@@ -1,0 +1,341 @@
+<script setup>
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
+import { deriveTitleFromBlocks } from '@tmpprompt/shared'
+import BlockEditor from '../components/BlockEditor.vue'
+import TopToast from '../components/TopToast.vue'
+import { useToast } from '../composables/useToast.js'
+import {
+  deleteDocument,
+  getApiBase,
+  getDocument,
+  resolveAssetUrl,
+  updateDocument,
+  uploadImage,
+} from '../lib/api.js'
+import { getEditToken, removeEditToken } from '../lib/tokens.js'
+
+const route = useRoute()
+const router = useRouter()
+const slug = computed(() => route.params.slug)
+const draft = ref({
+  title: '',
+  blocks: [],
+})
+const loading = ref(true)
+const saving = ref(false)
+const uploading = ref(false)
+const error = ref('')
+const editToken = ref('')
+const hasUnsavedChanges = ref(false)
+const lastSavedSnapshot = ref('')
+const editorRef = ref(null)
+const { toastMessage, flashToast, clearToast } = useToast()
+let autoSaveTimer = null
+
+const publicUrl = computed(() => `${window.location.origin}/p/${slug.value}`)
+const rawUrl = computed(() => `${getApiBase()}/p/${slug.value}/raw`)
+const displayTitle = computed(() => draft.value.title || deriveTitleFromBlocks(draft.value.blocks) || '未命名文档')
+const syncMessage = computed(() => {
+  if (uploading.value) {
+    return '图片处理中...'
+  }
+  if (saving.value) {
+    return '保存中...'
+  }
+  if (hasUnsavedChanges.value) {
+    return '未保存'
+  }
+  return '已同步'
+})
+
+function normalizeBlocksForSave(blocks) {
+  return blocks.map((block) => ({
+    ...block,
+    content: block.type === 'image' ? block.content.replace(getApiBase(), '') : block.content,
+  }))
+}
+
+function createSnapshot() {
+  return JSON.stringify({
+    title: draft.value.title,
+    blocks: normalizeBlocksForSave(draft.value.blocks),
+  })
+}
+
+function clearAutoSaveTimer() {
+  if (autoSaveTimer) {
+    window.clearTimeout(autoSaveTimer)
+    autoSaveTimer = null
+  }
+}
+
+function scheduleAutoSave() {
+  clearAutoSaveTimer()
+  if (!editToken.value || loading.value) {
+    return
+  }
+  autoSaveTimer = window.setTimeout(() => {
+    saveDocument({ auto: true })
+  }, 1500)
+}
+
+async function loadDocument() {
+  loading.value = true
+  error.value = ''
+  clearToast()
+  editToken.value = getEditToken(slug.value)
+
+  try {
+    const document = await getDocument(slug.value, editToken.value)
+    draft.value = {
+      title: document.title,
+      blocks: document.blocks.map((block) => ({
+        ...block,
+        content: block.type === 'image' ? resolveAssetUrl(block.content) : block.content,
+      })),
+    }
+    lastSavedSnapshot.value = createSnapshot()
+    hasUnsavedChanges.value = false
+    if (!document.canEdit) {
+      error.value = '当前浏览器里没有这个文档的编辑凭证，只能查看，不能保存。'
+    }
+  } catch (err) {
+    error.value = err.message
+  } finally {
+    loading.value = false
+  }
+}
+
+async function saveDocument(options = { auto: false }) {
+  if (!editToken.value) {
+    error.value = '本地没有找到编辑凭证，无法保存。'
+    return
+  }
+
+  const snapshot = createSnapshot()
+  if (options.auto && snapshot === lastSavedSnapshot.value) {
+    return
+  }
+
+  clearAutoSaveTimer()
+  saving.value = true
+  error.value = ''
+
+  try {
+    await updateDocument(slug.value, {
+      title: draft.value.title,
+      expiry: '24h',
+      visibility: 'listed',
+      editToken: editToken.value,
+      blocks: normalizeBlocksForSave(draft.value.blocks),
+    })
+    lastSavedSnapshot.value = snapshot
+    hasUnsavedChanges.value = false
+    if (!options.auto) {
+      flashToast('已保存')
+    }
+  } catch (err) {
+    error.value = err.message
+  } finally {
+    saving.value = false
+    if (createSnapshot() !== lastSavedSnapshot.value) {
+      hasUnsavedChanges.value = true
+      scheduleAutoSave()
+    }
+  }
+}
+
+async function handleUpload(files) {
+  uploading.value = true
+  error.value = ''
+  try {
+    const insertedAfterImported = editorRef.value?.isImportedBlockActive?.() || false
+    const uploadedBlocks = []
+    for (const file of files) {
+      const asset = await uploadImage(file)
+      uploadedBlocks.push({
+        type: 'image',
+        content: resolveAssetUrl(asset.url),
+        meta: {},
+      })
+    }
+    editorRef.value?.insertUploadedBlocks(uploadedBlocks)
+    flashToast(insertedAfterImported
+      ? `已把 ${uploadedBlocks.length} 张图片插入到当前导入块后方，稍后会自动保存`
+      : `已插入 ${uploadedBlocks.length} 张图片，稍后会自动保存`)
+  } catch (err) {
+    error.value = err.message
+  } finally {
+    uploading.value = false
+  }
+}
+
+async function handleImportTextFiles(files) {
+  error.value = ''
+  try {
+    const insertedAfterImported = editorRef.value?.isImportedBlockActive?.() || false
+    const importedBlocks = []
+    for (const file of files) {
+      const text = await file.text()
+      if (!text.trim()) {
+        continue
+      }
+      importedBlocks.push({
+        type: 'imported_text',
+        content: text,
+        meta: {
+          fileName: file.name || '未命名文件',
+          collapsed: true,
+        },
+      })
+    }
+
+    if (!importedBlocks.length) {
+      flashToast('没有读取到可插入的文本内容')
+      return
+    }
+
+    editorRef.value?.insertImportedBlocks(importedBlocks)
+    flashToast(insertedAfterImported
+      ? `已把 ${importedBlocks.length} 个文件块插入到当前导入块后方，稍后会自动保存`
+      : `已插入 ${importedBlocks.length} 个文件块，稍后会自动保存`)
+  } catch (err) {
+    error.value = '文件读取失败，请确认使用 UTF-8 编码的 .md 或 .txt 文件。'
+  }
+}
+
+async function copyCodexPrompt() {
+  const prompt = `请先阅读这个页面中的需求与上下文，再继续开发：${publicUrl.value}\n\n给模型读取的纯文本版本：${rawUrl.value}`
+  await navigator.clipboard.writeText(prompt)
+  flashToast('已复制给 Codex')
+}
+
+async function removeDocument() {
+  if (!editToken.value) {
+    return
+  }
+  const confirmed = window.confirm('确认删除这个文档吗？删除后无法恢复。')
+  if (!confirmed) {
+    return
+  }
+  try {
+    await deleteDocument(slug.value, editToken.value)
+    removeEditToken(slug.value)
+    router.push('/')
+  } catch (err) {
+    error.value = err.message
+  }
+}
+
+function clearAllContent() {
+  const confirmed = window.confirm('确认清空正文内容吗？标题会保留。')
+  if (!confirmed) {
+    return
+  }
+  editorRef.value?.clearDocument()
+  flashToast('已清空正文内容，稍后会自动保存')
+}
+
+watch(
+  draft,
+  () => {
+    if (loading.value || !editToken.value) {
+      return
+    }
+    hasUnsavedChanges.value = createSnapshot() !== lastSavedSnapshot.value
+    if (hasUnsavedChanges.value && !saving.value) {
+      scheduleAutoSave()
+    }
+  },
+  { deep: true }
+)
+
+function handleBeforeUnload(event) {
+  if (!hasUnsavedChanges.value) {
+    return
+  }
+  event.preventDefault()
+  event.returnValue = ''
+}
+
+function handleWindowKeydown(event) {
+  if (!(event.metaKey || event.ctrlKey)) {
+    return
+  }
+
+  if (event.key.toLowerCase() === 's') {
+    event.preventDefault()
+    saveDocument()
+    return
+  }
+
+  if (event.shiftKey && event.key === 'Backspace') {
+    event.preventDefault()
+    clearAllContent()
+  }
+}
+
+onBeforeRouteLeave(() => {
+  if (!hasUnsavedChanges.value) {
+    return true
+  }
+  return window.confirm('还有未保存内容，确定现在离开吗？')
+})
+
+onMounted(() => {
+  loadDocument()
+  window.addEventListener('beforeunload', handleBeforeUnload)
+  window.addEventListener('keydown', handleWindowKeydown)
+})
+
+onBeforeUnmount(() => {
+  clearAutoSaveTimer()
+  window.removeEventListener('beforeunload', handleBeforeUnload)
+  window.removeEventListener('keydown', handleWindowKeydown)
+})
+</script>
+
+<template>
+  <div class="flex flex-col gap-4">
+    <TopToast :message="toastMessage" />
+
+    <section v-if="loading" class="panel p-5 text-sm text-stone-600 dark:text-stone-400">正在加载文档...</section>
+
+    <template v-else>
+      <section class="panel flex flex-col gap-4 p-4">
+        <div class="flex flex-col gap-3">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <input v-model="draft.title" class="min-w-0 flex-1 border-0 bg-transparent p-0 text-2xl font-semibold text-stone-900 outline-none placeholder:text-stone-400 dark:text-stone-100 dark:placeholder:text-stone-600" :placeholder="displayTitle" />
+            <div class="flex flex-wrap gap-2">
+              <button type="button" class="tool-button tool-button-primary px-3 py-2 text-xs" :disabled="saving || !editToken" @click="saveDocument()">
+                {{ saving ? '保存中...' : '保存' }}
+              </button>
+              <RouterLink :to="`/p/${slug}`" class="tool-button px-3 py-2 text-xs">查看</RouterLink>
+              <button type="button" class="tool-button px-3 py-2 text-xs" @click="copyCodexPrompt">复制给 Codex</button>
+            </div>
+          </div>
+
+          <div class="flex flex-wrap items-center gap-3 text-sm text-stone-500 dark:text-stone-400">
+            <span>{{ syncMessage }}</span>
+            <span v-if="error" class="text-red-700 dark:text-red-300">{{ error }}</span>
+          </div>
+
+          <div class="flex flex-wrap items-center gap-3 text-xs text-stone-500 dark:text-stone-400">
+            <button type="button" class="text-stone-500 underline decoration-stone-300 underline-offset-4 hover:text-stone-900 dark:text-stone-400 dark:decoration-stone-700 dark:hover:text-stone-100" @click="clearAllContent">清空正文</button>
+            <button type="button" class="text-red-700 underline decoration-stone-300 underline-offset-4 hover:text-red-900 disabled:text-stone-400 dark:text-red-300 dark:decoration-stone-700 dark:hover:text-red-200" :disabled="!editToken" @click="removeDocument">删除文档</button>
+          </div>
+        </div>
+      </section>
+
+      <BlockEditor
+        ref="editorRef"
+        v-model="draft.blocks"
+        :uploading="uploading"
+        @upload-files="handleUpload"
+        @import-text-files="handleImportTextFiles"
+        @clear-request="clearAllContent"
+      />
+    </template>
+  </div>
+</template>
