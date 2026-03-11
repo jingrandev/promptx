@@ -63,6 +63,25 @@ function normalizeBlocksWithAnchors(inputBlocks = []) {
   return normalized
 }
 
+function areBlocksEquivalent(left = [], right = []) {
+  if (left === right) {
+    return true
+  }
+  if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) {
+    return false
+  }
+
+  return left.every((block, index) => {
+    const other = right[index]
+    if (!other || block?.type !== other.type || block?.content !== other.content) {
+      return false
+    }
+
+    return (block?.meta?.fileName || '') === (other.meta?.fileName || '')
+      && Boolean(block?.meta?.collapsed) === Boolean(other.meta?.collapsed)
+  })
+}
+
 function setBlocks(nextBlocks) {
   emit('update:modelValue', normalizeBlocksWithAnchors(nextBlocks))
 }
@@ -506,7 +525,7 @@ watch(
   () => props.modelValue,
   (value) => {
     const normalized = normalizeBlocksWithAnchors(value)
-    if (JSON.stringify(normalized) !== JSON.stringify(value)) {
+    if (!areBlocksEquivalent(normalized, value)) {
       emit('update:modelValue', normalized)
     }
   },

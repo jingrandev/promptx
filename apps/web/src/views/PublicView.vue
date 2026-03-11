@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import TopToast from '../components/TopToast.vue'
 import { useToast } from '../composables/useToast.js'
@@ -65,6 +65,10 @@ async function copyCodexPrompt() {
 }
 
 onMounted(loadDocument)
+
+watch(slug, () => {
+  loadDocument()
+})
 </script>
 
 <template>

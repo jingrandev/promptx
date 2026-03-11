@@ -11,7 +11,7 @@ import {
   slugifyTitle,
   summarizeDocument,
 } from '@tmpprompt/shared'
-import { all, get, persist, run, transaction } from './db.js'
+import { all, get, run, transaction } from './db.js'
 
 const slugTail = customAlphabet('abcdefghijkmnpqrstuvwxyz23456789', 6)
 const tokenId = customAlphabet('abcdefghijkmnpqrstuvwxyz23456789', 20)
@@ -65,23 +65,82 @@ function loadBlocks(documentId) {
   ).map(toBlock)
 }
 
+function loadBlocksForDocuments(documentIds = []) {
+  if (!documentIds.length) {
+    return new Map()
+  }
+
+  const placeholders = documentIds.map(() => '?').join(', ')
+  const rows = all(
+    `SELECT document_id, type, content, sort_order, id
+     FROM blocks
+     WHERE document_id IN (${placeholders})
+     ORDER BY document_id ASC, sort_order ASC, id ASC`,
+    documentIds
+  )
+
+  const grouped = new Map()
+  rows.forEach((row) => {
+    const documentId = Number(row.document_id)
+    if (!grouped.has(documentId)) {
+      grouped.set(documentId, [])
+    }
+    grouped.get(documentId).push({
+      type: row.type,
+      content: row.content,
+    })
+  })
+
+  return grouped
+}
+
+function normalizeBlockInput(block = {}) {
+  const type =
+    block.type === BLOCK_TYPES.IMAGE
+      ? BLOCK_TYPES.IMAGE
+      : block.type === BLOCK_TYPES.IMPORTED_TEXT
+        ? BLOCK_TYPES.IMPORTED_TEXT
+        : BLOCK_TYPES.TEXT
+  const content = clampText(
+    block.content || '',
+    type === BLOCK_TYPES.IMAGE ? 1000 : 50000
+  )
+  const meta =
+    type === BLOCK_TYPES.IMPORTED_TEXT
+      ? {
+          fileName: clampText(block.meta?.fileName || '', 180),
+          collapsed: Boolean(block.meta?.collapsed),
+        }
+      : {}
+
+  return {
+    id: Number.isInteger(Number(block.id)) ? Number(block.id) : null,
+    type,
+    content,
+    meta,
+    metaJson: JSON.stringify(meta),
+  }
+}
+
 export function listDocuments(limit = 30) {
+  const now = new Date().toISOString()
   const rows = all(
     `SELECT id, slug, title, visibility, expires_at, created_at, updated_at
      FROM documents
      WHERE visibility = 'listed'
+       AND (expires_at IS NULL OR expires_at > ?)
      ORDER BY created_at DESC
      LIMIT ?`,
-    [limit]
+    [now, limit]
   )
+
+  const documentIds = rows.map((row) => Number(row.id))
+  const blocksByDocumentId = loadBlocksForDocuments(documentIds)
 
   return rows
     .map((row) => {
-      const document = toDocument(row, loadBlocks(row.id))
-      if (isExpired(document)) {
-        return null
-      }
-
+      const blocks = blocksByDocumentId.get(Number(row.id)) || []
+      const document = toDocument(row, blocks)
       return {
         slug: document.slug,
         title: document.displayTitle || '未命名文档',
@@ -93,7 +152,6 @@ export function listDocuments(limit = 30) {
         blockCount: document.blocks.length,
       }
     })
-    .filter(Boolean)
 }
 
 export function getDocumentBySlug(slug) {
@@ -147,7 +205,9 @@ export function updateDocument(slug, input = {}) {
   const visibility = normalizeVisibility(input.visibility)
   const expiresAt = resolveExpiresAt(normalizeExpiry(input.expiry || '24h'))
   const updatedAt = new Date().toISOString()
-  const blocks = Array.isArray(input.blocks) ? input.blocks : []
+  const blocks = Array.isArray(input.blocks) ? input.blocks.map(normalizeBlockInput) : []
+  const currentBlocks = loadBlocks(existing.id)
+  const currentBlockMap = new Map(currentBlocks.map((block) => [block.id, block]))
 
   transaction(() => {
     run(
@@ -157,31 +217,43 @@ export function updateDocument(slug, input = {}) {
       [title, visibility, expiresAt, updatedAt, slug]
     )
 
-    run('DELETE FROM blocks WHERE document_id = ?', [existing.id])
+    const incomingIds = new Set()
 
     blocks.forEach((block, index) => {
-      const type =
-        block.type === BLOCK_TYPES.IMAGE
-          ? BLOCK_TYPES.IMAGE
-          : block.type === BLOCK_TYPES.IMPORTED_TEXT
-            ? BLOCK_TYPES.IMPORTED_TEXT
-            : BLOCK_TYPES.TEXT
-      const content = clampText(
-        block.content || '',
-        type === BLOCK_TYPES.IMAGE ? 1000 : 50000
-      )
-      const meta =
-        type === BLOCK_TYPES.IMPORTED_TEXT
-          ? {
-              fileName: clampText(block.meta?.fileName || '', 180),
-              collapsed: Boolean(block.meta?.collapsed),
-            }
-          : {}
+      const currentBlock = block.id ? currentBlockMap.get(block.id) : null
+
+      if (currentBlock) {
+        incomingIds.add(currentBlock.id)
+
+        const currentMetaJson = JSON.stringify(currentBlock.meta || {})
+        const unchanged =
+          currentBlock.type === block.type
+          && currentBlock.content === block.content
+          && currentBlock.sortOrder === index
+          && currentMetaJson === block.metaJson
+
+        if (!unchanged) {
+          run(
+            `UPDATE blocks
+             SET type = ?, content = ?, sort_order = ?, meta_json = ?
+             WHERE id = ? AND document_id = ?`,
+            [block.type, block.content, index, block.metaJson, currentBlock.id, existing.id]
+          )
+        }
+        return
+      }
+
       run(
         `INSERT INTO blocks (document_id, type, content, sort_order, meta_json, created_at)
          VALUES (?, ?, ?, ?, ?, ?)`,
-        [existing.id, type, content, index, JSON.stringify(meta), updatedAt]
+        [existing.id, block.type, block.content, index, block.metaJson, updatedAt]
       )
+    })
+
+    currentBlocks.forEach((block) => {
+      if (!incomingIds.has(block.id)) {
+        run('DELETE FROM blocks WHERE id = ? AND document_id = ?', [block.id, existing.id])
+      }
     })
   })
 

@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
+import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
 import { deriveTitleFromBlocks } from '@tmpprompt/shared'
 import BlockEditor from '../components/BlockEditor.vue'
 import TopToast from '../components/TopToast.vue'
@@ -33,8 +33,9 @@ const editorRef = ref(null)
 const { toastMessage, flashToast, clearToast } = useToast()
 let autoSaveTimer = null
 
+const apiBase = getApiBase()
 const publicUrl = computed(() => `${window.location.origin}/p/${slug.value}`)
-const rawUrl = computed(() => `${getApiBase()}/p/${slug.value}/raw`)
+const rawUrl = computed(() => `${apiBase}/p/${slug.value}/raw`)
 const displayTitle = computed(() => draft.value.title || deriveTitleFromBlocks(draft.value.blocks) || '未命名文档')
 const syncMessage = computed(() => {
   if (uploading.value) {
@@ -49,10 +50,17 @@ const syncMessage = computed(() => {
   return '已同步'
 })
 
+function normalizeImageContent(content = '') {
+  if (!content || !content.startsWith(apiBase)) {
+    return content
+  }
+  return content.slice(apiBase.length)
+}
+
 function normalizeBlocksForSave(blocks) {
   return blocks.map((block) => ({
     ...block,
-    content: block.type === 'image' ? block.content.replace(getApiBase(), '') : block.content,
+    content: block.type === 'image' ? normalizeImageContent(block.content) : block.content,
   }))
 }
 
@@ -283,10 +291,22 @@ onBeforeRouteLeave(() => {
   return window.confirm('还有未保存内容，确定现在离开吗？')
 })
 
+onBeforeRouteUpdate(() => {
+  if (!hasUnsavedChanges.value) {
+    return true
+  }
+  return window.confirm('还有未保存内容，确定现在离开吗？')
+})
+
 onMounted(() => {
   loadDocument()
   window.addEventListener('beforeunload', handleBeforeUnload)
   window.addEventListener('keydown', handleWindowKeydown)
+})
+
+watch(slug, () => {
+  clearAutoSaveTimer()
+  loadDocument()
 })
 
 onBeforeUnmount(() => {
