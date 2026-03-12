@@ -19,6 +19,7 @@ import {
   updateDocument,
 } from './repository.js'
 import { importPdfDocument } from './pdf.js'
+import { createTempFilePath, normalizeUploadFileName } from './upload.js'
 
 const app = Fastify({ logger: true })
 const port = Number(process.env.PORT || 3000)
@@ -146,7 +147,7 @@ app.post('/api/uploads', async (request, reply) => {
     return reply.code(400).send({ message: '只支持上传图片文件。' })
   }
 
-  const tempPath = path.join(tmpDir, `${nanoid(12)}-${part.filename || 'upload'}`)
+  const tempPath = createTempFilePath(tmpDir, part.filename)
   let outputPath = ''
   let completed = false
 
@@ -184,13 +185,13 @@ app.post('/api/imports/pdf', async (request, reply) => {
     return reply.code(400).send({ message: '没有收到 PDF 文件。' })
   }
 
-  const fileName = path.basename(String(part.filename || 'document.pdf'))
+  const fileName = normalizeUploadFileName(part.filename, 'document.pdf')
   const mimetype = String(part.mimetype || '').toLowerCase()
   if (mimetype !== 'application/pdf' && !fileName.toLowerCase().endsWith('.pdf')) {
     return reply.code(400).send({ message: '只支持导入 PDF 文件。' })
   }
 
-  const tempPath = path.join(tmpDir, `${nanoid(12)}-${fileName}`)
+  const tempPath = createTempFilePath(tmpDir, fileName, '.pdf')
   let createdAssets = []
 
   try {
