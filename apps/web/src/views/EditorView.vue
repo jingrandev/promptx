@@ -57,6 +57,27 @@ let bypassLeaveConfirm = false
 const apiBase = getApiBase()
 const rawUrl = computed(() => `${apiBase}/p/${slug.value}/raw`)
 const displayTitle = computed(() => draft.value.title || deriveTitleFromBlocks(draft.value.blocks) || '未命名文档')
+const shouldPromptOnLeave = computed(() => {
+  if (bypassLeaveConfirm || loading.value) {
+    return false
+  }
+  return true
+})
+const leaveDescription = computed(() => {
+  if (uploading.value) {
+    return '文件仍在处理中，现在离开可能中断这次上传或导入。'
+  }
+  if (saving.value) {
+    return '内容正在保存中，现在离开可能来不及把最新修改同步到服务器。'
+  }
+  if (hasUnsavedChanges.value) {
+    return '现在离开将丢失尚未同步的修改。'
+  }
+  if (codexSending.value) {
+    return 'Codex 仍在处理当前内容，现在离开后这轮进度将不会继续显示。'
+  }
+  return '确认离开当前编辑页？你之后仍可以从首页最近文档重新进入。'
+})
 const syncMessage = computed(() => {
   if (uploading.value) {
     return '文件处理中...'
@@ -365,7 +386,7 @@ function requestLeaveConfirmation() {
     return true
   }
 
-  if (!hasUnsavedChanges.value) {
+  if (!shouldPromptOnLeave.value) {
     return true
   }
 
@@ -407,7 +428,7 @@ watch(
 )
 
 function handleBeforeUnload(event) {
-  if (!hasUnsavedChanges.value) {
+  if (!shouldPromptOnLeave.value) {
     return
   }
   event.preventDefault()
@@ -488,11 +509,11 @@ onBeforeUnmount(() => {
     />
     <ConfirmDialog
       :open="showLeaveDialog"
-      title="还有未保存内容"
-      description="现在离开将丢失尚未同步的修改。"
-      confirm-text="仍然离开"
+      title="确认离开编辑页？"
+      :description="leaveDescription"
+      confirm-text="确认离开"
       cancel-text="继续编辑"
-      danger
+      :danger="hasUnsavedChanges || saving || uploading"
       @cancel="resolveLeaveConfirmation(false)"
       @confirm="resolveLeaveConfirmation(true)"
     />
