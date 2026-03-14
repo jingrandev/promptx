@@ -3,6 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { createRequire } from 'node:module'
 import { execFileSync, spawn } from 'node:child_process'
+import iconv from 'iconv-lite'
 import initSqlJs from 'sql.js'
 
 const CODEX_BIN = process.env.CODEX_BIN || 'codex'
@@ -107,6 +108,63 @@ function trimOutput(value = '', maxLength = 12000) {
     return text
   }
   return text.slice(text.length - maxLength)
+}
+
+function countSuspiciousMojibakeChars(value = '') {
+  return (String(value || '').match(/[鑾彇娴嬭瘯鏁嵁璺緞璇诲彇鍒嗛鍚庡墠杩欎釜閫夋嫨鎻掑叆鍖哄伐浣滃櫒]/g) || []).length
+}
+
+function countReadableCjkChars(value = '') {
+  return (String(value || '').match(/[\u4e00-\u9fff]/g) || []).length
+}
+
+function repairPossibleMojibake(value = '') {
+  const text = String(value || '')
+  if (!text) {
+    return text
+  }
+
+  const suspiciousCount = countSuspiciousMojibakeChars(text)
+  if (suspiciousCount < 2) {
+    return text
+  }
+
+  let repaired = text
+  try {
+    repaired = iconv.decode(iconv.encode(text, 'gb18030'), 'utf8')
+  } catch {
+    return text
+  }
+
+  if (!repaired || repaired === text) {
+    return text
+  }
+
+  const repairedSuspiciousCount = countSuspiciousMojibakeChars(repaired)
+
+  if (repairedSuspiciousCount < suspiciousCount && countReadableCjkChars(repaired) > 0) {
+    return repaired
+  }
+
+  return text
+}
+
+function sanitizeCodexPayload(value) {
+  if (typeof value === 'string') {
+    return repairPossibleMojibake(value)
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeCodexPayload(item))
+  }
+
+  if (!value || typeof value !== 'object') {
+    return value
+  }
+
+  return Object.fromEntries(
+    Object.entries(value).map(([key, item]) => [key, sanitizeCodexPayload(item)])
+  )
 }
 
 function parseJsonLine(line = '') {
@@ -298,18 +356,18 @@ export async function sendPromptToCodexSession(sessionInput, prompt) {
 
       child.on('close', (code) => {
         if (code !== 0) {
-          reject(new Error(extractCodexError(stderr, stdout)))
+          reject(new Error(repairPossibleMojibake(extractCodexError(stderr, stdout))))
           return
         }
 
         const message = fs.existsSync(outputFile)
-          ? fs.readFileSync(outputFile, 'utf8').trim()
+          ? repairPossibleMojibake(fs.readFileSync(outputFile, 'utf8').trim())
           : ''
 
         resolve({
           message,
-          stdout: trimOutput(stdout),
-          stderr: trimOutput(stderr),
+          stdout: repairPossibleMojibake(trimOutput(stdout)),
+          stderr: repairPossibleMojibake(trimOutput(stderr)),
           threadId: parseThreadIdFromStdout(stdout),
         })
       })
@@ -404,14 +462,14 @@ export function streamPromptToCodexSession(sessionInput, prompt, callbacks = {})
         trackThreadId(event, rememberThreadId)
         emit({
           type: 'codex',
-          event,
+          event: sanitizeCodexPayload(event),
         })
         continue
       }
 
       emit({
         type: 'stdout',
-        text: line,
+        text: repairPossibleMojibake(line),
       })
     }
   })
@@ -426,7 +484,7 @@ export function streamPromptToCodexSession(sessionInput, prompt, callbacks = {})
     for (const line of lines) {
       emit({
         type: 'stderr',
-        text: line,
+        text: repairPossibleMojibake(line),
       })
     }
   })
@@ -449,12 +507,12 @@ export function streamPromptToCodexSession(sessionInput, prompt, callbacks = {})
           trackThreadId(event, rememberThreadId)
           emit({
             type: 'codex',
-            event,
+            event: sanitizeCodexPayload(event),
           })
         } else {
           emit({
             type: 'stdout',
-            text: line,
+            text: repairPossibleMojibake(line),
           })
         }
       })
@@ -462,12 +520,12 @@ export function streamPromptToCodexSession(sessionInput, prompt, callbacks = {})
       stderrTail.forEach((line) => {
         emit({
           type: 'stderr',
-          text: line,
+          text: repairPossibleMojibake(line),
         })
       })
 
       if (fs.existsSync(outputFile)) {
-        finalMessage = fs.readFileSync(outputFile, 'utf8').trim()
+        finalMessage = repairPossibleMojibake(fs.readFileSync(outputFile, 'utf8').trim())
       }
 
       if (!finalThreadId) {
@@ -475,7 +533,7 @@ export function streamPromptToCodexSession(sessionInput, prompt, callbacks = {})
       }
 
       if (code !== 0) {
-        reject(new Error(extractCodexError(stderrRaw, stdoutRaw)))
+        reject(new Error(repairPossibleMojibake(extractCodexError(stderrRaw, stdoutRaw))))
         return
       }
 

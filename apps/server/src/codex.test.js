@@ -65,6 +65,25 @@ process.stdin.on('end', () => {
     return
   }
 
+  if (prompt.includes('mojibake-case')) {
+    const garbled = '鑾峰彇娴嬭瘯鏁版嵁'
+    if (outputFile) {
+      fs.writeFileSync(outputFile, garbled)
+    }
+    process.stdout.write(JSON.stringify({ type: 'thread.started', thread_id: threadId }) + '\\n')
+    process.stdout.write(JSON.stringify({
+      type: 'item.completed',
+      item: {
+        type: 'command_execution',
+        command: 'Get-Content demo.txt',
+        aggregated_output: garbled,
+        exit_code: 0,
+        status: 'completed',
+      },
+    }) + '\\n')
+    return
+  }
+
   process.stdout.write(JSON.stringify({ type: 'thread.started', thread_id: threadId }) + '\\n')
 
   if (prompt.includes('stream-tail-case')) {
@@ -292,6 +311,44 @@ test('streamPromptToCodexSession handles a tail event without newline', async ()
         'stream tail message'
       )
       assert.equal(events.at(-1)?.type, 'completed')
+    }
+  )
+})
+
+test('streamPromptToCodexSession repairs garbled command output', async () => {
+  const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-codex-mojibake-'))
+  const fakeBin = createFakeCodexBinary(tempHome)
+
+  await withEnv(
+    {
+      CODEX_HOME: tempHome,
+      CODEX_BIN: fakeBin,
+    },
+    async () => {
+      const { streamPromptToCodexSession, sendPromptToCodexSession } = await importFreshCodexModule()
+      const events = []
+      const stream = streamPromptToCodexSession(
+        { id: 'session-xyz', cwd: 'D:\\code\\promptx' },
+        'mojibake-case',
+        {
+          onEvent(event) {
+            events.push(event)
+          },
+        }
+      )
+
+      const streamResult = await stream.result
+      const sendResult = await sendPromptToCodexSession(
+        { id: 'session-xyz', cwd: 'D:\\code\\promptx' },
+        'mojibake-case'
+      )
+
+      assert.equal(streamResult.message, '获取测试数据')
+      assert.equal(sendResult.message, '获取测试数据')
+      assert.equal(
+        events.find((event) => event.type === 'codex' && event.event.type === 'item.completed')?.event?.item?.aggregated_output,
+        '获取测试数据'
+      )
     }
   )
 })
