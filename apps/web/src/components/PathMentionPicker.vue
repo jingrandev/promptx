@@ -823,14 +823,16 @@ watch(
     searchError.value = ''
     loadRecentPaths()
     loadPersistedExpandedPaths()
-    if (!props.open || !props.sessionId) {
+    if (!props.sessionId) {
       return
     }
 
     loadInitialTree({ force: true })
-    scheduleSearch()
+    if (props.open) {
+      scheduleSearch()
+    }
   },
-  { flush: 'sync' }
+  { flush: 'sync', immediate: true }
 )
 
 watch(

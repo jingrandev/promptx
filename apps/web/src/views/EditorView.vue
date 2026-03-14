@@ -6,7 +6,6 @@ import {
   Copy,
   SendHorizontal,
   Square,
-  SquarePen,
   WandSparkles,
   Upload,
 } from 'lucide-vue-next'
@@ -523,9 +522,6 @@ onBeforeUnmount(() => {
           </RouterLink>
 
           <div class="flex min-w-0 flex-1 items-center gap-2">
-            <span class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-sm border border-dashed border-stone-300 bg-stone-50 text-stone-700 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-200">
-              <SquarePen class="h-3.5 w-3.5" />
-            </span>
             <input
               v-model="draft.title"
               class="min-w-0 flex-1 border-0 bg-transparent p-0 text-lg font-semibold text-stone-900 outline-none placeholder:text-stone-400 dark:text-stone-100 dark:placeholder:text-stone-600 sm:text-xl"
