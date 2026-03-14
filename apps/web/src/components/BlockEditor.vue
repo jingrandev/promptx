@@ -653,7 +653,7 @@ defineExpose({
             rows="1"
             :value="block.content"
             class="w-full resize-none border-0 bg-transparent p-0 pr-12 text-[15px] leading-8 text-stone-900 outline-none placeholder:text-stone-400 dark:text-stone-100 dark:placeholder:text-stone-600"
-            :placeholder="index === 0 ? '从这里开始写需求、背景、目标、验收标准，或直接粘贴长文档内容...' : '继续输入...'"
+              :placeholder="index === 0 ? '从这里开始写需求...' : '继续输入...'"
             @focus="handleTextFocus(index)"
             @input="updateText(index, $event.target.value); handleTextInput($event)"
             @keydown="handleTextKeydown(index, $event)"

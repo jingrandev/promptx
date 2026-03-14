@@ -19,6 +19,7 @@ function toCodexSession(row) {
     title: row.title,
     cwd: row.cwd,
     codexThreadId: row.codex_thread_id || '',
+    running: false,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     started: Boolean(row.codex_thread_id),

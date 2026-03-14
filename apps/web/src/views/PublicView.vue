@@ -10,6 +10,7 @@ import {
 } from 'lucide-vue-next'
 import { useRoute } from 'vue-router'
 import TopToast from '../components/TopToast.vue'
+import { usePageTitle } from '../composables/usePageTitle.js'
 import { useToast } from '../composables/useToast.js'
 import { getApiBase, getDocument, resolveAssetUrl } from '../lib/api.js'
 import { buildCodexPrompt } from '../lib/codex.js'
@@ -23,6 +24,9 @@ const rawUrl = computed(() => `${getApiBase()}/p/${slug.value}/raw`)
 const collapsedMap = ref({})
 const { toastMessage, flashToast } = useToast()
 let loadRequestId = 0
+const pageTitle = computed(() => document.value?.displayTitle || document.value?.title || '')
+
+usePageTitle(pageTitle)
 
 function syncCollapsedState(blocks = []) {
   collapsedMap.value = Object.fromEntries(

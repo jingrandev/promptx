@@ -5,7 +5,6 @@ import {
   CircleAlert,
   PencilLine,
   Plus,
-  RefreshCcw,
   Trash2,
   X,
 } from 'lucide-vue-next'
@@ -25,10 +24,6 @@ const props = defineProps({
     default: () => [],
   },
   selectedSessionId: {
-    type: String,
-    default: '',
-  },
-  runningSessionId: {
     type: String,
     default: '',
   },
@@ -99,14 +94,56 @@ const workspaceSuggestions = computed(() => {
 
   return items.slice(0, 12)
 })
+const duplicateCwdSessions = computed(() => {
+  const target = normalizeCwdForCompare(form.cwd)
+  if (!target) {
+    return []
+  }
+
+  return props.sessions.filter((session) => {
+    if (session.id === activeSession.value?.id) {
+      return false
+    }
+    return normalizeCwdForCompare(session.cwd) === target
+  })
+})
+const duplicateCwdMessage = computed(() => {
+  if (!duplicateCwdSessions.value.length) {
+    return ''
+  }
+
+  const labels = duplicateCwdSessions.value
+    .slice(0, 3)
+    .map((session) => `「${session.title || '未命名会话'}」`)
+    .join('、')
+  const suffix = duplicateCwdSessions.value.length > 3 ? '等会话' : '会话'
+
+  return `该工作目录已被${labels}${suffix}使用，建议优先复用，避免把同一目录拆成多个会话。`
+})
 
 function getDateOrderValue(value = '') {
   const timestamp = Date.parse(String(value || ''))
   return Number.isFinite(timestamp) ? timestamp : 0
 }
 
+function normalizeCwdForCompare(value = '') {
+  const raw = String(value || '').trim()
+  if (!raw) {
+    return ''
+  }
+
+  const isWindowsPath = /^[a-z]:[\\/]/i.test(raw) || raw.includes('\\')
+  let normalized = raw.replace(/\\/g, '/')
+
+  if (normalized.length > 1 && !/^[a-z]:\/$/i.test(normalized)) {
+    normalized = normalized.replace(/\/+$/, '')
+  }
+
+  return isWindowsPath ? normalized.toLowerCase() : normalized
+}
+
 function isSessionRunning(sessionId) {
-  return Boolean(sessionId) && sessionId === props.runningSessionId
+  return Boolean(props.sessions.find((session) => session.id === sessionId)?.running)
 }
 
 function isCurrentSession(sessionId) {
@@ -141,7 +178,7 @@ function getRuntimeStatusLabel(sessionId) {
 function getRuntimeStatusClass(sessionId) {
   return isSessionRunning(sessionId)
     ? 'border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300'
-    : 'border-stone-300 bg-white text-stone-600 dark:border-stone-700 dark:bg-stone-950 dark:text-stone-300'
+    : 'border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300'
 }
 
 function getThreadStatusLabel(session) {
@@ -333,6 +370,7 @@ watch(
     if (open) {
       window.addEventListener('keydown', handleKeydown)
       initializeDialog()
+      handleRefresh().catch(() => {})
       return
     }
 
@@ -382,10 +420,10 @@ onBeforeUnmount(() => {
   <Teleport to="body">
     <div
       v-if="open"
-      class="fixed inset-0 z-50 flex items-center justify-center bg-stone-950/45 px-4 py-6 backdrop-blur-sm"
+      class="fixed inset-0 z-50 flex items-end justify-center bg-stone-950/45 px-0 py-0 backdrop-blur-sm sm:items-center sm:px-4 sm:py-6"
       @click.self="!busy && emit('close')"
     >
-      <section class="panel flex max-h-[88vh] w-full max-w-5xl flex-col overflow-hidden">
+      <section class="panel flex h-full w-full max-w-5xl flex-col overflow-hidden sm:h-auto sm:max-h-[88vh]">
         <ConfirmDialog
           :open="showDeleteDialog"
           title="确认删除 PromptX 会话？"
@@ -400,7 +438,7 @@ onBeforeUnmount(() => {
           @confirm="handleDelete"
         />
 
-        <div class="flex flex-wrap items-start justify-between gap-3 border-b border-stone-200 px-5 py-4 dark:border-stone-800">
+        <div class="flex flex-wrap items-start justify-between gap-3 border-b border-stone-200 px-4 py-3 dark:border-stone-800 sm:px-5 sm:py-4">
           <div>
             <div class="inline-flex items-center gap-2 text-sm font-medium text-stone-900 dark:text-stone-100">
               <Bot class="h-4 w-4" />
@@ -414,15 +452,6 @@ onBeforeUnmount(() => {
           <div class="flex items-center gap-2">
             <button
               type="button"
-              class="tool-button inline-flex items-center gap-2 px-3 py-2 text-xs"
-              :disabled="busy"
-              @click="handleRefresh"
-            >
-              <RefreshCcw class="h-4 w-4" />
-              <span>{{ loading ? '刷新中...' : '刷新' }}</span>
-            </button>
-            <button
-              type="button"
               class="inline-flex h-9 w-9 items-center justify-center rounded-sm text-stone-400 transition hover:bg-stone-200 hover:text-stone-700 disabled:cursor-not-allowed disabled:opacity-60 dark:hover:bg-stone-800 dark:hover:text-stone-200"
               :disabled="busy"
               @click="emit('close')"
@@ -433,12 +462,12 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="grid min-h-0 flex-1 gap-0 lg:grid-cols-[minmax(0,300px)_minmax(0,1fr)]">
-          <aside class="border-b border-stone-200 bg-stone-50/80 px-4 py-4 dark:border-stone-800 dark:bg-stone-950/60 lg:border-b-0 lg:border-r">
+          <aside class="border-b border-stone-200 bg-stone-50/80 px-3 py-3 dark:border-stone-800 dark:bg-stone-950/60 sm:px-4 sm:py-4 lg:border-b-0 lg:border-r">
             <div class="flex items-center justify-between gap-3">
               <div>
                 <div class="text-sm font-medium text-stone-900 dark:text-stone-100">会话列表</div>
-                <p class="mt-1 text-xs text-stone-500 dark:text-stone-400">
-                  {{ hasSessions ? '执行中和当前会话会自动排到最前面。' : '还没有会话，先新建一个固定工作目录。' }}
+                <p v-if="!hasSessions" class="mt-1 text-xs text-stone-500 dark:text-stone-400">
+                  还没有会话，先新建一个固定工作目录。
                 </p>
               </div>
               <button
@@ -452,7 +481,7 @@ onBeforeUnmount(() => {
               </button>
             </div>
 
-            <div class="mt-4 space-y-2 overflow-y-auto pr-1 lg:max-h-[calc(88vh-11rem)]">
+            <div class="mt-4 max-h-52 space-y-2 overflow-y-auto pr-1 sm:max-h-64 lg:max-h-[calc(88vh-11rem)]">
               <article
                 v-for="session in sortedSessions"
                 :key="session.id"
@@ -512,7 +541,7 @@ onBeforeUnmount(() => {
             </div>
           </aside>
 
-          <div class="min-h-0 overflow-y-auto px-5 py-4">
+          <div class="min-h-0 overflow-y-auto px-4 py-4 sm:px-5">
             <div class="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <div class="inline-flex items-center gap-2 text-sm font-medium text-stone-900 dark:text-stone-100">
@@ -557,12 +586,18 @@ onBeforeUnmount(() => {
                   type="text"
                   list="codex-manager-workspace-suggestions"
                   placeholder="例如：D:\\code\\yuyang-web"
-                  class="mt-1 w-full rounded-sm border border-stone-300 bg-white px-3 py-2 text-sm text-stone-900 outline-none transition focus:border-stone-500 disabled:cursor-not-allowed disabled:bg-stone-100 disabled:text-stone-500 dark:border-stone-700 dark:bg-stone-950 dark:text-stone-100 dark:focus:border-stone-400 dark:disabled:bg-stone-900 dark:disabled:text-stone-500"
+                  class="mt-1 w-full rounded-sm border bg-white px-3 py-2 text-sm text-stone-900 outline-none transition disabled:cursor-not-allowed disabled:bg-stone-100 disabled:text-stone-500 dark:bg-stone-950 dark:text-stone-100 dark:disabled:bg-stone-900 dark:disabled:text-stone-500"
+                  :class="duplicateCwdMessage
+                    ? 'border-amber-300 focus:border-amber-500 dark:border-amber-800 dark:focus:border-amber-500'
+                    : 'border-stone-300 focus:border-stone-500 dark:border-stone-700 dark:focus:border-stone-400'"
                   :disabled="busy || (mode === 'edit' && !canEditCwd)"
                 >
                 <datalist id="codex-manager-workspace-suggestions">
                   <option v-for="item in workspaceSuggestions" :key="item" :value="item" />
                 </datalist>
+                <p v-if="duplicateCwdMessage" class="mt-2 text-[11px] leading-5 text-amber-700 dark:text-amber-300">
+                  {{ duplicateCwdMessage }}
+                </p>
               </label>
             </div>
 
@@ -571,14 +606,14 @@ onBeforeUnmount(() => {
               class="mt-4 rounded-sm border border-dashed border-stone-300 bg-stone-50 px-3 py-3 text-xs text-stone-600 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-300"
             >
               <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
-                <span class="rounded-sm border border-dashed px-2 py-1" :class="getThreadStatusClass(activeSession)">
+                <span class="rounded-sm border border-dashed px-1.5 py-0.5 text-[10px]" :class="getThreadStatusClass(activeSession)">
                   {{ getThreadStatusLabel(activeSession) }}
                 </span>
-                <span class="inline-flex items-center gap-1 rounded-sm border border-dashed px-2 py-1" :class="getRuntimeStatusClass(activeSession.id)">
+                <span class="inline-flex items-center gap-1 rounded-sm border border-dashed px-1.5 py-0.5 text-[10px]" :class="getRuntimeStatusClass(activeSession.id)">
                   <span v-if="isSessionRunning(activeSession.id)" class="h-1.5 w-1.5 rounded-full bg-current animate-pulse" />
                   {{ getRuntimeStatusLabel(activeSession.id) }}
                 </span>
-                <span v-if="isCurrentSession(activeSession.id)" class="rounded-sm border border-dashed border-sky-300 bg-sky-50 px-2 py-1 text-sky-700 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-300">
+                <span v-if="isCurrentSession(activeSession.id)" class="rounded-sm border border-dashed border-sky-300 bg-sky-50 px-1.5 py-0.5 text-[10px] text-sky-700 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-300">
                   当前会话
                 </span>
                 <span>最近更新时间：{{ formatUpdatedAt(activeSession.updatedAt) }}</span>
@@ -607,7 +642,7 @@ onBeforeUnmount(() => {
               <span>{{ error }}</span>
             </p>
 
-            <div class="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-dashed border-stone-300 pt-4 dark:border-stone-700">
+            <div class="mt-6 flex flex-col gap-3 border-t border-dashed border-stone-300 pt-4 dark:border-stone-700 sm:flex-row sm:items-center sm:justify-between">
               <div class="flex flex-wrap items-center gap-2">
                 <button
                   v-if="mode === 'edit' && activeSession"
@@ -621,10 +656,10 @@ onBeforeUnmount(() => {
                 </button>
               </div>
 
-              <div class="flex flex-wrap items-center gap-2">
+              <div class="flex flex-col-reverse gap-2 sm:flex-row sm:flex-wrap sm:items-center">
                 <button
                   type="button"
-                  class="tool-button px-3 py-2 text-xs"
+                  class="tool-button w-full px-3 py-2 text-xs sm:w-auto"
                   :disabled="busy"
                   @click="emit('close')"
                 >
@@ -633,7 +668,7 @@ onBeforeUnmount(() => {
                 <button
                   v-if="mode === 'create' && hasSessions"
                   type="button"
-                  class="tool-button px-3 py-2 text-xs"
+                  class="tool-button w-full px-3 py-2 text-xs sm:w-auto"
                   :disabled="busy"
                   @click="initializeDialog"
                 >
@@ -641,7 +676,7 @@ onBeforeUnmount(() => {
                 </button>
                 <button
                   type="button"
-                  class="tool-button tool-button-primary px-3 py-2 text-xs"
+                  class="tool-button tool-button-primary w-full px-3 py-2 text-xs sm:w-auto"
                   :disabled="busy"
                   @click="handleSubmit"
                 >

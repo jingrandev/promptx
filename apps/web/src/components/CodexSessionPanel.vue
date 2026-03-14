@@ -5,10 +5,10 @@ import {
   CircleAlert,
   LoaderCircle,
   PencilLine,
-  RefreshCcw,
   Square,
 } from 'lucide-vue-next'
 import CodexSessionManagerDialog from './CodexSessionManagerDialog.vue'
+import CodexSessionSelect from './CodexSessionSelect.vue'
 import {
   createCodexSession,
   deleteCodexSession,
@@ -52,11 +52,14 @@ const transcriptRef = ref(null)
 const sendingStartedAt = ref(0)
 const sendingElapsedSeconds = ref(0)
 const showManager = ref(false)
-const runningSessionId = ref('')
 
 let turnId = 0
 let logId = 0
 let sendingTimer = null
+let sessionsLoadPromise = null
+let lastSessionsLoadedAt = 0
+
+const SESSION_REFRESH_TTL = 1500
 
 const hasPrompt = computed(() => {
   if (typeof props.buildPrompt === 'function') {
@@ -69,13 +72,10 @@ const hasSessions = computed(() => sessions.value.length > 0)
 const sortedSessions = computed(() => sortSessions(sessions.value))
 const selectedSession = computed(() => sessions.value.find((session) => session.id === selectedSessionId.value) || null)
 const helperText = computed(() => {
-  if (loading.value) {
-    return '正在读取 PromptX 会话...'
-  }
   if (!hasSessions.value) {
     return '还没有 PromptX 会话，请先在管理弹窗里新建一个固定工作目录。'
   }
-  return '发送区只负责当前会话，其他维护动作统一放到管理弹窗里。'
+  return ''
 })
 const workingLabel = computed(() => `处理中 (${sendingElapsedSeconds.value}s)`)
 
@@ -85,7 +85,7 @@ function getDateOrderValue(value = '') {
 }
 
 function isSessionRunning(sessionId) {
-  return Boolean(sessionId) && sessionId === runningSessionId.value
+  return Boolean(sessions.value.find((session) => session.id === sessionId)?.running)
 }
 
 function isCurrentSession(sessionId) {
@@ -129,18 +129,6 @@ function startSendingTimer() {
   }, 1000)
 }
 
-function formatUpdatedAt(value = '') {
-  if (!value) {
-    return '未知'
-  }
-
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) {
-    return value
-  }
-
-  return date.toLocaleString('zh-CN')
-}
 
 function formatTurnTime(value = '') {
   if (!value) {
@@ -159,40 +147,6 @@ function formatTurnTime(value = '') {
   })
 }
 
-function getRuntimeStatusLabel(sessionId) {
-  return isSessionRunning(sessionId) ? '执行中' : '空闲'
-}
-
-function getRuntimeStatusClass(sessionId) {
-  return isSessionRunning(sessionId)
-    ? 'border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300'
-    : 'border-stone-300 bg-white text-stone-600 dark:border-stone-700 dark:bg-stone-950 dark:text-stone-300'
-}
-
-function getThreadStatusLabel(session) {
-  return session?.started ? '已绑定线程' : '未启动'
-}
-
-function getThreadStatusClass(session) {
-  return session?.started
-    ? 'border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300'
-    : 'border-stone-300 bg-white text-stone-600 dark:border-stone-700 dark:bg-stone-950 dark:text-stone-300'
-}
-
-function normalizeSessionOption(session) {
-  const title = session.title || '未命名会话'
-  const tags = []
-
-  if (isSessionRunning(session.id)) {
-    tags.push('执行中')
-  }
-  if (isCurrentSession(session.id)) {
-    tags.push('当前')
-  }
-  tags.push(getThreadStatusLabel(session))
-
-  return `${title} - ${tags.join(' / ')}`
-}
 
 function normalizeLogEntry(entry) {
   if (!entry) {
@@ -528,13 +482,12 @@ function handleStreamEvent(payload = {}, turn) {
 
 function hydrateSelectedSession() {
   if (!props.storageKey) {
+    selectedSessionId.value = ''
     return
   }
 
   const saved = window.localStorage.getItem(props.storageKey)
-  if (saved) {
-    selectedSessionId.value = saved
-  }
+  selectedSessionId.value = saved || ''
 }
 
 function persistSelectedSession(sessionId) {
@@ -550,30 +503,58 @@ function persistSelectedSession(sessionId) {
 }
 
 async function loadSessions() {
-  loading.value = true
-  sessionError.value = ''
-
-  try {
-    const [sessionPayload, workspacePayload] = await Promise.all([
-      listCodexSessions(),
-      listCodexWorkspaces(),
-    ])
-    const nextSessions = sessionPayload.items || []
-
-    sessions.value = nextSessions
-    workspaces.value = workspacePayload.items || []
-
-    if (selectedSessionId.value && nextSessions.some((session) => session.id === selectedSessionId.value)) {
-      return
-    }
-
-    selectedSessionId.value = sortSessions(nextSessions)[0]?.id || ''
-  } catch (err) {
-    sessionError.value = err.message
-    throw err
-  } finally {
-    loading.value = false
+  if (sessionsLoadPromise) {
+    return sessionsLoadPromise
   }
+
+  const now = Date.now()
+  if (lastSessionsLoadedAt && now - lastSessionsLoadedAt < SESSION_REFRESH_TTL) {
+    return {
+      items: sessions.value,
+      workspaces: workspaces.value,
+    }
+  }
+
+  sessionsLoadPromise = (async () => {
+    loading.value = true
+    sessionError.value = ''
+
+    try {
+      const [sessionPayload, workspacePayload] = await Promise.all([
+        listCodexSessions(),
+        listCodexWorkspaces(),
+      ])
+      const nextSessions = sessionPayload.items || []
+
+      sessions.value = nextSessions
+      workspaces.value = workspacePayload.items || []
+      lastSessionsLoadedAt = Date.now()
+
+      if (selectedSessionId.value && nextSessions.some((session) => session.id === selectedSessionId.value)) {
+        return {
+          items: nextSessions,
+          workspaces: workspaces.value,
+        }
+      }
+
+      if (selectedSessionId.value) {
+        selectedSessionId.value = ''
+      }
+
+      return {
+        items: nextSessions,
+        workspaces: workspaces.value,
+      }
+    } catch (err) {
+      sessionError.value = err.message
+      throw err
+    } finally {
+      loading.value = false
+      sessionsLoadPromise = null
+    }
+  })()
+
+  return sessionsLoadPromise
 }
 
 function upsertWorkspace(cwd = '') {
@@ -594,6 +575,10 @@ function closeManager() {
 
 function handleSelectSession(sessionId) {
   selectedSessionId.value = String(sessionId || '').trim()
+}
+
+function refreshSessionsForSelection() {
+  loadSessions().catch(() => {})
 }
 
 async function handleCreateSession(payload) {
@@ -680,6 +665,19 @@ async function handleSend() {
   sessionError.value = ''
 
   try {
+    await loadSessions()
+
+    const latestSelectedSession = sessions.value.find((session) => session.id === selectedSessionId.value) || null
+    if (!latestSelectedSession) {
+      sessionError.value = '当前会话不存在，请重新选择。'
+      return false
+    }
+
+    if (latestSelectedSession.running) {
+      sessionError.value = '当前会话正在执行中，请等待完成后再发送。'
+      return false
+    }
+
     if (typeof props.beforeSend === 'function') {
       const ready = await props.beforeSend()
       if (ready === false) {
@@ -696,13 +694,12 @@ async function handleSend() {
       return false
     }
 
-    const session = selectedSession.value
+    const session = sessions.value.find((item) => item.id === selectedSessionId.value) || null
     if (!session) {
       sessionError.value = '当前会话不存在，请重新选择。'
       return false
     }
 
-    runningSessionId.value = session.id
     sending.value = true
     const controller = new AbortController()
     const turn = createTurn(prompt)
@@ -736,7 +733,6 @@ async function handleSend() {
         }
       } finally {
         sending.value = false
-        runningSessionId.value = ''
         currentController.value = null
       }
     })()
@@ -775,6 +771,14 @@ watch(
 watch(selectedSessionId, persistSelectedSession)
 
 watch(
+  () => props.storageKey,
+  () => {
+    hydrateSelectedSession()
+    loadSessions().catch(() => {})
+  }
+)
+
+watch(
   turns,
   () => {
     scheduleScrollToBottom()
@@ -804,7 +808,6 @@ onBeforeUnmount(() => {
       :sessions="sessions"
       :workspaces="workspaces"
       :selected-session-id="selectedSessionId"
-      :running-session-id="runningSessionId"
       :loading="loading"
       :sending="sending"
       :on-refresh="loadSessions"
@@ -823,18 +826,17 @@ onBeforeUnmount(() => {
               <Bot class="h-4 w-4" />
               <span>PromptX 会话</span>
             </div>
-            <p class="mt-1 text-xs text-stone-500 dark:text-stone-400">{{ helperText }}</p>
+            <p v-if="helperText" class="mt-1 text-xs text-stone-500 dark:text-stone-400">{{ helperText }}</p>
           </div>
 
           <div class="ml-auto flex items-center gap-2">
             <button
               type="button"
               class="tool-button inline-flex items-center gap-2 px-3 py-2 text-xs"
-              :disabled="loading || sending || managerBusy"
-              @click="loadSessions().catch(() => {})"
+              :disabled="sending"
+              @click="clearTurns"
             >
-              <RefreshCcw class="h-4 w-4" />
-              <span>刷新</span>
+              <span>清空记录</span>
             </button>
             <button
               type="button"
@@ -849,49 +851,16 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <label class="min-w-0 flex-1">
-            <select
+          <div class="min-w-0 flex-1">
+            <CodexSessionSelect
               v-model="selectedSessionId"
-              class="w-full rounded-sm border border-stone-300 bg-white px-3 py-2 text-sm text-stone-900 outline-none transition focus:border-stone-500 dark:border-stone-700 dark:bg-stone-950 dark:text-stone-100 dark:focus:border-stone-400"
-              :disabled="loading || sending || managerBusy || !hasSessions"
-            >
-              <option value="" disabled>{{ hasSessions ? '请选择 PromptX 会话' : '暂无会话' }}</option>
-              <option v-for="session in sortedSessions" :key="session.id" :value="session.id">
-                {{ normalizeSessionOption(session) }}
-              </option>
-            </select>
-          </label>
-
-          <button
-            type="button"
-            class="tool-button inline-flex items-center gap-2 px-3 py-2 text-xs sm:self-stretch"
-            :disabled="sending"
-            @click="clearTurns"
-          >
-            <span>清空记录</span>
-          </button>
-        </div>
-
-        <div
-          v-if="selectedSession"
-          class="rounded-sm border border-dashed border-stone-300 bg-stone-50 px-3 py-2 text-xs text-stone-600 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-300"
-        >
-          <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
-            <span class="rounded-sm border border-dashed px-2 py-1" :class="getThreadStatusClass(selectedSession)">
-              {{ getThreadStatusLabel(selectedSession) }}
-            </span>
-            <span class="inline-flex items-center gap-1 rounded-sm border border-dashed px-2 py-1" :class="getRuntimeStatusClass(selectedSession.id)">
-              <span v-if="isSessionRunning(selectedSession.id)" class="h-1.5 w-1.5 rounded-full bg-current animate-pulse" />
-              {{ getRuntimeStatusLabel(selectedSession.id) }}
-            </span>
-            <span
-              class="rounded-sm border border-dashed border-sky-300 bg-sky-50 px-2 py-1 text-sky-700 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-300"
-            >
-              当前会话
-            </span>
-            <span>最近更新时间：{{ formatUpdatedAt(selectedSession.updatedAt) }}</span>
+              :sessions="sortedSessions"
+              :loading="loading"
+              :disabled="sending || managerBusy"
+              @refresh-intent="refreshSessionsForSelection"
+            />
           </div>
-          <div class="mt-1 break-all font-mono text-[11px] text-stone-500 dark:text-stone-400">{{ selectedSession.cwd }}</div>
+
         </div>
 
         <p v-if="sessionError" class="inline-flex items-center gap-2 text-sm text-red-700 dark:text-red-300">
@@ -907,7 +876,7 @@ onBeforeUnmount(() => {
           v-if="!turns.length"
           class="rounded-sm border border-dashed border-stone-300 bg-stone-50 px-4 py-6 text-sm text-stone-500 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-400"
         >
-          这里会显示 PromptX 管理的会话执行过程，包括状态、命令日志和 Codex 回复。
+          这里会显示会话执行过程和 Codex 回复。
         </div>
 
         <div v-for="turn in turns" :key="turn.id" class="space-y-3">

@@ -36,6 +36,7 @@ import { importPdfDocument } from './pdf.js'
 import { createTempFilePath, normalizeUploadFileName } from './upload.js'
 
 const app = Fastify({ logger: true })
+const activeCodexSessionRuns = new Map()
 const port = Number(process.env.PORT || 3000)
 const host = process.env.HOST || '0.0.0.0'
 const uploadsDir = path.resolve(process.cwd(), 'uploads')
@@ -48,6 +49,54 @@ fs.mkdirSync(uploadsDir, { recursive: true })
 fs.mkdirSync(tmpDir, { recursive: true })
 
 let lastExpiredPurgeAt = 0
+
+function beginCodexSessionRun(sessionId = '') {
+  const normalized = String(sessionId || '').trim()
+  if (!normalized) {
+    return
+  }
+
+  activeCodexSessionRuns.set(normalized, (activeCodexSessionRuns.get(normalized) || 0) + 1)
+}
+
+function endCodexSessionRun(sessionId = '') {
+  const normalized = String(sessionId || '').trim()
+  if (!normalized) {
+    return
+  }
+
+  const nextCount = (activeCodexSessionRuns.get(normalized) || 0) - 1
+  if (nextCount > 0) {
+    activeCodexSessionRuns.set(normalized, nextCount)
+    return
+  }
+
+  activeCodexSessionRuns.delete(normalized)
+}
+
+function isCodexSessionRunning(sessionId = '') {
+  const normalized = String(sessionId || '').trim()
+  if (!normalized) {
+    return false
+  }
+
+  return (activeCodexSessionRuns.get(normalized) || 0) > 0
+}
+
+function decorateCodexSession(session) {
+  if (!session) {
+    return null
+  }
+
+  return {
+    ...session,
+    running: isCodexSessionRunning(session.id),
+  }
+}
+
+function decorateCodexSessionList(items = []) {
+  return items.map((item) => decorateCodexSession(item))
+}
 
 function listLanIpv4Addresses() {
   const interfaces = os.networkInterfaces()
@@ -323,7 +372,7 @@ app.post('/api/imports/pdf', async (request, reply) => {
 })
 
 app.get('/api/codex/sessions', async () => ({
-  items: listPromptxCodexSessions(),
+  items: decorateCodexSessionList(listPromptxCodexSessions()),
 }))
 
 app.get('/api/codex/workspaces', async () => ({
@@ -332,7 +381,7 @@ app.get('/api/codex/workspaces', async () => ({
 
 app.post('/api/codex/sessions', async (request, reply) => {
   const session = createPromptxCodexSession(request.body || {})
-  return reply.code(201).send(session)
+  return reply.code(201).send(decorateCodexSession(session))
 })
 
 app.patch('/api/codex/sessions/:sessionId', async (request, reply) => {
@@ -341,7 +390,7 @@ app.patch('/api/codex/sessions/:sessionId', async (request, reply) => {
     return reply.code(404).send({ message: '没有找到对应的 PromptX 会话。' })
   }
 
-  return session
+  return decorateCodexSession(session)
 })
 
 app.delete('/api/codex/sessions/:sessionId', async (request, reply) => {
@@ -364,15 +413,28 @@ app.post('/api/codex/sessions/:sessionId/send', async (request, reply) => {
     return reply.code(400).send({ message: '没有收到可发送的提示词。' })
   }
 
-  const result = await sendPromptToCodexSession(session, prompt)
-  const nextSession = updatePromptxCodexSession(session.id, {
-    codexThreadId: result.threadId || session.codexThreadId,
-  }) || session
+  beginCodexSessionRun(session.id)
+
+  let responsePayload = null
+
+  try {
+    const result = await sendPromptToCodexSession(session, prompt)
+    const nextSession = updatePromptxCodexSession(session.id, {
+      codexThreadId: result.threadId || session.codexThreadId,
+    }) || session
+
+    responsePayload = {
+      session: nextSession,
+      message: result.message,
+      rawStdout: result.rawStdout,
+    }
+  } finally {
+    endCodexSessionRun(session.id)
+  }
 
   return {
-    session: nextSession,
-    message: result.message,
-    rawStdout: result.rawStdout,
+    ...responsePayload,
+    session: decorateCodexSession(responsePayload.session),
   }
 })
 
@@ -403,12 +465,22 @@ app.post('/api/codex/sessions/:sessionId/send-stream', async (request, reply) =>
   reply.raw.flushHeaders?.()
 
   const writeEvent = (payload) => {
-    reply.raw.write(`${JSON.stringify(payload)}\n`)
+    if (reply.raw.destroyed || reply.raw.writableEnded) {
+      return
+    }
+
+    try {
+      reply.raw.write(`${JSON.stringify(payload)}\n`)
+    } catch {
+      // Ignore write failures after the client disconnects.
+    }
   }
+
+  beginCodexSessionRun(session.id)
 
   writeEvent({
     type: 'session',
-    session,
+    session: decorateCodexSession(session),
   })
 
   const stream = streamPromptToCodexSession(session, prompt, {
@@ -422,7 +494,7 @@ app.post('/api/codex/sessions/:sessionId/send-stream', async (request, reply) =>
       if (updated) {
         writeEvent({
           type: 'session.updated',
-          session: updated,
+          session: decorateCodexSession(updated),
         })
       }
     },
@@ -443,7 +515,17 @@ app.post('/api/codex/sessions/:sessionId/send-stream', async (request, reply) =>
     })
   } finally {
     reply.raw.off('close', handleAbort)
-    reply.raw.end()
+    endCodexSessionRun(session.id)
+
+    const finalSession = getPromptxCodexSessionById(session.id) || session
+    writeEvent({
+      type: 'session.updated',
+      session: decorateCodexSession(finalSession),
+    })
+
+    if (!reply.raw.destroyed && !reply.raw.writableEnded) {
+      reply.raw.end()
+    }
   }
 })
 

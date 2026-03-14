@@ -16,6 +16,7 @@ import BlockEditor from '../components/BlockEditor.vue'
 import CodexSessionPanel from '../components/CodexSessionPanel.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import TopToast from '../components/TopToast.vue'
+import { usePageTitle } from '../composables/usePageTitle.js'
 import { useToast } from '../composables/useToast.js'
 import {
   deleteDocument,
@@ -56,6 +57,7 @@ let bypassLeaveConfirm = false
 
 const apiBase = getApiBase()
 const rawUrl = computed(() => `${apiBase}/p/${slug.value}/raw`)
+const codexSessionStorageKey = computed(() => `promptx:codex-session-id:${slug.value}`)
 const displayTitle = computed(() => draft.value.title || deriveTitleFromBlocks(draft.value.blocks) || '未命名文档')
 const shouldPromptOnLeave = computed(() => {
   if (bypassLeaveConfirm || loading.value) {
@@ -78,6 +80,8 @@ const leaveDescription = computed(() => {
   }
   return '确认离开当前编辑页？你之后仍可以从首页最近文档重新进入。'
 })
+
+usePageTitle(displayTitle)
 
 function normalizeImageContent(content = '') {
   if (!content || !content.startsWith(apiBase)) {
@@ -539,7 +543,7 @@ onBeforeUnmount(() => {
           <CodexSessionPanel
             ref="codexPanelRef"
             :build-prompt="prepareCodexPrompt"
-            storage-key="promptx:codex-session-id"
+            :storage-key="codexSessionStorageKey"
             @sending-change="codexSending = $event"
           />
         </div>

@@ -11,6 +11,7 @@ import {
 } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
+import { usePageTitle } from '../composables/usePageTitle.js'
 import { createDocument, deleteDocument, listDocuments } from '../lib/api.js'
 
 const router = useRouter()
@@ -25,6 +26,8 @@ const loading = ref(false)
 const error = ref('')
 
 const recentItems = computed(() => items.value.slice(0, 10))
+
+usePageTitle()
 
 async function loadDocuments() {
   loading.value = true
