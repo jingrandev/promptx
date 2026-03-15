@@ -509,7 +509,23 @@ export function useCodexSessionPanel(props, emit) {
     showManager.value = false
   }
 
-  function mergeSession(nextSession) {
+  function mergeSessionRecord(currentSession, nextSession, options = {}) {
+    const { preserveRunning = false } = options
+    if (!nextSession?.id) {
+      return currentSession || null
+    }
+
+    if (!preserveRunning) {
+      return nextSession
+    }
+
+    return {
+      ...nextSession,
+      running: Boolean(currentSession?.running),
+    }
+  }
+
+  function mergeSession(nextSession, options = {}) {
     if (!nextSession?.id) {
       return
     }
@@ -517,9 +533,9 @@ export function useCodexSessionPanel(props, emit) {
     const nextList = [...sessions.value]
     const index = nextList.findIndex((item) => item.id === nextSession.id)
     if (index >= 0) {
-      nextList[index] = nextSession
+      nextList[index] = mergeSessionRecord(nextList[index], nextSession, options)
     } else {
-      nextList.unshift(nextSession)
+      nextList.unshift(mergeSessionRecord(null, nextSession, options))
     }
     sessions.value = nextList
   }
@@ -560,7 +576,9 @@ export function useCodexSessionPanel(props, emit) {
     }
 
     const turn = turns.value[turnIndex]
-    const didApply = applyRunEventToTurn(turn, event, nextLogIdValue, mergeSession)
+    const didApply = applyRunEventToTurn(turn, event, nextLogIdValue, (session) => {
+      mergeSession(session, { preserveRunning: true })
+    })
     if (!didApply) {
       return true
     }
@@ -592,9 +610,9 @@ export function useCodexSessionPanel(props, emit) {
 
       const index = nextSessions.findIndex((item) => item.id === session.id)
       if (index >= 0) {
-        nextSessions[index] = session
+        nextSessions[index] = mergeSessionRecord(nextSessions[index], session, { preserveRunning: true })
       } else {
-        nextSessions.unshift(session)
+        nextSessions.unshift(mergeSessionRecord(null, session, { preserveRunning: true }))
       }
     }
 
