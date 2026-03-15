@@ -315,6 +315,63 @@ test('streamPromptToCodexSession handles a tail event without newline', async ()
   )
 })
 
+test('streamPromptToCodexSession emits starting status for new sessions and resuming status for existing threads', async () => {
+  const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-codex-status-'))
+  const fakeBin = createFakeCodexBinary(tempHome)
+
+  await withEnv(
+    {
+      CODEX_HOME: tempHome,
+      CODEX_BIN: fakeBin,
+    },
+    async () => {
+      const { streamPromptToCodexSession } = await importFreshCodexModule()
+
+      const startingEvents = []
+      const startingStream = streamPromptToCodexSession(
+        { id: 'session-new', cwd: 'D:\\code\\promptx', codexThreadId: '' },
+        'hello start',
+        {
+          onEvent(event) {
+            startingEvents.push(event)
+          },
+        }
+      )
+      await startingStream.result
+
+      const resumingEvents = []
+      const resumingStream = streamPromptToCodexSession(
+        { id: 'session-old', cwd: 'D:\\code\\promptx', codexThreadId: 'thread-existing-1' },
+        'hello resume',
+        {
+          onEvent(event) {
+            resumingEvents.push(event)
+          },
+        }
+      )
+      await resumingStream.result
+
+      assert.deepEqual(
+        startingEvents.find((event) => event.type === 'status'),
+        {
+          type: 'status',
+          stage: 'starting',
+          message: '已创建 PromptX 会话，正在启动第一轮执行。',
+        }
+      )
+
+      assert.deepEqual(
+        resumingEvents.find((event) => event.type === 'status'),
+        {
+          type: 'status',
+          stage: 'resuming',
+          message: '已连接 PromptX 会话，正在继续这轮执行。',
+        }
+      )
+    }
+  )
+})
+
 test('streamPromptToCodexSession repairs garbled command output', async () => {
   const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-codex-mojibake-'))
   const fakeBin = createFakeCodexBinary(tempHome)

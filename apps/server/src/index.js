@@ -11,14 +11,14 @@ import { Jimp } from 'jimp'
 import { nanoid } from 'nanoid'
 import { EXPIRY_OPTIONS, VISIBILITY_OPTIONS } from '@promptx/shared'
 import {
-  buildDocumentExports,
-  canEditDocument,
-  createDocument,
-  deleteDocument,
-  getDocumentBySlug,
-  listDocuments,
-  purgeExpiredDocuments,
-  updateDocument,
+  buildTaskExports,
+  canEditTask,
+  createTask,
+  deleteTask,
+  getTaskBySlug,
+  listTasks,
+  purgeExpiredTasks,
+  updateTask,
 } from './repository.js'
 import {
   listKnownCodexWorkspaces,
@@ -32,7 +32,7 @@ import {
   listPromptxCodexSessions,
   updatePromptxCodexSession,
 } from './codexSessions.js'
-import { importPdfDocument } from './pdf.js'
+import { importPdfBlocks } from './pdf.js'
 import { createTempFilePath, normalizeUploadFileName } from './upload.js'
 import { listWorkspaceTree, searchWorkspaceEntries } from './workspaceFiles.js'
 
@@ -170,7 +170,7 @@ function purgeExpiredContent(force = false) {
   }
 
   lastExpiredPurgeAt = now
-  const result = purgeExpiredDocuments(new Date(now).toISOString())
+  const result = purgeExpiredTasks(new Date(now).toISOString())
   if (result.removedAssets.length) {
     removeAssetFiles(result.removedAssets)
   }
@@ -242,49 +242,49 @@ app.get('/api/meta', async () => ({
   visibilityOptions: VISIBILITY_OPTIONS,
 }))
 
-app.get('/api/documents', async () => {
+app.get('/api/tasks', async () => {
   purgeExpiredContent()
   return {
-    items: listDocuments(),
+    items: listTasks(),
   }
 })
 
-app.post('/api/documents', async (request, reply) => {
+app.post('/api/tasks', async (request, reply) => {
   purgeExpiredContent()
-  const document = createDocument(request.body || {})
-  return reply.code(201).send(document)
+  const task = createTask(request.body || {})
+  return reply.code(201).send(task)
 })
 
-app.get('/api/documents/:slug', async (request, reply) => {
+app.get('/api/tasks/:slug', async (request, reply) => {
   purgeExpiredContent()
-  const document = getDocumentBySlug(request.params.slug)
-  if (!document) {
-    return reply.code(404).send({ message: '文档不存在。' })
+  const task = getTaskBySlug(request.params.slug)
+  if (!task) {
+    return reply.code(404).send({ message: '任务不存在。' })
   }
-  if (document.expired) {
-    return reply.code(410).send({ message: '文档已过期。' })
+  if (task.expired) {
+    return reply.code(410).send({ message: '任务已过期。' })
   }
 
   return {
-    ...document,
-    canEdit: canEditDocument(request.params.slug),
+    ...task,
+    canEdit: canEditTask(request.params.slug),
   }
 })
 
-app.put('/api/documents/:slug', async (request, reply) => {
+app.put('/api/tasks/:slug', async (request, reply) => {
   purgeExpiredContent()
-  const result = updateDocument(request.params.slug, request.body || {})
+  const result = updateTask(request.params.slug, request.body || {})
   if (result.error === 'not_found') {
-    return reply.code(404).send({ message: '文档不存在。' })
+    return reply.code(404).send({ message: '任务不存在。' })
   }
   return result
 })
 
-app.delete('/api/documents/:slug', async (request, reply) => {
+app.delete('/api/tasks/:slug', async (request, reply) => {
   purgeExpiredContent()
-  const result = deleteDocument(request.params.slug)
+  const result = deleteTask(request.params.slug)
   if (result.error === 'not_found') {
-    return reply.code(404).send({ message: '文档不存在。' })
+    return reply.code(404).send({ message: '任务不存在。' })
   }
   removeAssetFiles(result.removedAssets)
   return reply.code(204).send()
@@ -337,7 +337,7 @@ app.post('/api/imports/pdf', async (request, reply) => {
     return reply.code(400).send({ message: '没有收到 PDF 文件。' })
   }
 
-  const fileName = normalizeUploadFileName(part.filename, 'document.pdf')
+  const fileName = normalizeUploadFileName(part.filename, 'task.pdf')
   const mimetype = String(part.mimetype || '').toLowerCase()
   if (mimetype !== 'application/pdf' && !fileName.toLowerCase().endsWith('.pdf')) {
     return reply.code(400).send({ message: '只支持导入 PDF 文件。' })
@@ -349,7 +349,7 @@ app.post('/api/imports/pdf', async (request, reply) => {
   try {
     await pipeline(part.file, fs.createWriteStream(tempPath))
     const buffer = fs.readFileSync(tempPath)
-    const imported = await importPdfDocument(buffer, {
+    const imported = await importPdfBlocks(buffer, {
       uploadsDir,
     })
     createdAssets = imported.createdAssets || []
@@ -558,14 +558,14 @@ app.post('/api/codex/sessions/:sessionId/send-stream', async (request, reply) =>
   }
 })
 
-app.get('/p/:slug/raw', async (request, reply) => {
+app.get('/api/tasks/:slug/raw', async (request, reply) => {
   purgeExpiredContent()
-  const document = getDocumentBySlug(request.params.slug)
-  if (!document || document.expired) {
-    return reply.code(404).type('text/plain; charset=utf-8').send('文档不存在。')
+  const task = getTaskBySlug(request.params.slug)
+  if (!task || task.expired) {
+    return reply.code(404).type('text/plain; charset=utf-8').send('任务不存在。')
   }
 
-  const exports = buildDocumentExports(document)
+  const exports = buildTaskExports(task)
   return reply.type('text/plain; charset=utf-8').send(exports.raw)
 })
 
