@@ -1,6 +1,7 @@
 import { nanoid } from 'nanoid'
 import { all, get, run, transaction } from './db.js'
 import { getPromptxCodexSessionById } from './codexSessions.js'
+import { captureRunGitBaseline, captureTaskGitBaseline } from './gitDiff.js'
 import { getTaskBySlug, updateTaskCodexSession } from './repository.js'
 
 const TERMINAL_RUN_STATUSES = new Set(['completed', 'error', 'stopped', 'interrupted'])
@@ -198,6 +199,13 @@ export function createCodexRun(input = {}) {
   })
 
   updateTaskCodexSession(task.slug, session.id)
+
+  try {
+    captureTaskGitBaseline(task.slug, session.cwd)
+    captureRunGitBaseline(runId, session.cwd)
+  } catch {
+    // Ignore diff baseline failures so they do not block the Codex run itself.
+  }
 
   return getCodexRunById(runId, { withEvents: true })
 }

@@ -16,6 +16,7 @@ export {
   createTaskCodexRun,
   createCodexSession,
   deleteCodexSession,
+  getTaskGitDiff,
   listTaskCodexRuns,
   listCodexSessionFiles,
   listCodexSessions,

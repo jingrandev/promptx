@@ -1,9 +1,10 @@
 <script setup>
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import {
   ArrowDown,
   Bot,
   CircleAlert,
+  FileDiff,
   LoaderCircle,
   PencilLine,
   Square,
@@ -12,7 +13,7 @@ import CodexSessionManagerDialog from './CodexSessionManagerDialog.vue'
 import CodexSessionSelect from './CodexSessionSelect.vue'
 import { useCodexSessionPanel } from '../composables/useCodexSessionPanel.js'
 
-const emit = defineEmits(['selected-session-change', 'sending-change'])
+const emit = defineEmits(['selected-session-change', 'sending-change', 'open-diff'])
 
 const props = defineProps({
   prompt: {
@@ -43,10 +44,17 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  sessionSelectionLocked: {
+    type: Boolean,
+    default: false,
+  },
+  sessionSelectionLockReason: {
+    type: String,
+    default: '',
+  },
 })
 
 const {
-  clearTurns,
   closeManager,
   formatTurnTime,
   getProcessCardClass,
@@ -84,6 +92,13 @@ const {
 } = useCodexSessionPanel(props, emit)
 
 const collapsedTurnMap = ref({})
+const sessionSelectionHelperText = computed(() => {
+  if (props.sessionSelectionLocked) {
+    return props.sessionSelectionLockReason || '该任务已有会话历史，不能再切换会话；如需使用新会话，请新建任务。'
+  }
+
+  return helperText.value || ''
+})
 
 function shouldCollapseTurn(turn) {
   return turn?.status !== 'running' && (turn?.events?.length || 0) > 3
@@ -120,6 +135,24 @@ function toggleTurnEvents(turn) {
   }
 }
 
+function openTurnDiff(turn) {
+  if (!turn?.runId) {
+    return
+  }
+
+  emit('open-diff', {
+    scope: 'run',
+    runId: turn.runId,
+  })
+}
+
+function openTaskDiff() {
+  emit('open-diff', {
+    scope: 'workspace',
+    runId: '',
+  })
+}
+
 watch(
   turns,
   (nextTurns) => {
@@ -142,6 +175,8 @@ defineExpose({
       :sessions="sessions"
       :workspaces="workspaces"
       :selected-session-id="selectedSessionId"
+      :selection-locked="sessionSelectionLocked"
+      :selection-lock-reason="sessionSelectionLockReason"
       :loading="loading"
       :sending="sending"
       :on-refresh="loadSessions"
@@ -167,10 +202,11 @@ defineExpose({
             <button
               type="button"
               class="tool-button inline-flex items-center gap-2 px-3 py-2 text-xs dark:border-[#4c423c] dark:bg-[#2b2521] dark:hover:bg-[#342d28]"
-              :disabled="sending"
-              @click="clearTurns"
+              :disabled="!taskSlug"
+              @click="openTaskDiff"
             >
-              <span>清空记录</span>
+              <FileDiff class="h-4 w-4" />
+              <span>代码变更</span>
             </button>
             <button
               type="button"
@@ -190,12 +226,19 @@ defineExpose({
               v-model="selectedSessionId"
               :sessions="sortedSessions"
               :loading="loading"
-              :disabled="sending || managerBusy"
+              :disabled="sending || managerBusy || sessionSelectionLocked"
               @refresh-intent="refreshSessionsForSelection"
             />
           </div>
 
         </div>
+
+        <p
+          v-if="sessionSelectionLocked"
+          class="text-xs text-stone-500 dark:text-stone-400"
+        >
+          {{ sessionSelectionHelperText }}
+        </p>
 
         <p v-if="sessionError" class="inline-flex items-center gap-2 text-sm text-red-700 dark:text-red-300">
           <CircleAlert class="h-4 w-4" />
@@ -267,6 +310,8 @@ defineExpose({
                 v-if="hasTurnSummary(turn)"
                 class="mt-3 rounded-sm border border-dashed border-current/20 bg-white/30 px-3 py-2 text-xs text-current/85 dark:bg-black/10"
               >
+                <div class="flex items-start justify-between gap-3">
+                  <div class="min-w-0 flex-1">
                 <div v-if="getTurnSummaryStatus(turn)" class="leading-5">
                   {{ getTurnSummaryStatus(turn) }}
                 </div>
@@ -282,6 +327,16 @@ defineExpose({
                     <span class="opacity-75">{{ item.label }}</span>
                     <span class="font-medium">{{ item.value }}</span>
                   </span>
+                </div>
+                  </div>
+                  <button
+                    v-if="turn.runId"
+                    type="button"
+                    class="shrink-0 rounded-sm border border-dashed border-current/30 px-2 py-1 text-[11px] transition hover:bg-white/20 dark:hover:bg-black/10"
+                    @click="openTurnDiff(turn)"
+                  >
+                    查看本轮变更
+                  </button>
                 </div>
               </div>
             </div>

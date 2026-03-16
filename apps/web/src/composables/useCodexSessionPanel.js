@@ -1486,7 +1486,17 @@ export function useCodexSessionPanel(props, emit) {
   }
 
   function handleSelectSession(sessionId) {
-    selectedSessionId.value = String(sessionId || '').trim()
+    const normalizedSessionId = String(sessionId || '').trim()
+    if (
+      props.sessionSelectionLocked
+      && normalizedSessionId
+      && normalizedSessionId !== selectedSessionId.value
+    ) {
+      sessionError.value = props.sessionSelectionLockReason || '该任务已有会话历史，不能再切换会话；如需使用新会话，请新建任务。'
+      return
+    }
+
+    selectedSessionId.value = normalizedSessionId
   }
 
   function refreshSessionsForSelection() {

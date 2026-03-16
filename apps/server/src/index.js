@@ -22,9 +22,10 @@ import {
   updateTask,
 } from './repository.js'
 import {
-  listKnownCodexWorkspaces,
+  listKnownCodexWorkspaces,
   streamPromptToCodexSession,
 } from './codex.js'
+import { getTaskGitDiffReview } from './gitDiff.js'
 import {
   createPromptxCodexSession,
   deletePromptxCodexSession,
@@ -562,6 +563,13 @@ app.post('/api/tasks/:slug/codex-session', async (request, reply) => {
   }
 
   const sessionId = String(request.body?.sessionId || '').trim()
+  const taskSessionLocked = Boolean(task.codexSessionId && Number(task.codexRunCount || 0) > 0)
+  if (taskSessionLocked && sessionId !== String(task.codexSessionId || '').trim()) {
+    return reply.code(409).send({
+      message: '该任务已有会话历史，不能再切换会话；如需使用新会话，请新建任务。',
+    })
+  }
+
   if (sessionId) {
     const session = getPromptxCodexSessionById(sessionId)
     if (!session) {
@@ -596,6 +604,25 @@ app.get('/api/tasks/:slug/codex-runs', async (request, reply) => {
   return {
     items: listTaskCodexRuns(request.params.slug, request.query?.limit),
   }
+})
+
+app.get('/api/tasks/:slug/git-diff', async (request, reply) => {
+  purgeExpiredContent()
+  const task = getTaskBySlug(request.params.slug)
+  if (!task || task.expired) {
+    return reply.code(404).send({ message: '任务不存在。' })
+  }
+
+  const scope = String(request.query?.scope || 'workspace').trim()
+  if (scope !== 'workspace' && scope !== 'task' && scope !== 'run') {
+    return reply.code(400).send({ message: '无效的 diff 范围。' })
+  }
+
+  return getTaskGitDiffReview(request.params.slug, {
+    scope,
+    runId: request.query?.runId,
+    filePath: request.query?.filePath,
+  })
 })
 
 app.post('/api/tasks/:slug/codex-runs', async (request, reply) => {

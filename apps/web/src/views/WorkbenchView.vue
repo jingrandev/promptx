@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   CircleAlert,
   Copy,
@@ -11,20 +11,30 @@ import {
   WandSparkles,
 } from 'lucide-vue-next'
 import BlockEditor from '../components/BlockEditor.vue'
+import TaskDiffReviewDialog from '../components/TaskDiffReviewDialog.vue'
 import CodexSessionPanel from '../components/CodexSessionPanel.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import ThemeToggle from '../components/ThemeToggle.vue'
 import TopToast from '../components/TopToast.vue'
+import { getTaskGitDiff } from '../lib/api.js'
+import { subscribeServerEvents } from '../lib/serverEvents.js'
 import { usePageTitle } from '../composables/usePageTitle.js'
 import { useToast } from '../composables/useToast.js'
 import { useWorkbenchTasks } from '../composables/useWorkbenchTasks.js'
 
 const showClearDialog = ref(false)
 const showDeleteDialog = ref(false)
+const showDiffDialog = ref(false)
 const editingTaskTitleSlug = ref('')
+const diffFocusToken = ref(0)
+const preferredDiffScope = ref('workspace')
+const preferredDiffRunId = ref('')
+const taskDiffSummaryMap = ref({})
 const { toastMessage, flashToast, clearToast } = useToast()
 
 const codexPanelRef = ref(null)
+let unsubscribeServerEvents = null
+let taskDiffRequestId = 0
 
 function getCurrentPanelRef(currentTaskSlug) {
   if (!currentTaskSlug) {
@@ -83,6 +93,67 @@ const currentRenderedTask = computed(() =>
 )
 
 usePageTitle(pageTitle)
+
+function openTaskDiff(scope = 'workspace', runId = '') {
+  preferredDiffScope.value = scope === 'run' ? 'run' : scope === 'task' ? 'task' : 'workspace'
+  preferredDiffRunId.value = preferredDiffScope.value === 'run' ? String(runId || '') : ''
+  showDiffDialog.value = true
+  diffFocusToken.value += 1
+}
+
+function closeTaskDiff() {
+  showDiffDialog.value = false
+}
+
+function getTaskDiffBadge(taskSlug) {
+  return taskDiffSummaryMap.value[String(taskSlug || '').trim()] || null
+}
+
+async function refreshTaskDiffSummaries(targetSlugs = []) {
+  const currentRequestId = ++taskDiffRequestId
+  const slugs = (targetSlugs.length ? targetSlugs : renderedTasks.value.map((task) => task.slug))
+    .map((slug) => String(slug || '').trim())
+    .filter(Boolean)
+
+  if (!slugs.length) {
+    taskDiffSummaryMap.value = {}
+    return
+  }
+
+  const uniqueSlugs = [...new Set(slugs)]
+  const nextMap = { ...taskDiffSummaryMap.value }
+
+  await Promise.all(uniqueSlugs.map(async (slug) => {
+    try {
+      const payload = await getTaskGitDiff(slug, { scope: 'workspace' })
+      nextMap[slug] = {
+        supported: Boolean(payload?.supported),
+        fileCount: Math.max(0, Number(payload?.summary?.fileCount) || 0),
+        additions: Math.max(0, Number(payload?.summary?.additions) || 0),
+        deletions: Math.max(0, Number(payload?.summary?.deletions) || 0),
+      }
+    } catch {
+      nextMap[slug] = {
+        supported: false,
+        fileCount: 0,
+        additions: 0,
+        deletions: 0,
+      }
+    }
+  }))
+
+  if (currentRequestId !== taskDiffRequestId) {
+    return
+  }
+
+  const filteredMap = {}
+  renderedTasks.value.forEach((task) => {
+    if (nextMap[task.slug]) {
+      filteredMap[task.slug] = nextMap[task.slug]
+    }
+  })
+  taskDiffSummaryMap.value = filteredMap
+}
 
 async function handleTaskTitleBlur() {
   editingTaskTitleSlug.value = ''
@@ -204,12 +275,35 @@ onMounted(() => {
   initializeWorkbench()
   window.addEventListener('beforeunload', handleBeforeUnload)
   window.addEventListener('keydown', handleWindowKeydown)
+
+  unsubscribeServerEvents = subscribeServerEvents((event) => {
+    const eventType = String(event.type || '').trim()
+    const eventTaskSlug = String(event.taskSlug || '').trim()
+
+    if (eventType === 'ready') {
+      refreshTaskDiffSummaries().catch(() => {})
+      return
+    }
+
+    if ((eventType === 'runs.changed' || eventType === 'tasks.changed') && eventTaskSlug) {
+      refreshTaskDiffSummaries([eventTaskSlug]).catch(() => {})
+    }
+  })
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('beforeunload', handleBeforeUnload)
   window.removeEventListener('keydown', handleWindowKeydown)
+  unsubscribeServerEvents?.()
 })
+
+watch(
+  () => renderedTasks.value.map((task) => task.slug).join('|'),
+  () => {
+    refreshTaskDiffSummaries().catch(() => {})
+  },
+  { immediate: true }
+)
 </script>
 
 <template>
@@ -235,6 +329,15 @@ onBeforeUnmount(() => {
       danger
       @cancel="closeDeleteDialog"
       @confirm="confirmRemoveCurrentTask"
+    />
+    <TaskDiffReviewDialog
+      :open="showDiffDialog"
+      :task-slug="currentTaskSlug"
+      :task-title="currentTaskDisplayTitle"
+      :preferred-scope="preferredDiffScope"
+      :preferred-run-id="preferredDiffRunId"
+      :focus-token="diffFocusToken"
+      @close="closeTaskDiff"
     />
 
     <div class="grid min-h-0 flex-1 gap-4 lg:grid-cols-[260px_minmax(0,1fr)] lg:grid-rows-1">
@@ -266,11 +369,9 @@ onBeforeUnmount(() => {
             <article
               v-for="task in renderedTasks"
               :key="task.slug"
-              class="group relative rounded-sm border px-3 py-3 transition cursor-default"
-              :class="task.slug === currentTaskSlug && task.sending
-                ? 'border-amber-400 bg-amber-100/80 text-stone-950 dark:border-[#8a6d48] dark:bg-[#3b3127] dark:text-stone-50'
-                : task.slug === currentTaskSlug
-                  ? 'border-stone-500 bg-stone-100 text-stone-900 dark:border-[#73665c] dark:bg-[#332c27] dark:text-stone-100'
+              class="group relative cursor-default rounded-sm border px-3 py-3 transition"
+              :class="task.slug === currentTaskSlug
+                ? 'border-emerald-500 bg-white text-stone-900 shadow-sm dark:border-emerald-400 dark:bg-[#332c27] dark:text-stone-100'
                 : task.sending
                   ? 'border-amber-300 bg-amber-50/70 hover:bg-amber-50 dark:border-[#6f5a3f] dark:bg-[#312820] dark:hover:bg-[#392f26]'
                   : 'border-stone-300 bg-stone-50 hover:bg-stone-100 dark:border-[#453c36] dark:bg-[#26211d] dark:hover:bg-[#2f2924]'"
@@ -279,9 +380,7 @@ onBeforeUnmount(() => {
               <span
                 v-if="task.slug === currentTaskSlug"
                 class="absolute inset-y-2 left-0 w-1 rounded-full"
-                :class="task.sending
-                  ? 'bg-amber-500 dark:bg-[#f0c879]'
-                  : 'bg-emerald-500 dark:bg-emerald-400'"
+                :class="'bg-emerald-500 dark:bg-emerald-400'"
               />
               <div class="flex items-start justify-between gap-3">
                 <div class="min-w-0 h-5 flex-1 overflow-hidden">
@@ -324,15 +423,20 @@ onBeforeUnmount(() => {
                 </div>
               </div>
               <div class="mt-2 truncate text-xs opacity-80">{{ task.lastPromptPreview || '还没有发送记录' }}</div>
-              <div class="mt-2 text-[11px] opacity-70">{{ new Date(task.updatedAt).toLocaleString('zh-CN') }}</div>
-              <button
-                type="button"
-                class="absolute bottom-2 right-2 inline-flex h-6 w-6 items-center justify-center rounded-sm text-stone-500 opacity-0 transition hover:bg-red-100 hover:text-red-700 group-hover:opacity-100 focus:opacity-100 dark:text-stone-500 dark:hover:bg-red-950/20 dark:hover:text-red-200"
-                :disabled="removingTask || creatingTask || task.sending"
-                @click.stop="selectTask(task.slug); openDeleteDialog()"
-              >
-                <Trash2 class="h-3.5 w-3.5" />
-              </button>
+              <div class="mt-2 flex items-center justify-between gap-3">
+                <div class="min-w-0 text-[11px] opacity-70">{{ new Date(task.updatedAt).toLocaleString('zh-CN') }}</div>
+                <div class="flex shrink-0 items-center gap-1.5 text-[10px] uppercase tracking-[0.18em] opacity-80">
+                  <span
+                    v-if="getTaskDiffBadge(task.slug)?.supported && getTaskDiffBadge(task.slug)?.fileCount"
+                    class="inline-flex items-center gap-1 rounded-sm border border-dashed px-1.5 py-0.5"
+                    :class="task.slug === currentTaskSlug
+                      ? 'border-stone-400 bg-white/70 text-stone-700 dark:border-[#73665c] dark:bg-[#3a322d] dark:text-stone-200'
+                      : 'border-stone-300 text-stone-600 dark:border-[#5b514b] dark:bg-[#2d2723] dark:text-stone-300'"
+                  >
+                    <span>{{ getTaskDiffBadge(task.slug)?.fileCount }} 文件</span>
+                  </span>
+                </div>
+              </div>
             </article>
           </div>
         </div>
@@ -342,6 +446,15 @@ onBeforeUnmount(() => {
             <CircleAlert class="mt-0.5 h-4 w-4 shrink-0" />
             <span class="min-w-0 break-words">{{ error }}</span>
           </div>
+          <button
+            type="button"
+            class="tool-button inline-flex w-full items-center justify-center gap-2 px-3 py-2 text-sm text-red-700 hover:text-red-900 dark:text-red-300 dark:hover:text-red-200"
+            :disabled="!currentTaskSlug || removingTask || creatingTask || isCurrentTaskSending"
+            @click="openDeleteDialog"
+          >
+            <Trash2 class="h-4 w-4" />
+            <span>{{ removingTask ? '删除中...' : '删除当前任务' }}</span>
+          </button>
         </div>
       </aside>
 
@@ -354,8 +467,11 @@ onBeforeUnmount(() => {
               :task-slug="currentRenderedTask.slug"
               :build-prompt="() => prepareCodexPromptForTask(currentRenderedTask.slug)"
               :selected-session-id="currentRenderedTask.codexSessionId || ''"
+              :session-selection-locked="Boolean(currentRenderedTask.sessionSelectionLocked)"
+              :session-selection-lock-reason="currentRenderedTask.sessionSelectionLockReason || ''"
               @sending-change="handleTaskSendingChange(currentRenderedTask.slug, $event)"
               @selected-session-change="handleTaskSessionChange(currentRenderedTask.slug, $event)"
+              @open-diff="openTaskDiff($event.scope, $event.runId)"
             />
           </div>
         </div>

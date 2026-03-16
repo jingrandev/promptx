@@ -26,7 +26,8 @@ function toBlock(row) {
   }
 }
 
-function toTask(row, blocks = []) {
+function toTask(row, blocks = [], options = {}) {
+  const codexRunCount = Math.max(0, Number(options.codexRunCount) || 0)
   const displayTitle = row.title || row.auto_title || deriveTitleFromBlocks(blocks)
   return {
     id: Number(row.id),
@@ -39,6 +40,7 @@ function toTask(row, blocks = []) {
     visibility: row.visibility,
     expiresAt: row.expires_at,
     expiry: getExpiryValue(row.expires_at),
+    codexRunCount,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     blocks,
@@ -139,13 +141,47 @@ function loadListMetadata(taskIds = []) {
   }
 }
 
+function getCodexRunCountByTaskSlug(taskSlug = '') {
+  return Math.max(
+    0,
+    Number(
+      get(
+        `SELECT COUNT(*) AS count
+         FROM codex_runs
+         WHERE task_slug = ?`,
+        [String(taskSlug || '').trim()]
+      )?.count || 0
+    )
+  )
+}
+
+function loadCodexRunCounts(taskSlugs = []) {
+  const normalizedSlugs = [...new Set(taskSlugs.map((slug) => String(slug || '').trim()).filter(Boolean))]
+  if (!normalizedSlugs.length) {
+    return new Map()
+  }
+
+  const placeholders = normalizedSlugs.map(() => '?').join(', ')
+  const rows = all(
+    `SELECT task_slug, COUNT(*) AS count
+     FROM codex_runs
+     WHERE task_slug IN (${placeholders})
+     GROUP BY task_slug`,
+    normalizedSlugs
+  )
+
+  return new Map(
+    rows.map((row) => [String(row.task_slug || '').trim(), Math.max(0, Number(row.count) || 0)])
+  )
+}
+
 function collectImagePaths(blocks = []) {
   return blocks
     .filter((block) => block.type === BLOCK_TYPES.IMAGE && block.content)
     .map((block) => block.content)
 }
 
-function mapTaskSummary(row, firstText = '', blockCount = 0) {
+function mapTaskSummary(row, firstText = '', blockCount = 0, codexRunCount = 0) {
   const textBlock = firstText
     ? [{ type: BLOCK_TYPES.TEXT, content: firstText }]
     : []
@@ -161,6 +197,7 @@ function mapTaskSummary(row, firstText = '', blockCount = 0) {
     visibility: row.visibility,
     expiresAt: row.expires_at,
     preview: summarizeTask({ blocks: textBlock }),
+    codexRunCount: Math.max(0, Number(codexRunCount) || 0),
     blockCount,
   }
 }
@@ -207,12 +244,14 @@ export function listTasks(limit = 30) {
     blockCountByTaskId,
     firstTextByTaskId,
   } = loadListMetadata(taskIds)
+  const codexRunCountBySlug = loadCodexRunCounts(rows.map((row) => row.slug))
 
   return rows.map((row) =>
     mapTaskSummary(
       row,
       firstTextByTaskId.get(Number(row.id)) || '',
-      blockCountByTaskId.get(Number(row.id)) || 0
+      blockCountByTaskId.get(Number(row.id)) || 0,
+      codexRunCountBySlug.get(String(row.slug || '').trim()) || 0
     )
   )
 }
@@ -229,7 +268,9 @@ export function getTaskBySlug(slug) {
     return null
   }
 
-  const task = toTask(row, loadBlocks(row.id))
+  const task = toTask(row, loadBlocks(row.id), {
+    codexRunCount: getCodexRunCountByTaskSlug(row.slug),
+  })
   return isExpired(task) ? { ...task, expired: true } : task
 }
 

@@ -91,6 +91,33 @@ export function listTaskCodexRuns(taskSlug, options = {}) {
   })
 }
 
+export function getTaskGitDiff(taskSlug, options = {}) {
+  const params = new URLSearchParams()
+  const scope = String(options.scope || 'workspace').trim()
+  const runId = String(options.runId || '').trim()
+  const filePath = String(options.filePath || '').trim()
+
+  if (scope === 'run') {
+    params.set('scope', 'run')
+  } else if (scope === 'task') {
+    params.set('scope', 'task')
+  } else {
+    params.set('scope', 'workspace')
+  }
+
+  if (runId) {
+    params.set('runId', runId)
+  }
+  if (filePath) {
+    params.set('filePath', filePath)
+  }
+
+  const query = params.toString()
+  return request(`/api/tasks/${encodeURIComponent(taskSlug)}/git-diff${query ? `?${query}` : ''}`, {
+    cache: 'no-store',
+  })
+}
+
 export function createTaskCodexRun(taskSlug, payload) {
   return request(`/api/tasks/${encodeURIComponent(taskSlug)}/codex-runs`, {
     method: 'POST',
