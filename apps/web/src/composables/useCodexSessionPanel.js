@@ -64,6 +64,615 @@ function formatTodoItems(items = []) {
     .join('\n')
 }
 
+function formatCount(value = 0) {
+  const number = Number(value || 0)
+  if (!Number.isFinite(number)) {
+    return '0'
+  }
+  return number.toLocaleString('zh-CN')
+}
+
+export function formatElapsedDuration(value = 0) {
+  const totalSeconds = Math.max(0, Math.floor(Number(value) || 0))
+  if (totalSeconds < 66) {
+    return `${totalSeconds}s`
+  }
+
+  const hours = Math.floor(totalSeconds / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+  const seconds = totalSeconds % 60
+
+  if (hours > 0) {
+    return `${hours}小时${minutes}分${seconds}秒`
+  }
+
+  return `${minutes}分${seconds}秒`
+}
+
+function summarizeText(value = '', limit = 140) {
+  const text = String(value || '').replace(/\s+/g, ' ').trim()
+  if (!text) {
+    return ''
+  }
+  if (text.length <= limit) {
+    return text
+  }
+  return `${text.slice(0, limit)}...`
+}
+
+function formatMultilineList(prefix = '', items = []) {
+  const list = items.filter(Boolean)
+  if (!list.length) {
+    return ''
+  }
+
+  const body = list.map((item) => `- ${item}`).join('\n')
+  return prefix ? `${prefix}\n${body}` : body
+}
+
+function createTurnSummaryState() {
+  return {
+    commandCount: 0,
+    webSearchCount: 0,
+    fileChangeCount: 0,
+    subAgentCount: 0,
+    waitingAgentCount: 0,
+    currentActivity: '',
+    latestActivity: '',
+    latestDetail: '',
+  }
+}
+
+function parseCodexRetryMessage(message = '') {
+  const text = String(message || '').trim()
+  if (!text) {
+    return null
+  }
+
+  const matched = text.match(/^Reconnecting\.\.\.\s*(\d+)\/(\d+)\s*\(([\s\S]+)\)$/i)
+  if (!matched) {
+    return null
+  }
+
+  return {
+    attempt: Number(matched[1] || 0),
+    total: Number(matched[2] || 0),
+    reason: String(matched[3] || '').trim(),
+    rawMessage: text,
+  }
+}
+
+function formatWebSearchEvent(item = {}, phase = 'completed') {
+  const action = item.action || {}
+  const actionType = String(action.type || '').trim()
+  const query = String(item.query || action.query || '').trim()
+  const queries = Array.isArray(action.queries) ? action.queries.map((entry) => String(entry || '').trim()).filter(Boolean) : []
+  const url = String(action.url || query || '').trim()
+
+  if (actionType === 'search') {
+    const title = phase === 'started' ? '正在搜索网页' : '已搜索网页'
+    return {
+      kind: 'command',
+      title,
+      detail: formatMultilineList(
+        query ? `关键词：${query}` : '',
+        queries.length > 1 ? queries : []
+      ),
+    }
+  }
+
+  if (actionType === 'open_page') {
+    return {
+      kind: 'command',
+      title: phase === 'started' ? '正在打开网页' : '已打开网页',
+      detail: url,
+    }
+  }
+
+  return {
+    kind: 'command',
+    title: phase === 'started' ? '准备网页检索' : '网页检索已更新',
+    detail: query,
+  }
+}
+
+function formatCollabToolEvent(item = {}, phase = 'completed') {
+  const tool = String(item.tool || '').trim()
+  const agentCount = Array.isArray(item.receiver_thread_ids) ? item.receiver_thread_ids.filter(Boolean).length : 0
+  const prompt = summarizeText(item.prompt)
+
+  if (tool === 'spawn_agent') {
+    return {
+      kind: 'todo',
+      title: phase === 'started'
+        ? '正在启动子代理'
+        : `已启动 ${agentCount || 1} 个子代理`,
+      detail: prompt ? `任务：${prompt}` : '',
+    }
+  }
+
+  if (tool === 'wait') {
+    return {
+      kind: 'todo',
+      title: phase === 'started'
+        ? (agentCount ? `等待 ${agentCount} 个子代理返回结果` : '等待子代理返回结果')
+        : '子代理结果已汇总',
+      detail: prompt ? `等待内容：${prompt}` : '',
+    }
+  }
+
+  return {
+    kind: 'todo',
+    title: phase === 'started'
+      ? `正在执行协作工具：${tool || '未知工具'}`
+      : `协作工具完成：${tool || '未知工具'}`,
+    detail: prompt ? `任务：${prompt}` : '',
+  }
+}
+
+function formatFileChangeEvent(item = {}, phase = 'completed') {
+  const changes = Array.isArray(item.changes) ? item.changes : []
+  const kindLabelMap = {
+    create: '新增',
+    update: '更新',
+    delete: '删除',
+  }
+
+  return {
+    kind: 'command',
+    title: phase === 'started'
+      ? '正在整理文件变更'
+      : `已记录 ${changes.length || 0} 个文件改动`,
+    detail: formatMultilineList('', changes.map((change) => {
+      const changePath = String(change?.path || '').trim()
+      const changeKind = kindLabelMap[String(change?.kind || '').trim()] || '变更'
+      return `${changeKind} ${changePath || '未命名文件'}`
+    })),
+  }
+}
+
+function syncTurnSummaryFromCodexEvent(turn, event = {}) {
+  if (!turn?.summary) {
+    turn.summary = createTurnSummaryState()
+  }
+
+  const summary = turn.summary
+  const eventType = String(event.type || '').trim()
+  const item = event.item || {}
+
+  if (eventType === 'turn.started') {
+    summary.currentActivity = '正在分析任务'
+    summary.latestActivity = 'Codex 开始执行'
+    summary.latestDetail = ''
+    return
+  }
+
+  if (eventType === 'turn.completed') {
+    summary.currentActivity = ''
+    summary.waitingAgentCount = 0
+    summary.latestActivity = 'Codex 执行完成'
+    summary.latestDetail = ''
+    return
+  }
+
+  if (eventType === 'turn.failed') {
+    summary.currentActivity = ''
+    summary.waitingAgentCount = 0
+    summary.latestActivity = '本轮运行失败'
+    summary.latestDetail = ''
+    return
+  }
+
+  if (eventType === 'error') {
+    const retrying = parseCodexRetryMessage(extractCodexEventErrorText(event))
+    if (retrying) {
+      summary.currentActivity = `网络异常，正在重试 (${retrying.attempt}/${retrying.total})`
+      summary.latestActivity = summary.currentActivity
+      summary.latestDetail = summarizeText(retrying.reason, 120)
+      return
+    }
+
+    summary.currentActivity = ''
+    summary.latestActivity = 'Codex 返回错误'
+    summary.latestDetail = summarizeText(extractCodexEventErrorText(event), 120)
+    return
+  }
+
+  if (eventType === 'item.started') {
+    if (item.type === 'command_execution') {
+      summary.currentActivity = '正在执行命令'
+      summary.latestActivity = '开始执行命令'
+      summary.latestDetail = summarizeText(item.command, 120)
+      return
+    }
+
+    if (item.type === 'web_search') {
+      summary.currentActivity = item.action?.type === 'open_page' ? '正在打开网页' : '正在搜索网页'
+      summary.latestActivity = summary.currentActivity
+      summary.latestDetail = summarizeText(item.action?.type === 'open_page' ? (item.action?.url || item.query) : (item.query || item.action?.query), 120)
+      return
+    }
+
+    if (item.type === 'collab_tool_call') {
+      if (item.tool === 'wait') {
+        const agentCount = Array.isArray(item.receiver_thread_ids) ? item.receiver_thread_ids.filter(Boolean).length : 0
+        summary.waitingAgentCount = agentCount
+        summary.currentActivity = agentCount ? `等待 ${agentCount} 个子代理返回结果` : '等待子代理返回结果'
+        summary.latestActivity = summary.currentActivity
+        summary.latestDetail = summarizeText(item.prompt, 120)
+        return
+      }
+
+      if (item.tool === 'spawn_agent') {
+        summary.currentActivity = '正在启动子代理'
+        summary.latestActivity = '正在启动子代理'
+        summary.latestDetail = summarizeText(item.prompt, 120)
+        return
+      }
+    }
+
+    if (item.type === 'file_change') {
+      summary.currentActivity = '正在整理文件变更'
+      summary.latestActivity = '正在整理文件变更'
+      summary.latestDetail = summarizeText((item.changes || []).map((change) => change?.path).filter(Boolean).join('，'), 120)
+      return
+    }
+
+    if (item.type === 'todo_list') {
+      summary.currentActivity = '正在规划执行步骤'
+      summary.latestActivity = '正在规划执行步骤'
+      summary.latestDetail = summarizeText((item.items || []).map((entry) => entry?.text).filter(Boolean).join('；'), 120)
+    }
+    return
+  }
+
+  if (eventType !== 'item.completed') {
+    return
+  }
+
+  if (item.type === 'command_execution') {
+    summary.commandCount += 1
+    summary.currentActivity = ''
+    summary.latestActivity = '命令执行完成'
+    summary.latestDetail = summarizeText(item.command, 120)
+    return
+  }
+
+  if (item.type === 'web_search') {
+    summary.webSearchCount += 1
+    summary.currentActivity = ''
+    summary.latestActivity = item.action?.type === 'open_page' ? '已打开网页' : '已搜索网页'
+    summary.latestDetail = summarizeText(item.action?.type === 'open_page' ? (item.action?.url || item.query) : (item.query || item.action?.query), 120)
+    return
+  }
+
+  if (item.type === 'collab_tool_call') {
+    if (item.tool === 'spawn_agent') {
+      const agentCount = Array.isArray(item.receiver_thread_ids) ? item.receiver_thread_ids.filter(Boolean).length : 0
+      summary.subAgentCount += agentCount
+      summary.currentActivity = ''
+      summary.latestActivity = agentCount ? `已启动 ${agentCount} 个子代理` : '已启动子代理'
+      summary.latestDetail = summarizeText(item.prompt, 120)
+      return
+    }
+
+    if (item.tool === 'wait') {
+      summary.waitingAgentCount = 0
+      summary.currentActivity = ''
+      summary.latestActivity = '子代理结果已汇总'
+      summary.latestDetail = summarizeText(item.prompt, 120)
+      return
+    }
+
+    summary.currentActivity = ''
+    summary.latestActivity = `协作工具完成：${item.tool || '未知工具'}`
+    summary.latestDetail = summarizeText(item.prompt, 120)
+    return
+  }
+
+  if (item.type === 'file_change') {
+    const changes = Array.isArray(item.changes) ? item.changes : []
+    summary.fileChangeCount += changes.length
+    summary.currentActivity = ''
+    summary.latestActivity = changes.length ? `已记录 ${changes.length} 个文件改动` : '已记录文件改动'
+    summary.latestDetail = summarizeText(changes.map((change) => change?.path).filter(Boolean).join('，'), 120)
+    return
+  }
+
+  if (item.type === 'todo_list') {
+    summary.currentActivity = ''
+    summary.latestActivity = '待办列表已更新'
+    summary.latestDetail = summarizeText((item.items || []).map((entry) => entry?.text).filter(Boolean).join('；'), 120)
+    return
+  }
+
+  if (item.type === 'agent_message') {
+    summary.currentActivity = ''
+    summary.latestActivity = 'Codex 已返回结果'
+    summary.latestDetail = summarizeText(item.text, 120)
+  }
+}
+
+function getTurnElapsedSeconds(turn = {}, options = {}) {
+  const startedAt = Date.parse(String(turn.startedAt || ''))
+  if (!Number.isFinite(startedAt)) {
+    return 0
+  }
+
+  if (turn.status === 'running') {
+    if (
+      options.currentRunningRunId
+      && String(options.currentRunningRunId) === String(turn.runId || '')
+      && Number.isFinite(Number(options.runningElapsedSeconds))
+    ) {
+      return Math.max(0, Math.floor(Number(options.runningElapsedSeconds) || 0))
+    }
+
+    const nowMs = Number(options.nowMs) || Date.now()
+    return Math.max(0, Math.floor((nowMs - startedAt) / 1000))
+  }
+
+  const finishedAt = Date.parse(String(turn.finishedAt || ''))
+  if (Number.isFinite(finishedAt) && finishedAt >= startedAt) {
+    return Math.max(0, Math.floor((finishedAt - startedAt) / 1000))
+  }
+
+  return 0
+}
+
+export function getTurnSummaryItems(turn = {}, options = {}) {
+  const summary = turn.summary || createTurnSummaryState()
+  const items = []
+  const elapsedSeconds = getTurnElapsedSeconds(turn, options)
+
+  if (elapsedSeconds > 0) {
+    items.push({ key: 'elapsed', label: '耗时', value: formatElapsedDuration(elapsedSeconds) })
+  }
+
+  if (summary.webSearchCount) {
+    items.push({ key: 'web', label: '网页', value: formatCount(summary.webSearchCount) })
+  }
+  if (summary.commandCount) {
+    items.push({ key: 'command', label: '命令', value: formatCount(summary.commandCount) })
+  }
+  if (summary.fileChangeCount) {
+    items.push({ key: 'file', label: '改动', value: formatCount(summary.fileChangeCount) })
+  }
+  if (summary.subAgentCount) {
+    items.push({ key: 'agent', label: '子代理', value: formatCount(summary.subAgentCount) })
+  }
+
+  return items
+}
+
+export function getTurnSummaryStatus(turn = {}) {
+  const summary = turn.summary || createTurnSummaryState()
+
+  if (summary.waitingAgentCount > 0) {
+    return `当前：等待 ${formatCount(summary.waitingAgentCount)} 个子代理返回结果`
+  }
+
+  if (summary.currentActivity) {
+    return `当前：${summary.currentActivity}`
+  }
+
+  if (summary.latestActivity) {
+    return `最近：${summary.latestActivity}`
+  }
+
+  if (turn.status === 'running') {
+    return '当前：正在等待 Codex 返回更多事件'
+  }
+
+  return ''
+}
+
+export function getTurnSummaryDetail(turn = {}) {
+  const summary = turn.summary || createTurnSummaryState()
+  return String(summary.latestDetail || '').trim()
+}
+
+export function hasTurnSummary(turn = {}) {
+  return Boolean(getTurnSummaryItems(turn).length || getTurnSummaryStatus(turn) || getTurnSummaryDetail(turn))
+}
+
+const CODEX_ISSUE_PATTERNS = [
+  {
+    type: 'billing',
+    title: '额度或账单异常',
+    summary: 'Codex 可能因为额度不足、欠费或账单限制而无法继续执行。',
+    patterns: [
+      /insufficient_quota/i,
+      /exceeded your current quota/i,
+      /\bquota\b/i,
+      /\bbilling\b/i,
+      /credit balance/i,
+      /payment required/i,
+      /余额不足/,
+      /欠费/,
+      /账单/,
+      /充值/,
+    ],
+  },
+  {
+    type: 'permission',
+    title: '权限不足',
+    summary: 'Codex 当前权限不够，无法访问所需文件、命令或资源。',
+    patterns: [
+      /permission denied/i,
+      /insufficient permissions?/i,
+      /forbidden/i,
+      /unauthorized/i,
+      /access denied/i,
+      /not allowed/i,
+      /权限不足/,
+      /没有权限/,
+      /无权/,
+      /拒绝访问/,
+    ],
+  },
+  {
+    type: 'rate_limit',
+    title: '请求过于频繁',
+    summary: 'Codex 可能触发了限流，请稍后再试。',
+    patterns: [
+      /rate limit/i,
+      /too many requests/i,
+      /\b429\b/,
+      /请求过于频繁/,
+      /限流/,
+    ],
+  },
+  {
+    type: 'context_limit',
+    title: '上下文过长',
+    summary: '这次发送的内容可能过长，超过了模型可处理的上下文限制。',
+    patterns: [
+      /context length/i,
+      /maximum context length/i,
+      /context_length_exceeded/i,
+      /token limit/i,
+      /prompt is too long/i,
+      /上下文过长/,
+      /超过.*token/i,
+      /超出.*上下文/,
+    ],
+  },
+  {
+    type: 'model_unavailable',
+    title: '模型或服务暂不可用',
+    summary: 'Codex 背后的模型或服务当前不可用，请稍后重试。',
+    patterns: [
+      /model .*not found/i,
+      /model .*unavailable/i,
+      /service unavailable/i,
+      /server error/i,
+      /overloaded/i,
+      /\b503\b/,
+      /模型不可用/,
+      /服务不可用/,
+    ],
+  },
+  {
+    type: 'network',
+    title: '网络连接异常',
+    summary: 'Codex 在请求过程中遇到了网络问题或连接超时。',
+    patterns: [
+      /timed out/i,
+      /\btimeout\b/i,
+      /stream disconnected/i,
+      /error sending request/i,
+      /connection reset/i,
+      /connection closed/i,
+      /socket hang up/i,
+      /network error/i,
+      /fetch failed/i,
+      /econnreset/i,
+      /econnrefused/i,
+      /enotfound/i,
+      /network is unreachable/i,
+      /temporary failure in name resolution/i,
+      /网络异常/,
+      /连接超时/,
+    ],
+  },
+  {
+    type: 'cli_missing',
+    title: 'Codex CLI 不可用',
+    summary: '当前环境没有正确安装或配置 Codex CLI。',
+    patterns: [
+      /找不到 Codex CLI/,
+      /codex --version/i,
+      /enoent/i,
+      /not recognized as an internal or external command/i,
+      /command not found/i,
+    ],
+  },
+]
+
+export function classifyCodexIssue(message = '') {
+  const text = String(message || '').trim()
+  if (!text) {
+    return null
+  }
+
+  const matched = CODEX_ISSUE_PATTERNS.find((issue) => issue.patterns.some((pattern) => pattern.test(text)))
+  if (!matched) {
+    return null
+  }
+
+  return {
+    type: matched.type,
+    title: matched.title,
+    summary: matched.summary,
+    rawMessage: text,
+  }
+}
+
+export function formatCodexIssueMessage(message = '') {
+  const text = String(message || '').trim()
+  if (!text) {
+    return ''
+  }
+
+  const issue = classifyCodexIssue(text)
+  if (!issue) {
+    return text
+  }
+
+  return `${issue.summary}\n\n原始错误：${issue.rawMessage}`
+}
+
+function extractTextFromUnknownError(input, depth = 0) {
+  if (!input || depth > 4) {
+    return ''
+  }
+
+  if (typeof input === 'string') {
+    return input.trim()
+  }
+
+  if (typeof input !== 'object') {
+    return ''
+  }
+
+  const priorityKeys = [
+    'message',
+    'detail',
+    'error',
+    'last_error',
+    'cause',
+    'reason',
+    'stderr',
+    'text',
+    'summary',
+  ]
+
+  for (const key of priorityKeys) {
+    if (!Object.prototype.hasOwnProperty.call(input, key)) {
+      continue
+    }
+
+    const value = extractTextFromUnknownError(input[key], depth + 1)
+    if (value) {
+      return value
+    }
+  }
+
+  for (const value of Object.values(input)) {
+    const text = extractTextFromUnknownError(value, depth + 1)
+    if (text) {
+      return text
+    }
+  }
+
+  return ''
+}
+
+export function extractCodexEventErrorText(event = {}) {
+  return extractTextFromUnknownError(event)
+}
+
 export function formatCodexEvent(event = {}) {
   const eventType = String(event.type || '').trim()
   const item = event.item || {}
@@ -85,7 +694,11 @@ export function formatCodexEvent(event = {}) {
 
   if (eventType === 'turn.completed') {
     const usage = event.usage
-      ? `输入 ${event.usage.input_tokens || 0} / 输出 ${event.usage.output_tokens || 0}`
+      ? [
+        `输入 ${formatCount(event.usage.input_tokens)}`,
+        event.usage.cached_input_tokens ? `缓存 ${formatCount(event.usage.cached_input_tokens)}` : '',
+        `输出 ${formatCount(event.usage.output_tokens)}`,
+      ].filter(Boolean).join(' / ')
       : ''
     return {
       title: 'Codex 执行完成',
@@ -93,7 +706,38 @@ export function formatCodexEvent(event = {}) {
     }
   }
 
+  if (eventType === 'error' || eventType === 'turn.failed') {
+    const rawMessage = extractCodexEventErrorText(event) || 'Codex 执行失败'
+    const retrying = eventType === 'error' ? parseCodexRetryMessage(rawMessage) : null
+    if (retrying) {
+      return {
+        kind: 'info',
+        title: `网络异常，正在重试 (${retrying.attempt}/${retrying.total})`,
+        detail: formatCodexIssueMessage(retrying.reason || retrying.rawMessage),
+      }
+    }
+
+    const issue = classifyCodexIssue(rawMessage)
+    return {
+      kind: 'error',
+      title: issue?.title || (eventType === 'turn.failed' ? '本轮运行失败' : 'Codex 返回错误'),
+      detail: formatCodexIssueMessage(rawMessage),
+    }
+  }
+
   if (eventType === 'item.started') {
+    if (item.type === 'web_search') {
+      return formatWebSearchEvent(item, 'started')
+    }
+
+    if (item.type === 'collab_tool_call') {
+      return formatCollabToolEvent(item, 'started')
+    }
+
+    if (item.type === 'file_change') {
+      return formatFileChangeEvent(item, 'started')
+    }
+
     if (item.type === 'command_execution') {
       return {
         kind: 'command',
@@ -131,6 +775,18 @@ export function formatCodexEvent(event = {}) {
         title: 'Codex 已返回结果',
         detail: '',
       }
+    }
+
+    if (item.type === 'web_search') {
+      return formatWebSearchEvent(item, 'completed')
+    }
+
+    if (item.type === 'collab_tool_call') {
+      return formatCollabToolEvent(item, 'completed')
+    }
+
+    if (item.type === 'file_change') {
+      return formatFileChangeEvent(item, 'completed')
     }
 
     if (item.type === 'command_execution') {
@@ -210,16 +866,38 @@ function createBaseTurn(run = {}, nextTurnId) {
     prompt: String(run.prompt || '').trim(),
     status: 'completed',
     startedAt: run.startedAt || run.createdAt || '',
+    finishedAt: run.finishedAt || '',
     events: [],
     responseMessage: '',
     errorMessage: '',
     lastEventSeq: 0,
+    summary: createTurnSummaryState(),
   }
 }
 
 function appendTurnEvent(turn, entry, nextLogId) {
   const normalized = normalizeLogEntry(entry, nextLogId)
   if (!normalized) {
+    return
+  }
+
+  turn.events.push(normalized)
+  if (turn.events.length > 120) {
+    turn.events.splice(0, turn.events.length - 120)
+  }
+}
+
+function upsertRetryingEvent(turn, entry, nextLogId) {
+  const normalized = normalizeLogEntry(entry, nextLogId)
+  if (!normalized) {
+    return
+  }
+
+  for (let index = turn.events.length - 1; index >= 0; index -= 1) {
+    if (!String(turn.events[index]?.title || '').startsWith('网络异常，正在重试')) {
+      continue
+    }
+    turn.events.splice(index, 1, normalized)
     return
   }
 
@@ -257,10 +935,11 @@ export function applyRunPayloadToTurn(turn, payload = {}, nextLogId, mergeSessio
   }
 
   if (payload.type === 'stderr') {
+    const issue = classifyCodexIssue(payload.text)
     appendTurnEvent(turn, {
       kind: 'error',
-      title: 'stderr',
-      detail: payload.text,
+      title: issue?.title || 'stderr',
+      detail: formatCodexIssueMessage(payload.text),
     }, nextLogId)
     return
   }
@@ -275,9 +954,22 @@ export function applyRunPayloadToTurn(turn, payload = {}, nextLogId, mergeSessio
   }
 
   if (payload.type === 'codex') {
-    appendTurnEvent(turn, formatCodexEvent(payload.event), nextLogId)
+    syncTurnSummaryFromCodexEvent(turn, payload.event)
+    const formattedEvent = formatCodexEvent(payload.event)
+    if (String(formattedEvent.title || '').startsWith('网络异常，正在重试')) {
+      upsertRetryingEvent(turn, formattedEvent, nextLogId)
+    } else {
+      appendTurnEvent(turn, formattedEvent, nextLogId)
+    }
     if (payload.event?.type === 'item.completed' && payload.event?.item?.type === 'agent_message' && payload.event?.item?.text) {
       turn.responseMessage = payload.event.item.text
+    }
+    const message = extractCodexEventErrorText(payload.event) || 'Codex 执行失败'
+    const retrying = payload.event?.type === 'error' ? parseCodexRetryMessage(message) : null
+    if (!retrying && (payload.event?.type === 'error' || payload.event?.type === 'turn.failed')) {
+      const message = extractCodexEventErrorText(payload.event) || 'Codex 执行失败'
+      turn.errorMessage = formatCodexIssueMessage(message)
+      turn.status = 'error'
     }
     return
   }
@@ -303,18 +995,50 @@ export function applyRunPayloadToTurn(turn, payload = {}, nextLogId, mergeSessio
   }
 
   if (payload.type === 'error') {
+    const issue = classifyCodexIssue(payload.message)
     appendTurnEvent(turn, {
       kind: 'error',
-      title: '执行失败',
-      detail: payload.message || 'Codex 执行失败',
+      title: issue?.title || '执行失败',
+      detail: formatCodexIssueMessage(payload.message || 'Codex 执行失败'),
     }, nextLogId)
   }
+}
+
+function shouldPreferEventDerivedError(runError = '', eventError = '') {
+  const persisted = String(runError || '').trim()
+  const derived = String(eventError || '').trim()
+
+  if (!derived) {
+    return false
+  }
+
+  if (!persisted) {
+    return true
+  }
+
+  if (/no last agent message|wrote empty content/i.test(persisted)) {
+    return true
+  }
+
+  if (/^Codex 执行失败[。.]?$/i.test(persisted)) {
+    return true
+  }
+
+  const persistedIssue = classifyCodexIssue(persisted)
+  const derivedIssue = classifyCodexIssue(derived)
+
+  return !persistedIssue && Boolean(derivedIssue)
 }
 
 export function syncTurnStateFromRun(turn, run = {}) {
   turn.status = run.status || 'completed'
   turn.responseMessage = String(run.responseMessage || turn.responseMessage || '')
-  turn.errorMessage = String(run.errorMessage || '')
+  turn.finishedAt = String(run.finishedAt || turn.finishedAt || '')
+  const persistedError = formatCodexIssueMessage(String(run.errorMessage || ''))
+  const eventDerivedError = String(turn.errorMessage || '')
+  turn.errorMessage = shouldPreferEventDerivedError(run.errorMessage, eventDerivedError)
+    ? eventDerivedError
+    : persistedError
 
   if (turn.status === 'completed' && !turn.responseMessage) {
     turn.responseMessage = '本轮 Codex 执行已完成，没有返回额外文本。'
@@ -334,12 +1058,15 @@ export function applyRunEventToTurn(turn, event = {}, nextLogId, mergeSession = 
 
   if (payload.type === 'completed') {
     turn.status = 'completed'
+    turn.finishedAt = new Date().toISOString()
   } else if (payload.type === 'stopped') {
     turn.status = 'stopped'
     turn.errorMessage = ''
+    turn.finishedAt = new Date().toISOString()
   } else if (payload.type === 'error') {
     turn.status = 'error'
-    turn.errorMessage = String(payload.message || turn.errorMessage || 'Codex 执行失败')
+    turn.errorMessage = formatCodexIssueMessage(String(payload.message || turn.errorMessage || 'Codex 执行失败'))
+    turn.finishedAt = new Date().toISOString()
   }
 
   if (nextSeq) {
@@ -408,7 +1135,7 @@ export function useCodexSessionPanel(props, emit) {
     }
     return ''
   })
-  const workingLabel = computed(() => `运行中 (${sendingElapsedSeconds.value}s)`)
+  const workingLabel = computed(() => `运行中 (${formatElapsedDuration(sendingElapsedSeconds.value)})`)
 
   function clearSendingTimer() {
     if (sendingTimer) {
@@ -530,6 +1257,14 @@ export function useCodexSessionPanel(props, emit) {
 
   function scrollToBottom() {
     scheduleScrollToBottom({ force: true })
+  }
+
+  function getDisplayTurnSummaryItems(turn) {
+    return getTurnSummaryItems(turn, {
+      currentRunningRunId: currentRunningRunId.value,
+      runningElapsedSeconds: sendingElapsedSeconds.value,
+      nowMs: Date.now(),
+    })
   }
 
   function openManager() {
@@ -1105,11 +1840,15 @@ export function useCodexSessionPanel(props, emit) {
     formatTurnTime,
     getProcessCardClass,
     getProcessStatus,
+    getTurnSummaryDetail,
+    getDisplayTurnSummaryItems,
+    getTurnSummaryStatus,
     handleCreateSession,
     handleDeleteSession,
     handleSelectSession,
     handleSend,
     handleUpdateSession,
+    hasTurnSummary,
     helperText,
     loading,
     managerBusy,

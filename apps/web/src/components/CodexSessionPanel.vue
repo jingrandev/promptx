@@ -1,4 +1,5 @@
 <script setup>
+import { ref, watch } from 'vue'
 import {
   ArrowDown,
   Bot,
@@ -50,6 +51,9 @@ const {
   formatTurnTime,
   getProcessCardClass,
   getProcessStatus,
+  getDisplayTurnSummaryItems,
+  getTurnSummaryDetail,
+  getTurnSummaryStatus,
   handleCreateSession,
   handleDeleteSession,
   handleSelectSession,
@@ -63,6 +67,7 @@ const {
   refreshSessionsForSelection,
   selectedSessionId,
   sending,
+  hasTurnSummary,
   hasNewerMessages,
   sessionError,
   shouldShowResponse,
@@ -77,6 +82,51 @@ const {
   loadSessions,
   scrollToBottom,
 } = useCodexSessionPanel(props, emit)
+
+const collapsedTurnMap = ref({})
+
+function shouldCollapseTurn(turn) {
+  return turn?.status !== 'running' && (turn?.events?.length || 0) > 3
+}
+
+function syncCollapsedTurns(nextTurns = []) {
+  const nextMap = {}
+
+  ;(nextTurns || []).forEach((turn) => {
+    const existing = collapsedTurnMap.value[turn.id]
+    if (typeof existing === 'boolean') {
+      nextMap[turn.id] = turn.status === 'running' ? false : existing
+      return
+    }
+
+    nextMap[turn.id] = shouldCollapseTurn(turn)
+  })
+
+  collapsedTurnMap.value = nextMap
+}
+
+function isTurnEventsCollapsed(turn) {
+  return Boolean(collapsedTurnMap.value[turn?.id])
+}
+
+function toggleTurnEvents(turn) {
+  if (!turn?.id) {
+    return
+  }
+
+  collapsedTurnMap.value = {
+    ...collapsedTurnMap.value,
+    [turn.id]: !isTurnEventsCollapsed(turn),
+  }
+}
+
+watch(
+  turns,
+  (nextTurns) => {
+    syncCollapsedTurns(nextTurns)
+  },
+  { immediate: true, deep: true }
+)
 
 defineExpose({
   send: handleSend,
@@ -178,9 +228,19 @@ defineExpose({
             <div class="min-w-0 w-full max-w-[94%] rounded-sm border border-dashed px-4 py-3" :class="getProcessCardClass(turn)">
               <div class="flex items-center justify-between gap-3 text-xs">
                 <span>执行过程</span>
-                <span>{{ getProcessStatus(turn) }}</span>
+                <div class="flex items-center gap-2">
+                  <button
+                    v-if="turn.events.length"
+                    type="button"
+                    class="rounded-sm border border-dashed border-current/30 px-2 py-1 text-[11px] transition hover:bg-white/20 dark:hover:bg-black/10"
+                    @click="toggleTurnEvents(turn)"
+                  >
+                    {{ isTurnEventsCollapsed(turn) ? `展开日志 (${turn.events.length})` : '收起日志' }}
+                  </button>
+                  <span>{{ getProcessStatus(turn) }}</span>
+                </div>
               </div>
-              <div v-if="turn.events.length" class="mt-3 space-y-3">
+              <div v-if="turn.events.length && !isTurnEventsCollapsed(turn)" class="mt-3 space-y-3">
                 <div
                   v-for="item in turn.events"
                   :key="item.id"
@@ -196,7 +256,34 @@ defineExpose({
                   <pre v-if="item.detail" class="mt-1 whitespace-pre-wrap break-all font-mono text-[11px] leading-5">{{ item.detail }}</pre>
                 </div>
               </div>
+              <div
+                v-else-if="turn.events.length"
+                class="mt-3 rounded-sm border border-dashed border-current/20 bg-white/20 px-3 py-2 text-xs text-current/75 dark:bg-black/10"
+              >
+                已折叠 {{ turn.events.length }} 条过程日志
+              </div>
               <p v-else class="mt-3 text-xs text-current/80">正在等待 Codex 返回事件...</p>
+              <div
+                v-if="hasTurnSummary(turn)"
+                class="mt-3 rounded-sm border border-dashed border-current/20 bg-white/30 px-3 py-2 text-xs text-current/85 dark:bg-black/10"
+              >
+                <div v-if="getTurnSummaryStatus(turn)" class="leading-5">
+                  {{ getTurnSummaryStatus(turn) }}
+                </div>
+                <div v-if="getTurnSummaryDetail(turn)" class="mt-1 break-all leading-5 opacity-75">
+                  {{ getTurnSummaryDetail(turn) }}
+                </div>
+                <div v-if="getDisplayTurnSummaryItems(turn).length" class="mt-2 flex flex-wrap gap-2">
+                  <span
+                    v-for="item in getDisplayTurnSummaryItems(turn)"
+                    :key="item.key"
+                    class="inline-flex items-center gap-1 rounded-sm border border-dashed border-current/30 px-2 py-1"
+                  >
+                    <span class="opacity-75">{{ item.label }}</span>
+                    <span class="font-medium">{{ item.value }}</span>
+                  </span>
+                </div>
+              </div>
             </div>
           </div>
 

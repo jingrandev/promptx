@@ -149,8 +149,19 @@ async function copyCodexPrompt() {
 }
 
 async function sendToCodex() {
-  updateLastPromptPreview(currentTaskSlug.value, buildPromptForTask(currentTaskSlug.value))
-  await getCurrentPanelRef(currentTaskSlug.value)?.send?.()
+  const taskSlug = currentTaskSlug.value
+  if (!taskSlug) {
+    return
+  }
+
+  updateLastPromptPreview(taskSlug, buildPromptForTask(taskSlug))
+  const didSend = await getCurrentPanelRef(taskSlug)?.send?.()
+  if (!didSend || taskSlug !== currentTaskSlug.value) {
+    return
+  }
+
+  clearCurrentTaskContent({ silent: true })
+  await saveTask({ auto: false, silent: true })
 }
 
 function stopCodex() {
@@ -342,7 +353,6 @@ onBeforeUnmount(() => {
               :active="Boolean(currentRenderedTask?.slug)"
               :task-slug="currentRenderedTask.slug"
               :build-prompt="() => prepareCodexPromptForTask(currentRenderedTask.slug)"
-              :after-send="() => clearCurrentTaskContent({ silent: true })"
               :selected-session-id="currentRenderedTask.codexSessionId || ''"
               @sending-change="handleTaskSendingChange(currentRenderedTask.slug, $event)"
               @selected-session-change="handleTaskSessionChange(currentRenderedTask.slug, $event)"

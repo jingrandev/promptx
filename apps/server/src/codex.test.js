@@ -65,6 +65,22 @@ process.stdin.on('end', () => {
     return
   }
 
+  if (prompt.includes('disconnect-case')) {
+    process.stdout.write(JSON.stringify({
+      type: 'error',
+      message: 'Reconnecting... 1/5 (stream disconnected before completion: error sending request for url (https://api.codexzh.com/v1/responses))',
+    }) + '\\n')
+    process.stdout.write(JSON.stringify({
+      type: 'turn.failed',
+      error: {
+        message: 'stream disconnected before completion: error sending request for url (https://api.codexzh.com/v1/responses)',
+      },
+    }) + '\\n')
+    process.stderr.write('Warning: no last agent message; wrote empty content to tmp-file\\n')
+    process.exit(1)
+    return
+  }
+
   if (prompt.includes('mojibake-case')) {
     const garbled = '鑾峰彇娴嬭瘯鏁版嵁'
     if (outputFile) {
@@ -183,6 +199,10 @@ function writeThreadsDb(tempHome, rows = []) {
   }
 }
 
+function getSessionCwd() {
+  return process.cwd()
+}
+
 test('listKnownCodexWorkspaces dedupes cwd values', async () => {
   const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-codex-home-'))
   writeThreadsDb(tempHome, [
@@ -217,7 +237,7 @@ test('streamPromptToCodexSession handles a tail event without newline', async ()
       const events = []
       const seenThreadIds = []
       const stream = streamPromptToCodexSession(
-        { id: 'session-xyz', cwd: 'D:\\code\\promptx' },
+        { id: 'session-xyz', cwd: getSessionCwd() },
         'stream-tail-case',
         {
           onEvent(event) {
@@ -262,7 +282,7 @@ test('streamPromptToCodexSession emits starting status for new sessions and resu
 
       const startingEvents = []
       const startingStream = streamPromptToCodexSession(
-        { id: 'session-new', cwd: 'D:\\code\\promptx', codexThreadId: '' },
+        { id: 'session-new', cwd: getSessionCwd(), codexThreadId: '' },
         'hello start',
         {
           onEvent(event) {
@@ -274,7 +294,7 @@ test('streamPromptToCodexSession emits starting status for new sessions and resu
 
       const resumingEvents = []
       const resumingStream = streamPromptToCodexSession(
-        { id: 'session-old', cwd: 'D:\\code\\promptx', codexThreadId: 'thread-existing-1' },
+        { id: 'session-old', cwd: getSessionCwd(), codexThreadId: 'thread-existing-1' },
         'hello resume',
         {
           onEvent(event) {
@@ -317,11 +337,35 @@ test('streamPromptToCodexSession surfaces stderr failures', async () => {
     async () => {
       const { streamPromptToCodexSession } = await importFreshCodexModule()
       const stream = streamPromptToCodexSession(
-        { id: 'session-xyz', cwd: 'D:\\code\\promptx' },
+        { id: 'session-xyz', cwd: getSessionCwd() },
         'fail-case'
       )
 
       await assert.rejects(() => stream.result, /mocked codex failure/)
+    }
+  )
+})
+
+test('streamPromptToCodexSession prefers structured codex errors over trailing stderr warnings', async () => {
+  const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-codex-disconnect-'))
+  const fakeBin = createFakeCodexBinary(tempHome)
+
+  await withEnv(
+    {
+      CODEX_HOME: tempHome,
+      CODEX_BIN: fakeBin,
+    },
+    async () => {
+      const { streamPromptToCodexSession } = await importFreshCodexModule()
+      const stream = streamPromptToCodexSession(
+        { id: 'session-xyz', cwd: getSessionCwd() },
+        'disconnect-case'
+      )
+
+      await assert.rejects(
+        () => stream.result,
+        /stream disconnected before completion: error sending request/
+      )
     }
   )
 })
@@ -339,7 +383,7 @@ test('streamPromptToCodexSession repairs garbled command output', async () => {
       const { streamPromptToCodexSession } = await importFreshCodexModule()
       const events = []
       const stream = streamPromptToCodexSession(
-        { id: 'session-xyz', cwd: 'D:\\code\\promptx' },
+        { id: 'session-xyz', cwd: getSessionCwd() },
         'mojibake-case',
         {
           onEvent(event) {

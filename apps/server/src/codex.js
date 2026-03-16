@@ -199,6 +199,71 @@ function flushBufferedText(buffer = '') {
   return tail ? [...lines, tail] : lines
 }
 
+function extractTextFromUnknownError(input, depth = 0) {
+  if (!input || depth > 4) {
+    return ''
+  }
+
+  if (typeof input === 'string') {
+    return input.trim()
+  }
+
+  if (typeof input !== 'object') {
+    return ''
+  }
+
+  const priorityKeys = [
+    'message',
+    'detail',
+    'error',
+    'last_error',
+    'cause',
+    'reason',
+    'stderr',
+    'text',
+    'summary',
+  ]
+
+  for (const key of priorityKeys) {
+    if (!Object.prototype.hasOwnProperty.call(input, key)) {
+      continue
+    }
+
+    const text = extractTextFromUnknownError(input[key], depth + 1)
+    if (text) {
+      return text
+    }
+  }
+
+  for (const value of Object.values(input)) {
+    const text = extractTextFromUnknownError(value, depth + 1)
+    if (text) {
+      return text
+    }
+  }
+
+  return ''
+}
+
+function extractLatestCodexEventError(stdout = '') {
+  const lines = flushBufferedText(stdout)
+  let latestError = ''
+
+  for (const line of lines) {
+    const event = parseJsonLine(line)
+    if (!event || (event.type !== 'error' && event.type !== 'turn.failed')) {
+      continue
+    }
+
+    const text = extractTextFromUnknownError(sanitizeCodexPayload(event))
+    if (text) {
+      latestError = text
+    }
+  }
+
+  return latestError
+}
+
 function normalizeManagedSession(sessionInput) {
   if (!sessionInput || typeof sessionInput !== 'object') {
     return null
@@ -229,6 +294,11 @@ function createExecArgs(session) {
 }
 
 function extractCodexError(stderr = '', stdout = '') {
+  const eventError = extractLatestCodexEventError(stdout)
+  if (eventError) {
+    return eventError
+  }
+
   const stderrText = trimOutput(stderr)
   if (stderrText) {
     const lines = stderrText.split('\n').map((line) => line.trim()).filter(Boolean)
