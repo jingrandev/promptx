@@ -129,6 +129,45 @@ function ensureSchema() {
 
     CREATE UNIQUE INDEX IF NOT EXISTS idx_codex_run_events_run_seq ON codex_run_events(run_id, seq);
     CREATE INDEX IF NOT EXISTS idx_codex_run_events_run_id_id ON codex_run_events(run_id, id ASC);
+
+    CREATE TABLE IF NOT EXISTS task_git_baselines (
+      task_slug TEXT PRIMARY KEY,
+      repo_root TEXT NOT NULL,
+      head_oid TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (task_slug) REFERENCES tasks(slug) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS task_git_baseline_entries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      task_slug TEXT NOT NULL,
+      path TEXT NOT NULL,
+      state_json TEXT NOT NULL DEFAULT '{}',
+      FOREIGN KEY (task_slug) REFERENCES task_git_baselines(task_slug) ON DELETE CASCADE
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_task_git_baseline_entries_scope_path
+      ON task_git_baseline_entries(task_slug, path);
+
+    CREATE TABLE IF NOT EXISTS run_git_baselines (
+      run_id TEXT PRIMARY KEY,
+      repo_root TEXT NOT NULL,
+      head_oid TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (run_id) REFERENCES codex_runs(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS run_git_baseline_entries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      run_id TEXT NOT NULL,
+      path TEXT NOT NULL,
+      state_json TEXT NOT NULL DEFAULT '{}',
+      FOREIGN KEY (run_id) REFERENCES run_git_baselines(run_id) ON DELETE CASCADE
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_run_git_baseline_entries_scope_path
+      ON run_git_baseline_entries(run_id, path);
   `)
 
   try {

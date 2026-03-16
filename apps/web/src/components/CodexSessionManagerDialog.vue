@@ -27,6 +27,14 @@ const props = defineProps({
     type: String,
     default: '',
   },
+  selectionLocked: {
+    type: Boolean,
+    default: false,
+  },
+  selectionLockReason: {
+    type: String,
+    default: '',
+  },
   loading: {
     type: Boolean,
     default: false,
@@ -120,6 +128,9 @@ const duplicateCwdMessage = computed(() => {
 
   return `该工作目录已被${labels}${suffix}使用，建议优先复用，避免把同一目录拆成多个会话。`
 })
+const selectionLockedMessage = computed(() =>
+  props.selectionLockReason || '该任务已有会话历史，不能再切换会话；如需使用新会话，请新建任务。'
+)
 
 function getDateOrderValue(value = '') {
   const timestamp = Date.parse(String(value || ''))
@@ -258,10 +269,6 @@ function handleKeydown(event) {
 
 function selectSession(sessionId) {
   emit('select-session', sessionId)
-}
-
-function useWorkspace(pathValue) {
-  form.cwd = String(pathValue || '')
 }
 
 async function handleRefresh() {
@@ -444,9 +451,6 @@ onBeforeUnmount(() => {
               <Bot class="h-4 w-4" />
               <span>PromptX 会话管理</span>
             </div>
-            <p class="mt-1 text-sm leading-6 text-stone-600 dark:text-stone-400">
-              在这里统一新建、编辑、删除会话，并切换当前发送目标。
-            </p>
           </div>
 
           <div class="flex items-center gap-2">
@@ -485,21 +489,21 @@ onBeforeUnmount(() => {
               <article
                 v-for="session in sortedSessions"
                 :key="session.id"
-                class="rounded-sm border border-dashed p-3 transition"
+                class="relative cursor-pointer rounded-sm border p-3 transition"
                 :class="mode === 'edit' && editingSessionId === session.id
-                  ? 'border-stone-500 bg-white shadow-sm dark:border-stone-500 dark:bg-stone-900'
+                  ? 'border-emerald-500 bg-white shadow-sm dark:border-emerald-400 dark:bg-stone-900'
                   : isSessionRunning(session.id)
-                    ? 'border-amber-300 bg-amber-50/70 dark:border-amber-800 dark:bg-amber-950/20'
+                    ? 'border-amber-300 bg-amber-50/70 hover:border-amber-400 dark:border-amber-800 dark:bg-amber-950/20 dark:hover:border-amber-700'
                     : isCurrentSession(session.id)
-                      ? 'border-sky-300 bg-sky-50/70 dark:border-sky-800 dark:bg-sky-950/20'
-                      : 'border-stone-300 bg-white/70 hover:border-stone-500 dark:border-stone-700 dark:bg-stone-900/70'"
+                      ? 'border-sky-300 bg-sky-50/70 hover:border-sky-400 dark:border-sky-800 dark:bg-sky-950/20 dark:hover:border-sky-700'
+                      : 'border-stone-300 bg-white/70 hover:border-stone-500 hover:bg-white dark:border-stone-700 dark:bg-stone-900/70 dark:hover:border-stone-500 dark:hover:bg-stone-900'"
+                @click="!busy && openEditMode(session.id)"
               >
-                <button
-                  type="button"
-                  class="w-full text-left"
-                  :disabled="busy"
-                  @click="openEditMode(session.id)"
-                >
+                <span
+                  v-if="mode === 'edit' && editingSessionId === session.id"
+                  class="absolute inset-y-3 left-0 w-1 rounded-full bg-emerald-500 dark:bg-emerald-400"
+                />
+                <div class="w-full text-left">
                   <div class="flex flex-wrap items-center gap-2 text-sm font-medium text-stone-900 dark:text-stone-100">
                     <span class="truncate">{{ session.title || '未命名会话' }}</span>
                     <span
@@ -525,18 +529,8 @@ onBeforeUnmount(() => {
                   <div class="mt-2 text-[11px] text-stone-500 dark:text-stone-400">
                     最近更新：{{ formatUpdatedAt(session.updatedAt) }}
                   </div>
-                </button>
-
-                <div class="mt-3 flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    class="tool-button inline-flex items-center gap-2 px-2.5 py-1.5 text-[11px]"
-                    :disabled="busy || isCurrentSession(session.id)"
-                    @click="selectSession(session.id)"
-                  >
-                    {{ isCurrentSession(session.id) ? '当前会话' : '设为当前' }}
-                  </button>
                 </div>
+
               </article>
             </div>
           </aside>
@@ -548,22 +542,8 @@ onBeforeUnmount(() => {
                   <PencilLine class="h-4 w-4" />
                   <span>{{ mode === 'create' ? '新建会话' : '编辑会话' }}</span>
                 </div>
-                <p class="mt-1 text-sm leading-6 text-stone-600 dark:text-stone-400">
-                  {{ mode === 'create'
-                    ? '为一个固定工作目录创建独立的 PromptX 会话。'
-                    : '已启动会话只能修改标题；如需切换工作目录，请新建一个会话。' }}
-                </p>
               </div>
 
-              <button
-                v-if="mode === 'edit' && activeSession && !isCurrentSession(activeSession.id)"
-                type="button"
-                class="tool-button inline-flex items-center gap-2 px-3 py-2 text-xs"
-                :disabled="busy"
-                @click="selectSession(activeSession.id)"
-              >
-                <span>设为当前会话</span>
-              </button>
             </div>
 
             <div class="mt-5 grid gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)]">
@@ -599,42 +579,6 @@ onBeforeUnmount(() => {
                   {{ duplicateCwdMessage }}
                 </p>
               </label>
-            </div>
-
-            <div
-              v-if="mode === 'edit' && activeSession"
-              class="mt-4 rounded-sm border border-dashed border-stone-300 bg-stone-50 px-3 py-3 text-xs text-stone-600 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-300"
-            >
-              <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
-                <span class="rounded-sm border border-dashed px-1.5 py-0.5 text-[10px]" :class="getThreadStatusClass(activeSession)">
-                  {{ getThreadStatusLabel(activeSession) }}
-                </span>
-                <span class="inline-flex items-center gap-1 rounded-sm border border-dashed px-1.5 py-0.5 text-[10px]" :class="getRuntimeStatusClass(activeSession.id)">
-                  <span v-if="isSessionRunning(activeSession.id)" class="h-1.5 w-1.5 rounded-full bg-current animate-pulse" />
-                  {{ getRuntimeStatusLabel(activeSession.id) }}
-                </span>
-                <span v-if="isCurrentSession(activeSession.id)" class="rounded-sm border border-dashed border-sky-300 bg-sky-50 px-1.5 py-0.5 text-[10px] text-sky-700 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-300">
-                  当前会话
-                </span>
-                <span>最近更新时间：{{ formatUpdatedAt(activeSession.updatedAt) }}</span>
-              </div>
-              <div class="mt-1 break-all font-mono text-[11px] text-stone-500 dark:text-stone-400">{{ activeSession.cwd }}</div>
-              <p v-if="activeSession.started" class="mt-2 text-[11px] leading-5 text-amber-700 dark:text-amber-300">
-                已启动会话不能直接修改工作目录，避免把现有线程和新目录混在一起。
-              </p>
-            </div>
-
-            <div v-if="workspaceSuggestions.length" class="mt-4 flex flex-wrap gap-2">
-              <button
-                v-for="item in workspaceSuggestions"
-                :key="item"
-                type="button"
-                class="rounded-sm border border-dashed border-stone-300 px-2 py-1 text-[11px] text-stone-600 transition hover:border-stone-500 hover:text-stone-900 disabled:cursor-not-allowed disabled:opacity-60 dark:border-stone-700 dark:text-stone-300 dark:hover:border-stone-500 dark:hover:text-stone-100"
-                :disabled="busy || (mode === 'edit' && !canEditCwd)"
-                @click="useWorkspace(item)"
-              >
-                {{ item }}
-              </button>
             </div>
 
             <p v-if="error" class="mt-4 inline-flex items-center gap-2 text-sm text-red-700 dark:text-red-300">

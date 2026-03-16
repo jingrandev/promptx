@@ -149,6 +149,7 @@ function toTaskSummary(taskRecord) {
     autoTitle: String(taskRecord.autoTitle || ''),
     lastPromptPreview: String(taskRecord.lastPromptPreview || ''),
     codexSessionId: String(taskRecord.codexSessionId || ''),
+    codexRunCount: Math.max(0, Number(taskRecord.codexRunCount) || 0),
     running: Boolean(taskRecord.running),
     preview: String(taskRecord.lastPromptPreview || ''),
     updatedAt: taskRecord.updatedAt || taskRecord.createdAt || new Date().toISOString(),
@@ -271,6 +272,10 @@ export function useWorkbenchTasks(options = {}) {
       autoTitle,
       preview,
       codexSessionId,
+      sessionSelectionLocked: Boolean(codexSessionId && Number(task.codexRunCount || 0) > 0),
+      sessionSelectionLockReason: codexSessionId && Number(task.codexRunCount || 0) > 0
+        ? '该任务已有会话历史，不能再切换会话；如需使用新会话，请新建任务。'
+        : '',
       displayTitle: resolveTaskDisplayTitle({ title, autoTitle, preview }, blocks),
       sending: Boolean(task.running || sendingTaskMap.value[task.slug]),
     }
@@ -355,7 +360,13 @@ export function useWorkbenchTasks(options = {}) {
     }
 
     const normalizedSessionId = String(sessionId || '').trim()
-    const previousSessionId = selectedSessionMap.value[targetSlug] || ''
+    const currentSummary = getTaskSummary(targetSlug)
+    const previousSessionId = selectedSessionMap.value[targetSlug] || currentSummary?.codexSessionId || ''
+    const sessionSelectionLocked = Boolean(previousSessionId && Number(currentSummary?.codexRunCount || 0) > 0)
+    if (sessionSelectionLocked && normalizedSessionId !== previousSessionId) {
+      error.value = '该任务已有会话历史，不能再切换会话；如需使用新会话，请新建任务。'
+      return
+    }
 
     setTaskSelectedSessionId(targetSlug, normalizedSessionId)
 
@@ -366,8 +377,6 @@ export function useWorkbenchTasks(options = {}) {
         codexSessionId: normalizedSessionId,
       })
     }
-
-    const currentSummary = getTaskSummary(targetSlug)
     if (currentSummary) {
       upsertTaskSummary({
         ...currentSummary,
