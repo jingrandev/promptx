@@ -256,8 +256,10 @@ onBeforeUnmount(() => {
               v-for="task in renderedTasks"
               :key="task.slug"
               class="group relative rounded-sm border px-3 py-3 transition cursor-default"
-              :class="task.slug === currentTaskSlug
-                ? 'border-stone-500 bg-stone-100 text-stone-900 dark:border-[#73665c] dark:bg-[#332c27] dark:text-stone-100'
+              :class="task.slug === currentTaskSlug && task.sending
+                ? 'border-amber-400 bg-amber-100/80 text-stone-950 dark:border-[#8a6d48] dark:bg-[#3b3127] dark:text-stone-50'
+                : task.slug === currentTaskSlug
+                  ? 'border-stone-500 bg-stone-100 text-stone-900 dark:border-[#73665c] dark:bg-[#332c27] dark:text-stone-100'
                 : task.sending
                   ? 'border-amber-300 bg-amber-50/70 hover:bg-amber-50 dark:border-[#6f5a3f] dark:bg-[#312820] dark:hover:bg-[#392f26]'
                   : 'border-stone-300 bg-stone-50 hover:bg-stone-100 dark:border-[#453c36] dark:bg-[#26211d] dark:hover:bg-[#2f2924]'"
@@ -265,7 +267,10 @@ onBeforeUnmount(() => {
             >
               <span
                 v-if="task.slug === currentTaskSlug"
-                class="absolute inset-y-2 left-0 w-1 rounded-full bg-emerald-500 dark:bg-emerald-400"
+                class="absolute inset-y-2 left-0 w-1 rounded-full"
+                :class="task.sending
+                  ? 'bg-amber-500 dark:bg-[#f0c879]'
+                  : 'bg-emerald-500 dark:bg-emerald-400'"
               />
               <div class="flex items-start justify-between gap-3">
                 <div class="min-w-0 h-5 flex-1 overflow-hidden">
@@ -294,7 +299,9 @@ onBeforeUnmount(() => {
                   <span
                     v-if="task.sending"
                     class="inline-flex items-center gap-1.5 rounded-sm border border-dashed px-1.5 py-0.5"
-                    :class="'border-amber-300 text-amber-700 dark:border-[#7f6949] dark:bg-[#392f20] dark:text-[#e5ce9a]'"
+                    :class="task.slug === currentTaskSlug
+                      ? 'border-amber-400 bg-amber-50/95 text-amber-800 dark:border-[#d0a765] dark:bg-[#4a3a29] dark:text-[#f4ddb0]'
+                      : 'border-amber-300 text-amber-700 dark:border-[#7f6949] dark:bg-[#392f20] dark:text-[#e5ce9a]'"
                   >
                     <span class="task-loading-dots" aria-hidden="true">
                       <span class="task-loading-dots__dot"></span>
