@@ -1,6 +1,5 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { pipeline } from 'node:stream/promises'
 import Fastify from 'fastify'
 import cors from '@fastify/cors'
@@ -57,19 +56,15 @@ import {
   searchDirectoryPickerEntries,
   searchWorkspaceEntries,
 } from './workspaceFiles.js'
+import { ensurePromptxStorageReady, serverRootDir } from './appPaths.js'
 import { createSseHub } from './sseHub.js'
 
 const app = Fastify({ logger: true })
 const port = Number(process.env.PORT || 3000)
 const host = process.env.HOST || '127.0.0.1'
-const uploadsDir = path.resolve(process.cwd(), 'uploads')
-const tmpDir = path.resolve(process.cwd(), 'tmp')
-const serverRootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+const { tmpDir, uploadsDir } = ensurePromptxStorageReady()
 const workspaceRootDir = path.resolve(serverRootDir, '..', '..')
 const workspaceParentDir = path.dirname(workspaceRootDir)
-
-fs.mkdirSync(uploadsDir, { recursive: true })
-fs.mkdirSync(tmpDir, { recursive: true })
 
 let lastExpiredPurgeAt = 0
 const sseHub = createSseHub()

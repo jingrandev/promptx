@@ -1,13 +1,10 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 import Database from 'better-sqlite3'
+import { ensurePromptxStorageReady } from './appPaths.js'
 
 const SCHEMA_VERSION = 1
-const serverRootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const dataDir = process.env.PROMPTX_DATA_DIR
-  ? path.resolve(process.env.PROMPTX_DATA_DIR)
-  : path.join(serverRootDir, 'data')
+const { dataDir } = ensurePromptxStorageReady()
 const dbPath = path.join(dataDir, 'promptx.sqlite')
 
 fs.mkdirSync(dataDir, { recursive: true })
