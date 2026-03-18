@@ -1,24 +1,13 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
-import {
-  ArrowLeft,
-  Blocks,
-  CircleAlert,
-  Copy,
-  PencilLine,
-  Plus,
-  SendHorizontal,
-  Settings2,
-  Square,
-  Trash2,
-  Upload,
-  WandSparkles,
-} from 'lucide-vue-next'
 import BlockEditor from '../components/BlockEditor.vue'
 import TaskDiffReviewDialog from '../components/TaskDiffReviewDialog.vue'
 import CodexSessionPanel from '../components/CodexSessionPanel.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
+import WorkbenchEditorActions from '../components/WorkbenchEditorActions.vue'
+import WorkbenchMobileDetailHeader from '../components/WorkbenchMobileDetailHeader.vue'
 import WorkbenchSettingsDialog from '../components/WorkbenchSettingsDialog.vue'
+import WorkbenchTaskListPanel from '../components/WorkbenchTaskListPanel.vue'
 import TopToast from '../components/TopToast.vue'
 import { usePageTitle } from '../composables/usePageTitle.js'
 import { useToast } from '../composables/useToast.js'
@@ -109,32 +98,6 @@ function resolvePreferredMobileDetailTab(task) {
 }
 
 usePageTitle(pageTitle)
-
-function getTaskCardClass(task) {
-  if (task.slug === currentTaskSlug.value) {
-    return 'border-[var(--theme-accent)] bg-[var(--theme-accentSoft)] text-[var(--theme-textPrimary)] shadow-md shadow-[color-mix(in_srgb,var(--theme-accent)_18%,transparent)]'
-  }
-
-  if (task.sending) {
-    return 'border-[var(--theme-warning)] bg-[var(--theme-appPanelMuted)] hover:bg-[var(--theme-appPanelHover)]'
-  }
-
-  return 'border-[var(--theme-borderDefault)] bg-[var(--theme-appPanelMuted)] hover:bg-[var(--theme-appPanelHover)]'
-}
-
-function getTaskRunningBadgeClass(task) {
-  if (task.slug === currentTaskSlug.value) {
-    return 'border-[var(--theme-warning)] bg-[var(--theme-warningSoft)] text-[var(--theme-warningText)]'
-  }
-
-  return 'border-[var(--theme-warning)] bg-[var(--theme-warningSoft)] text-[var(--theme-warningText)]'
-}
-
-function getTaskWorkspaceBadgeClass(task) {
-  return task.slug === currentTaskSlug.value
-    ? 'border-[var(--theme-borderStrong)] bg-[var(--theme-appPanelStrong)] text-[var(--theme-textSecondary)]'
-    : 'border-[var(--theme-borderDefault)] bg-[var(--theme-appPanelStrong)] text-[var(--theme-textMuted)]'
-}
 
 function openTaskDiff(scope = 'workspace', runId = '') {
   preferredDiffScope.value = scope === 'run' ? 'run' : scope === 'task' ? 'task' : 'workspace'
@@ -465,124 +428,28 @@ onBeforeUnmount(() => {
     />
 
     <div v-if="!isMobileLayout" class="grid min-h-0 flex-1 gap-4 lg:grid-cols-[260px_minmax(0,1fr)] lg:grid-rows-1">
-      <aside class="panel flex min-h-0 flex-col overflow-hidden">
-        <div class="theme-divider border-b px-4 py-4">
-          <div class="flex items-center justify-between gap-3">
-            <div class="flex min-h-8 items-center">
-              <div class="theme-heading inline-flex items-center gap-2 text-sm font-medium">
-                <Blocks class="h-4 w-4" />
-                <span>PromptX 工作台</span>
-              </div>
-            </div>
-            <button
-              type="button"
-              class="tool-button inline-flex items-center gap-2 px-3 py-2 text-xs"
-              @click="openSettingsDialog"
-            >
-              <Settings2 class="h-4 w-4" />
-              <span class="hidden sm:inline">设置</span>
-            </button>
-          </div>
-          <button
-            type="button"
-            class="tool-button tool-button-primary mt-4 inline-flex w-full items-center justify-center gap-2 px-3 py-2 text-sm"
-            :disabled="creatingTask || loadingTask || uploading"
-            @click="handleCreateTask"
-          >
-            <Plus class="h-4 w-4" />
-            <span>{{ creatingTask ? '创建中...' : '新建任务' }}</span>
-          </button>
-        </div>
-
-        <div class="min-h-0 flex-1 overflow-y-auto px-3 py-3">
-          <div v-if="loadingTasks && !renderedTasks.length" class="theme-empty-state px-3 py-4 text-sm">
-            正在加载任务...
-          </div>
-
-          <div v-else class="space-y-2">
-            <article
-              v-for="task in renderedTasks"
-              :key="task.slug"
-              class="group relative cursor-default rounded-sm border px-3 py-3 transition"
-              :class="getTaskCardClass(task)"
-              @click="handleTaskSelect(task.slug)"
-            >
-              <span
-                v-if="task.slug === currentTaskSlug"
-                class="absolute inset-y-2 left-0 w-1 rounded-full"
-                :class="'bg-[var(--theme-accent)]'"
-              />
-              <div class="flex items-start justify-between gap-3">
-                <div class="min-w-0 h-5 flex-1 overflow-hidden">
-                  <input
-                    v-if="task.slug === currentTaskSlug && editingTaskTitleSlug === task.slug"
-                    v-model="draft.title"
-                    type="text"
-                    maxlength="140"
-                    data-task-title-input="current"
-                    class="block h-5 min-h-0 w-full appearance-none border-0 bg-transparent p-0 text-left text-sm font-semibold leading-5 outline-none placeholder:text-[var(--theme-textMuted)]"
-                    :placeholder="draft.autoTitle || currentTaskAutoTitle || '未命名任务'"
-                    @click.stop
-                    @keydown.enter.prevent="$event.target.blur()"
-                    @keydown.esc.prevent="editingTaskTitleSlug = ''"
-                    @blur="handleTaskTitleBlur"
-                  >
-                  <button
-                    v-else
-                    type="button"
-                    class="block h-5 w-full cursor-pointer truncate bg-transparent p-0 text-left text-sm leading-5"
-                    :class="task.slug === currentTaskSlug ? 'font-semibold' : 'font-medium'"
-                    @click.stop="handleTaskTitleClick(task.slug)"
-                  >{{ task.displayTitle }}</button>
-                </div>
-                <div class="flex shrink-0 items-center gap-1.5 text-[10px] uppercase tracking-[0.18em] opacity-80">
-                  <span
-                    v-if="task.sending"
-                    class="inline-flex items-center gap-1.5 rounded-sm border border-dashed px-1.5 py-0.5"
-                    :class="getTaskRunningBadgeClass(task)"
-                  >
-                    <span class="task-loading-dots" aria-hidden="true">
-                      <span class="task-loading-dots__dot"></span>
-                      <span class="task-loading-dots__dot"></span>
-                      <span class="task-loading-dots__dot"></span>
-                    </span>
-                    <span>运行中</span>
-                  </span>
-                </div>
-              </div>
-              <div class="mt-2 truncate text-xs opacity-80">{{ task.lastPromptPreview || '还没有发送记录' }}</div>
-              <div class="mt-2 flex items-center justify-between gap-3">
-                <div class="min-w-0 text-[11px] opacity-70">{{ new Date(task.updatedAt).toLocaleString('zh-CN') }}</div>
-                <div class="flex shrink-0 items-center gap-1.5 text-[10px] uppercase tracking-[0.18em] opacity-80">
-                  <span
-                    v-if="task.workspaceDiffSummary?.supported && task.workspaceDiffSummary?.fileCount"
-                    class="inline-flex items-center gap-1 rounded-sm border border-dashed px-1.5 py-0.5"
-                    :class="getTaskWorkspaceBadgeClass(task)"
-                  >
-                    <span>{{ task.workspaceDiffSummary?.fileCount }} 文件</span>
-                  </span>
-                </div>
-              </div>
-            </article>
-          </div>
-        </div>
-
-        <div class="theme-divider border-t px-3 py-3">
-          <div v-if="error" class="theme-danger-text mb-3 inline-flex min-w-0 items-start gap-2 text-xs">
-            <CircleAlert class="mt-0.5 h-4 w-4 shrink-0" />
-            <span class="min-w-0 break-words">{{ error }}</span>
-          </div>
-          <button
-            type="button"
-            class="tool-button theme-danger-text theme-danger-hover inline-flex w-full items-center justify-center gap-2 px-3 py-2 text-sm"
-            :disabled="!currentTaskSlug || removingTask || creatingTask || isCurrentTaskSending"
-            @click="openDeleteDialog"
-          >
-            <Trash2 class="h-4 w-4" />
-            <span>{{ removingTask ? '删除中...' : '删除当前任务' }}</span>
-          </button>
-        </div>
-      </aside>
+      <WorkbenchTaskListPanel
+        :loading-tasks="loadingTasks"
+        :tasks="renderedTasks"
+        :current-task-slug="currentTaskSlug"
+        :editing-task-title-slug="editingTaskTitleSlug"
+        :draft-title="draft.title"
+        :current-task-auto-title="draft.autoTitle || currentTaskAutoTitle"
+        :creating-task="creatingTask"
+        :loading-task="loadingTask"
+        :uploading="uploading"
+        :error="error"
+        :removing-task="removingTask"
+        :is-current-task-sending="isCurrentTaskSending"
+        @open-settings="openSettingsDialog"
+        @create-task="handleCreateTask"
+        @select-task="handleTaskSelect"
+        @title-click="handleTaskTitleClick"
+        @title-blur="handleTaskTitleBlur"
+        @cancel-title-edit="editingTaskTitleSlug = ''"
+        @update:draft-title="draft.title = $event"
+        @delete-task="openDeleteDialog"
+      />
 
       <div class="grid min-h-0 gap-4 overflow-hidden lg:grid-cols-2 lg:grid-rows-1">
         <div class="min-h-0 min-w-0 overflow-hidden">
@@ -619,36 +486,14 @@ onBeforeUnmount(() => {
             @clear-request="openClearDialog"
           >
             <template #header-actions>
-              <button type="button" class="tool-button inline-flex w-full items-center justify-center gap-1.5 px-2 py-2 text-xs sm:w-auto sm:gap-2 sm:px-3" @click="editorRef?.openFilePicker?.()">
-                <Upload class="h-4 w-4" />
-                <span>选文件</span>
-              </button>
-              <button type="button" class="tool-button inline-flex w-full items-center justify-center gap-1.5 px-2 py-2 text-xs sm:w-auto sm:gap-2 sm:px-3" @click="openClearDialog">
-                <WandSparkles class="h-4 w-4" />
-                <span>清空</span>
-              </button>
-              <button type="button" class="tool-button hidden items-center justify-center gap-1.5 px-2 py-2 text-xs sm:inline-flex sm:w-auto sm:gap-2 sm:px-3" @click="copyCodexPrompt">
-                <Copy class="h-4 w-4" />
-                <span>复制</span>
-              </button>
-              <button
-                v-if="!isCurrentTaskSending"
-                type="button"
-                class="tool-button inline-flex w-full items-center justify-center gap-1.5 px-2 py-2 text-xs sm:w-auto sm:gap-2 sm:px-3"
-                @click="sendToCodex"
-              >
-                <SendHorizontal class="h-4 w-4" />
-                <span>发送</span>
-              </button>
-              <button
-                v-else
-                type="button"
-                class="tool-button inline-flex w-full items-center justify-center gap-1.5 px-2 py-2 text-xs sm:w-auto sm:gap-2 sm:px-3"
-                @click="stopCodex"
-              >
-                <Square class="h-4 w-4" />
-                <span>停止</span>
-              </button>
+              <WorkbenchEditorActions
+                :is-current-task-sending="isCurrentTaskSending"
+                @open-file-picker="editorRef?.openFilePicker?.()"
+                @clear-request="openClearDialog"
+                @copy-request="copyCodexPrompt"
+                @send-request="sendToCodex"
+                @stop-request="stopCodex"
+              />
             </template>
           </BlockEditor>
         </div>
@@ -656,165 +501,44 @@ onBeforeUnmount(() => {
     </div>
 
     <div v-else class="min-h-0 flex-1 overflow-hidden">
-      <aside v-if="mobileView === 'tasks'" class="panel flex h-full min-h-0 flex-col overflow-hidden">
-        <div class="theme-divider border-b px-4 py-4">
-          <div class="flex items-center justify-between gap-3">
-            <div class="flex min-h-8 items-center">
-              <div class="theme-heading inline-flex items-center gap-2 text-sm font-medium">
-                <Blocks class="h-4 w-4" />
-                <span>PromptX 工作台</span>
-              </div>
-            </div>
-            <button
-              type="button"
-              class="tool-button inline-flex items-center gap-2 px-3 py-2 text-xs"
-              @click="openSettingsDialog"
-            >
-              <Settings2 class="h-4 w-4" />
-              <span>设置</span>
-            </button>
-          </div>
-          <button
-            type="button"
-            class="tool-button tool-button-primary mt-4 inline-flex w-full items-center justify-center gap-2 px-3 py-2 text-sm"
-            :disabled="creatingTask || loadingTask || uploading"
-            @click="handleCreateTask"
-          >
-            <Plus class="h-4 w-4" />
-            <span>{{ creatingTask ? '创建中...' : '新建任务' }}</span>
-          </button>
-        </div>
-
-        <div class="min-h-0 flex-1 overflow-y-auto px-3 py-3">
-          <div v-if="loadingTasks && !renderedTasks.length" class="theme-empty-state px-3 py-4 text-sm">
-            正在加载任务...
-          </div>
-
-          <div v-else class="space-y-2">
-            <article
-              v-for="task in renderedTasks"
-              :key="task.slug"
-              class="group relative cursor-default rounded-sm border px-3 py-3 transition"
-              :class="getTaskCardClass(task)"
-              @click="handleTaskSelect(task.slug)"
-            >
-              <span
-                v-if="task.slug === currentTaskSlug"
-                class="absolute inset-y-2 left-0 w-1 rounded-full"
-                :class="'bg-[var(--theme-accent)]'"
-              />
-              <div class="flex items-start justify-between gap-3">
-                <div class="min-w-0 h-5 flex-1 overflow-hidden">
-                  <input
-                    v-if="task.slug === currentTaskSlug && editingTaskTitleSlug === task.slug"
-                    v-model="draft.title"
-                    type="text"
-                    maxlength="140"
-                    data-task-title-input="current"
-                    class="block h-5 min-h-0 w-full appearance-none border-0 bg-transparent p-0 text-left text-sm font-semibold leading-5 outline-none placeholder:text-[var(--theme-textMuted)]"
-                    :placeholder="draft.autoTitle || currentTaskAutoTitle || '未命名任务'"
-                    @click.stop
-                    @keydown.enter.prevent="$event.target.blur()"
-                    @keydown.esc.prevent="editingTaskTitleSlug = ''"
-                    @blur="handleTaskTitleBlur"
-                  >
-                  <button
-                    v-else
-                    type="button"
-                    class="block h-5 w-full cursor-pointer truncate bg-transparent p-0 text-left text-sm leading-5"
-                    :class="task.slug === currentTaskSlug ? 'font-semibold' : 'font-medium'"
-                    @click.stop="handleTaskTitleClick(task.slug)"
-                  >{{ task.displayTitle }}</button>
-                </div>
-                <div class="flex shrink-0 items-center gap-1.5 text-[10px] uppercase tracking-[0.18em] opacity-80">
-                  <span
-                    v-if="task.sending"
-                    class="inline-flex items-center gap-1.5 rounded-sm border border-dashed px-1.5 py-0.5"
-                    :class="getTaskRunningBadgeClass(task)"
-                  >
-                    <span class="task-loading-dots" aria-hidden="true">
-                      <span class="task-loading-dots__dot"></span>
-                      <span class="task-loading-dots__dot"></span>
-                      <span class="task-loading-dots__dot"></span>
-                    </span>
-                    <span>运行中</span>
-                  </span>
-                </div>
-              </div>
-              <div class="mt-2 truncate text-xs opacity-80">{{ task.lastPromptPreview || '还没有发送记录' }}</div>
-              <div class="mt-2 flex items-center justify-between gap-3">
-                <div class="min-w-0 text-[11px] opacity-70">{{ new Date(task.updatedAt).toLocaleString('zh-CN') }}</div>
-                <div class="flex shrink-0 items-center gap-1.5 text-[10px] uppercase tracking-[0.18em] opacity-80">
-                  <span
-                    v-if="task.workspaceDiffSummary?.supported && task.workspaceDiffSummary?.fileCount"
-                    class="inline-flex items-center gap-1 rounded-sm border border-dashed px-1.5 py-0.5"
-                    :class="getTaskWorkspaceBadgeClass(task)"
-                  >
-                    <span>{{ task.workspaceDiffSummary?.fileCount }} 文件</span>
-                  </span>
-                </div>
-              </div>
-            </article>
-          </div>
-        </div>
-
-        <div class="theme-divider border-t px-3 py-3">
-          <div v-if="error" class="theme-danger-text mb-3 inline-flex min-w-0 items-start gap-2 text-xs">
-            <CircleAlert class="mt-0.5 h-4 w-4 shrink-0" />
-            <span class="min-w-0 break-words">{{ error }}</span>
-          </div>
-          <button
-            type="button"
-            class="tool-button theme-danger-text theme-danger-hover inline-flex w-full items-center justify-center gap-2 px-3 py-2 text-sm"
-            :disabled="!currentTaskSlug || removingTask || creatingTask || isCurrentTaskSending"
-            @click="openDeleteDialog"
-          >
-            <Trash2 class="h-4 w-4" />
-            <span>{{ removingTask ? '删除中...' : '删除当前任务' }}</span>
-          </button>
-        </div>
-      </aside>
+      <WorkbenchTaskListPanel
+        v-if="mobileView === 'tasks'"
+        :loading-tasks="loadingTasks"
+        :tasks="renderedTasks"
+        :current-task-slug="currentTaskSlug"
+        :editing-task-title-slug="editingTaskTitleSlug"
+        :draft-title="draft.title"
+        :current-task-auto-title="draft.autoTitle || currentTaskAutoTitle"
+        :creating-task="creatingTask"
+        :loading-task="loadingTask"
+        :uploading="uploading"
+        :error="error"
+        :removing-task="removingTask"
+        :is-current-task-sending="isCurrentTaskSending"
+        mobile
+        @open-settings="openSettingsDialog"
+        @create-task="handleCreateTask"
+        @select-task="handleTaskSelect"
+        @title-click="handleTaskTitleClick"
+        @title-blur="handleTaskTitleBlur"
+        @cancel-title-edit="editingTaskTitleSlug = ''"
+        @update:draft-title="draft.title = $event"
+        @delete-task="openDeleteDialog"
+      />
 
       <div v-else class="flex h-full min-h-0 flex-col gap-3 overflow-hidden">
-        <section class="panel shrink-0 overflow-hidden">
-          <div class="theme-divider border-b px-4 py-3">
-            <div class="flex items-center gap-3">
-              <button
-                type="button"
-                class="tool-button inline-flex shrink-0 items-center gap-1.5 px-3 py-2 text-xs"
-                @click="leaveMobileDetail"
-              >
-                <ArrowLeft class="h-4 w-4" />
-                <span>任务</span>
-              </button>
-
-              <div class="min-w-0 flex-1">
-                <input
-                  v-if="currentTaskSlug && editingTaskTitleSlug === currentTaskSlug"
-                  v-model="draft.title"
-                  type="text"
-                  maxlength="140"
-                  data-task-title-input="current"
-                  class="block w-full appearance-none border-0 bg-transparent p-0 text-left text-sm font-semibold leading-6 outline-none placeholder:text-[var(--theme-textMuted)]"
-                  :placeholder="draft.autoTitle || currentTaskAutoTitle || '未命名任务'"
-                  @keydown.enter.prevent="$event.target.blur()"
-                  @keydown.esc.prevent="editingTaskTitleSlug = ''"
-                  @blur="handleTaskTitleBlur"
-                >
-                <button
-                  v-else
-                  type="button"
-                  class="inline-flex w-full items-center gap-2 truncate bg-transparent p-0 text-left text-sm font-semibold leading-6"
-                  :disabled="!currentTaskSlug"
-                  @click="beginTaskTitleEdit(currentTaskSlug)"
-                >
-                  <span class="truncate">{{ currentTaskDisplayTitle || '未命名任务' }}</span>
-                  <PencilLine class="h-3.5 w-3.5 shrink-0 opacity-50" />
-                </button>
-              </div>
-            </div>
-          </div>
-        </section>
+        <WorkbenchMobileDetailHeader
+          :current-task-slug="currentTaskSlug"
+          :editing-task-title-slug="editingTaskTitleSlug"
+          :title="currentTaskDisplayTitle"
+          :title-input-value="draft.title"
+          :current-task-auto-title="draft.autoTitle || currentTaskAutoTitle"
+          @back="leaveMobileDetail"
+          @begin-edit="beginTaskTitleEdit(currentTaskSlug)"
+          @title-blur="handleTaskTitleBlur"
+          @cancel-title-edit="editingTaskTitleSlug = ''"
+          @update:title-input-value="draft.title = $event"
+        />
 
         <section class="panel shrink-0 overflow-hidden">
           <div class="theme-divider border-b px-3 py-3">
@@ -877,36 +601,14 @@ onBeforeUnmount(() => {
               @clear-request="openClearDialog"
             >
               <template #header-actions>
-                <button type="button" class="tool-button inline-flex w-full items-center justify-center gap-1.5 px-2 py-2 text-xs sm:w-auto sm:gap-2 sm:px-3" @click="editorRef?.openFilePicker?.()">
-                  <Upload class="h-4 w-4" />
-                  <span>选文件</span>
-                </button>
-                <button type="button" class="tool-button inline-flex w-full items-center justify-center gap-1.5 px-2 py-2 text-xs sm:w-auto sm:gap-2 sm:px-3" @click="openClearDialog">
-                  <WandSparkles class="h-4 w-4" />
-                  <span>清空</span>
-                </button>
-                <button type="button" class="tool-button hidden items-center justify-center gap-1.5 px-2 py-2 text-xs sm:inline-flex sm:w-auto sm:gap-2 sm:px-3" @click="copyCodexPrompt">
-                  <Copy class="h-4 w-4" />
-                  <span>复制</span>
-                </button>
-                <button
-                  v-if="!isCurrentTaskSending"
-                  type="button"
-                  class="tool-button inline-flex w-full items-center justify-center gap-1.5 px-2 py-2 text-xs sm:w-auto sm:gap-2 sm:px-3"
-                  @click="sendToCodex"
-                >
-                  <SendHorizontal class="h-4 w-4" />
-                  <span>发送</span>
-                </button>
-                <button
-                  v-else
-                  type="button"
-                  class="tool-button inline-flex w-full items-center justify-center gap-1.5 px-2 py-2 text-xs sm:w-auto sm:gap-2 sm:px-3"
-                  @click="stopCodex"
-                >
-                  <Square class="h-4 w-4" />
-                  <span>停止</span>
-                </button>
+                <WorkbenchEditorActions
+                  :is-current-task-sending="isCurrentTaskSending"
+                  @open-file-picker="editorRef?.openFilePicker?.()"
+                  @clear-request="openClearDialog"
+                  @copy-request="copyCodexPrompt"
+                  @send-request="sendToCodex"
+                  @stop-request="stopCodex"
+                />
               </template>
             </BlockEditor>
           </div>
