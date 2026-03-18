@@ -255,6 +255,11 @@ function beginTaskTitleEdit(taskSlug) {
 }
 
 async function handleTaskTitleClick(taskSlug) {
+  if (isMobileLayout.value) {
+    await handleTaskSelect(taskSlug)
+    return
+  }
+
   if (taskSlug !== currentTaskSlug.value) {
     await handleTaskSelect(taskSlug)
     return
