@@ -3,6 +3,7 @@ export {
   createTask,
   deleteTask,
   fetchRawTask,
+  getMeta,
   getTask,
   listTasks,
   listTaskWorkspaceDiffSummaries,

@@ -918,23 +918,53 @@ function createRoot() {
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       }
       .button {
-        border: 1px solid #1c1917;
-        background: #1c1917;
-        color: #fafaf9;
-        border-radius: 4px;
-        padding: 10px 14px;
+        border: 1px solid #2b7a66;
+        background: #2b7a66;
+        color: #fffaf4;
+        border-radius: 3px;
+        padding: 10px 16px;
         font-size: 13px;
-        font-weight: 600;
+        font-weight: 500;
         cursor: pointer;
-        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18);
+        letter-spacing: 0.01em;
+        box-shadow:
+          0 10px 24px rgba(53, 38, 22, 0.08),
+          0 1px 0 rgba(0, 0, 0, 0.02);
+        transition: background-color 140ms ease, border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
+      }
+      .button:hover {
+        transform: translateY(-1px);
+        border-color: #246754;
+        background: #246754;
+        box-shadow:
+          0 12px 28px rgba(53, 38, 22, 0.1),
+          0 1px 0 rgba(0, 0, 0, 0.02);
+      }
+      .button:focus-visible {
+        outline: 2px solid rgba(100, 86, 74, 0.22);
+        outline-offset: 2px;
+      }
+      .button:active {
+        transform: translateY(0);
+        border-color: #215a4b;
+        background: #215a4b;
+        box-shadow:
+          0 8px 18px rgba(53, 38, 22, 0.08),
+          0 1px 0 rgba(0, 0, 0, 0.02);
       }
       .button[disabled] {
         opacity: 0.75;
         cursor: default;
+        transform: none;
+        border-color: #4d8676;
+        background: #4d8676;
+        box-shadow:
+          0 10px 22px rgba(53, 38, 22, 0.06),
+          0 1px 0 rgba(0, 0, 0, 0.02);
       }
     </style>
     <div class="wrap">
-      <button class="button" type="button">AI修复</button>
+      <button class="button" type="button">PromptX修复</button>
     </div>
   `
 
@@ -954,7 +984,7 @@ function createRoot() {
 }
 
 function render(refs) {
-  refs.button.textContent = refs.state.busy ? '生成中...' : refs.state.error ? '重试 AI修复' : 'AI修复'
+  refs.button.textContent = refs.state.busy ? '生成中...' : refs.state.error ? '重试 PromptX修复' : 'PromptX修复'
   refs.button.disabled = refs.state.busy
   refs.button.title = refs.state.error ? '生成失败，请重试' : '创建 PromptX 任务'
 }

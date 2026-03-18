@@ -1,5 +1,11 @@
 import { request } from './request.js'
 
+export function getMeta() {
+  return request('/api/meta', {
+    cache: 'no-store',
+  })
+}
+
 export function listTasks() {
   return request('/api/tasks')
 }

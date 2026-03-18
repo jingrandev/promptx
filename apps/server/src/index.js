@@ -68,6 +68,18 @@ const workspaceParentDir = path.dirname(workspaceRootDir)
 const webDistDir = path.resolve(serverRootDir, '..', 'web', 'dist')
 const webIndexFile = path.join(webDistDir, 'index.html')
 const hasBuiltWebApp = fs.existsSync(webIndexFile)
+const packageJsonPath = path.resolve(workspaceRootDir, 'package.json')
+
+function readPromptxVersion() {
+  try {
+    const payload = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'))
+    return String(payload.version || '').trim() || '0.0.0'
+  } catch {
+    return '0.0.0'
+  }
+}
+
+const promptxVersion = readPromptxVersion()
 
 let lastExpiredPurgeAt = 0
 const sseHub = createSseHub()
@@ -321,6 +333,7 @@ if (hasBuiltWebApp) {
 app.get('/health', async () => ({ ok: true }))
 
 app.get('/api/meta', async () => ({
+  version: promptxVersion,
   expiryOptions: EXPIRY_OPTIONS,
   visibilityOptions: VISIBILITY_OPTIONS,
 }))

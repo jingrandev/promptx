@@ -54,6 +54,11 @@ promptx doctor
 
 仓库内置了禅道 Chrome 扩展：`apps/zentao-extension`
 
+注意：
+
+- 目前 `npm install -g @muyichengshayu/promptx` 安装的正式包不包含这个扩展目录
+- 如需使用禅道扩展，请先下载或克隆本仓库源码，再按下面方式手动加载
+
 1. 打开 `chrome://extensions`
 2. 开启开发者模式
 3. 点击“加载已解压的扩展程序”

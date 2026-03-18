@@ -1,5 +1,38 @@
-const APP_ORIGIN = 'http://localhost:5173'
-const API_ORIGIN = 'http://localhost:3000'
+const PROMPTX_TARGETS = [
+  {
+    name: 'release',
+    appOrigin: 'http://127.0.0.1:3000',
+    apiOrigin: 'http://127.0.0.1:3000',
+  },
+  {
+    name: 'release-localhost',
+    appOrigin: 'http://localhost:3000',
+    apiOrigin: 'http://localhost:3000',
+  },
+  {
+    name: 'dev',
+    appOrigin: 'http://127.0.0.1:5174',
+    apiOrigin: 'http://127.0.0.1:3001',
+  },
+  {
+    name: 'dev-localhost',
+    appOrigin: 'http://localhost:5174',
+    apiOrigin: 'http://localhost:3001',
+  },
+  {
+    name: 'legacy-dev',
+    appOrigin: 'http://127.0.0.1:5173',
+    apiOrigin: 'http://127.0.0.1:3000',
+  },
+  {
+    name: 'legacy-dev-localhost',
+    appOrigin: 'http://localhost:5173',
+    apiOrigin: 'http://localhost:3000',
+  },
+]
+
+let resolvedPromptxTarget = null
+let resolvePromptxTargetPromise = null
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type !== 'CREATE_PROMPTX_TASK_FROM_ZENTAO') {
@@ -19,6 +52,51 @@ async function readJson(response) {
     throw new Error(payload.message || '请求失败。')
   }
   return payload
+}
+
+async function checkHealth(apiOrigin = '') {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 1200)
+
+  try {
+    const response = await fetch(`${apiOrigin}/health`, {
+      signal: controller.signal,
+    })
+    return response.ok
+  } catch {
+    return false
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+async function resolvePromptxTarget() {
+  if (resolvedPromptxTarget) {
+    return resolvedPromptxTarget
+  }
+
+  if (resolvePromptxTargetPromise) {
+    return resolvePromptxTargetPromise
+  }
+
+  resolvePromptxTargetPromise = (async () => {
+    for (const target of PROMPTX_TARGETS) {
+      if (await checkHealth(target.apiOrigin)) {
+        resolvedPromptxTarget = target
+        return target
+      }
+    }
+
+    throw new Error(
+      '没有检测到可用的 PromptX 服务。请先启动正式版（127.0.0.1:3000）或开发版（127.0.0.1:3001 / 5174）。'
+    )
+  })()
+
+  try {
+    return await resolvePromptxTargetPromise
+  } finally {
+    resolvePromptxTargetPromise = null
+  }
 }
 
 function getFileNameFromUrl(url = '', mimeType = '') {
@@ -322,15 +400,13 @@ async function normalizeBlocksWithHostedImages(settings, blocks = []) {
 
 async function createPromptxTask(payload = {}) {
   const title = String(payload.title || '').trim() || '禅道 Bug'
+  const settings = await resolvePromptxTarget()
   const blocks = await normalizeBlocksWithHostedImages(
-    {
-      appOrigin: APP_ORIGIN,
-      apiOrigin: API_ORIGIN,
-    },
+    settings,
     buildBlocksFromPayload(payload)
   )
 
-  const created = await fetch(`${API_ORIGIN}/api/tasks`, {
+  const created = await fetch(`${settings.apiOrigin}/api/tasks`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -342,7 +418,7 @@ async function createPromptxTask(payload = {}) {
     }),
   }).then(readJson)
 
-  await fetch(`${API_ORIGIN}/api/tasks/${created.slug}`, {
+  await fetch(`${settings.apiOrigin}/api/tasks/${created.slug}`, {
     method: 'PUT',
     headers: {
       'Content-Type': 'application/json',
@@ -355,8 +431,8 @@ async function createPromptxTask(payload = {}) {
     }),
   }).then(readJson)
 
-  const rawUrl = `${API_ORIGIN}/api/tasks/${created.slug}/raw`
-  const taskUrl = `${APP_ORIGIN}/?task=${encodeURIComponent(created.slug)}`
+  const rawUrl = `${settings.apiOrigin}/api/tasks/${created.slug}/raw`
+  const taskUrl = `${settings.appOrigin}/?task=${encodeURIComponent(created.slug)}`
 
   return {
     taskUrl,

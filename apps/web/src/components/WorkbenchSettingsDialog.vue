@@ -1,7 +1,8 @@
 <script setup>
-import { onBeforeUnmount, watch } from 'vue'
+import { onBeforeUnmount, ref, watch } from 'vue'
 import { Settings2, X } from 'lucide-vue-next'
 import ThemeToggle from './ThemeToggle.vue'
+import { getMeta } from '../lib/api.js'
 
 const props = defineProps({
   open: {
@@ -11,6 +12,28 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['close'])
+const version = ref('')
+const versionLoading = ref(false)
+const versionError = ref('')
+
+async function loadMeta() {
+  versionLoading.value = true
+  versionError.value = ''
+
+  try {
+    const payload = await getMeta()
+    const nextVersion = String(payload?.version || '').trim()
+    version.value = nextVersion
+    if (!nextVersion) {
+      versionError.value = '当前服务暂未返回版本号，请确认已重启到最新版本。'
+    }
+  } catch (error) {
+    version.value = ''
+    versionError.value = error?.message || '版本信息读取失败。'
+  } finally {
+    versionLoading.value = false
+  }
+}
 
 function handleKeydown(event) {
   if (!props.open) {
@@ -28,6 +51,7 @@ watch(
     document.body.classList.toggle('overflow-hidden', open)
     if (open) {
       window.addEventListener('keydown', handleKeydown)
+      loadMeta()
       return
     }
 
@@ -70,6 +94,20 @@ onBeforeUnmount(() => {
         <div class="space-y-6 px-5 py-5">
           <section class="rounded-sm border border-dashed border-[var(--theme-borderDefault)] bg-[var(--theme-appPanelMuted)] px-4 py-4">
             <ThemeToggle />
+          </section>
+
+          <section class="rounded-sm border border-dashed border-[var(--theme-borderDefault)] bg-[var(--theme-appPanelMuted)] px-4 py-4">
+            <div class="flex items-center justify-between gap-3">
+              <div>
+                <div class="theme-heading text-sm font-medium">版本信息</div>
+                <p class="theme-muted-text mt-1 text-xs leading-5">
+                  {{ versionError || '当前已安装的 PromptX 版本。' }}
+                </p>
+              </div>
+              <span class="rounded-sm border border-dashed border-[var(--theme-borderStrong)] bg-[var(--theme-appPanelStrong)] px-2.5 py-1 text-xs font-medium text-[var(--theme-textSecondary)]">
+                {{ versionLoading ? '读取中...' : version ? `v${version}` : '不可用' }}
+              </span>
+            </div>
           </section>
         </div>
       </section>
