@@ -4,6 +4,7 @@ import test from 'node:test'
 import {
   buildPromptPreview,
   deriveTaskPreview,
+  mergeTaskSummariesWithWorkspaceDiff,
   resolveTaskDisplayTitle,
 } from './useWorkbenchTasks.js'
 
@@ -39,4 +40,75 @@ test('deriveTaskPreview compacts whitespace and uses first text-like block', () 
 test('buildPromptPreview trims whitespace and limits length', () => {
   const preview = buildPromptPreview('  hello\n\nworld   from   promptx  ', 12)
   assert.equal(preview, 'hello world ')
+})
+
+test('mergeTaskSummariesWithWorkspaceDiff preserves summary for same session', () => {
+  const merged = mergeTaskSummariesWithWorkspaceDiff([
+    {
+      slug: 'task-1',
+      codexSessionId: 'session-a',
+      workspaceDiffSummary: {
+        supported: true,
+        fileCount: 3,
+        additions: 10,
+        deletions: 2,
+      },
+    },
+  ], [
+    {
+      slug: 'task-1',
+      codexSessionId: 'session-a',
+    },
+  ])
+
+  assert.deepEqual(merged[0].workspaceDiffSummary, {
+    supported: true,
+    fileCount: 3,
+    additions: 10,
+    deletions: 2,
+  })
+})
+
+test('mergeTaskSummariesWithWorkspaceDiff clears summary when session changes', () => {
+  const merged = mergeTaskSummariesWithWorkspaceDiff([
+    {
+      slug: 'task-1',
+      codexSessionId: 'session-a',
+      workspaceDiffSummary: {
+        supported: true,
+        fileCount: 3,
+        additions: 10,
+        deletions: 2,
+      },
+    },
+  ], [
+    {
+      slug: 'task-1',
+      codexSessionId: 'session-b',
+    },
+  ])
+
+  assert.equal(merged[0].workspaceDiffSummary, null)
+})
+
+test('mergeTaskSummariesWithWorkspaceDiff clears summary when session is removed', () => {
+  const merged = mergeTaskSummariesWithWorkspaceDiff([
+    {
+      slug: 'task-1',
+      codexSessionId: 'session-a',
+      workspaceDiffSummary: {
+        supported: true,
+        fileCount: 3,
+        additions: 10,
+        deletions: 2,
+      },
+    },
+  ], [
+    {
+      slug: 'task-1',
+      codexSessionId: '',
+    },
+  ])
+
+  assert.equal(merged[0].workspaceDiffSummary, null)
 })

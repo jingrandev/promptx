@@ -96,6 +96,54 @@ export function buildPromptPreview(prompt = '', max = 72) {
     .slice(0, max)
 }
 
+export function mergeTaskSummariesWithWorkspaceDiff(prevItems = [], nextItems = []) {
+  const previousBySlug = new Map(
+    (prevItems || [])
+      .map((item) => {
+        const slug = String(item?.slug || '').trim()
+        return slug ? [slug, item] : null
+      })
+      .filter(Boolean)
+  )
+
+  return (nextItems || []).map((item) => {
+    const slug = String(item?.slug || '').trim()
+    const nextSessionId = String(item?.codexSessionId || '').trim()
+
+    if (!slug) {
+      return item
+    }
+
+    if (Object.prototype.hasOwnProperty.call(item, 'workspaceDiffSummary')) {
+      return {
+        ...item,
+        workspaceDiffSummary: normalizeWorkspaceDiffSummary(item.workspaceDiffSummary),
+      }
+    }
+
+    if (!nextSessionId) {
+      return {
+        ...item,
+        workspaceDiffSummary: null,
+      }
+    }
+
+    const previousItem = previousBySlug.get(slug)
+    const previousSessionId = String(previousItem?.codexSessionId || '').trim()
+    if (previousSessionId && previousSessionId === nextSessionId) {
+      return {
+        ...item,
+        workspaceDiffSummary: normalizeWorkspaceDiffSummary(previousItem.workspaceDiffSummary),
+      }
+    }
+
+    return {
+      ...item,
+      workspaceDiffSummary: null,
+    }
+  })
+}
+
 function sortTaskSummaries(items = []) {
   return [...items].sort((left, right) => {
     const rightTime = Date.parse(String(right?.updatedAt || '')) || 0
@@ -405,6 +453,9 @@ export function useWorkbenchTasks(options = {}) {
       upsertTaskSummary({
         ...currentSummary,
         codexSessionId: normalizedSessionId,
+        workspaceDiffSummary: normalizedSessionId && normalizedSessionId === previousSessionId
+          ? currentSummary.workspaceDiffSummary
+          : null,
       })
     }
 
@@ -557,7 +608,9 @@ export function useWorkbenchTasks(options = {}) {
 
     try {
       const payload = await listTasks()
-      const nextTasks = sortTaskSummaries((payload.items || []).map(toTaskSummary))
+      const nextTasks = sortTaskSummaries(
+        mergeTaskSummariesWithWorkspaceDiff(tasks.value, (payload.items || []).map(toTaskSummary))
+      )
       tasks.value = nextTasks
       syncSendingTaskMapWithTasks(nextTasks)
       refreshTaskWorkspaceDiffSummaries(nextTasks)
