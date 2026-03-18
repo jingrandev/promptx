@@ -1,9 +1,11 @@
 <script setup>
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import {
+  ArrowLeft,
   Bot,
   CircleAlert,
   FolderOpen,
+  Info,
   PencilLine,
   Plus,
   Trash2,
@@ -77,6 +79,12 @@ const saving = ref(false)
 const deleting = ref(false)
 const showDeleteDialog = ref(false)
 const showDirectoryPicker = ref(false)
+const isMobileLayout = ref(false)
+const mobileView = ref('list')
+const mobileDetailTab = ref('basic')
+const MOBILE_BREAKPOINT_QUERY = '(max-width: 767px)'
+let mobileMediaQueryList = null
+let removeMobileMediaQueryListener = () => {}
 
 const sortedSessions = computed(() => sortSessions(props.sessions))
 const activeSession = computed(() => props.sessions.find((session) => session.id === editingSessionId.value) || null)
@@ -242,6 +250,41 @@ function openEditMode(sessionId) {
   syncFormFromSession(session)
 }
 
+function enterMobileDetail(tab = 'basic') {
+  mobileView.value = 'detail'
+  mobileDetailTab.value = tab
+}
+
+function returnToMobileList() {
+  mobileView.value = 'list'
+  mobileDetailTab.value = 'basic'
+}
+
+function handleCreateIntent() {
+  openCreateMode()
+  if (isMobileLayout.value) {
+    enterMobileDetail('basic')
+  }
+}
+
+function handleSessionCardClick(sessionId) {
+  if (busy.value) {
+    return
+  }
+
+  openEditMode(sessionId)
+  if (isMobileLayout.value) {
+    enterMobileDetail('basic')
+  }
+}
+
+function syncMobileLayout(matches) {
+  isMobileLayout.value = Boolean(matches)
+  if (!isMobileLayout.value) {
+    mobileView.value = 'detail'
+  }
+}
+
 function handleDirectoryPicked(pathValue) {
   form.cwd = String(pathValue || '').trim()
 }
@@ -249,6 +292,8 @@ function handleDirectoryPicked(pathValue) {
 function initializeDialog() {
   error.value = ''
   showDeleteDialog.value = false
+  mobileDetailTab.value = 'basic'
+  mobileView.value = isMobileLayout.value ? 'list' : 'detail'
 
   if (props.selectedSessionId && props.sessions.some((session) => session.id === props.selectedSessionId)) {
     openEditMode(props.selectedSessionId)
@@ -394,8 +439,14 @@ async function handleDelete() {
 
     if (nextSessionId) {
       openEditMode(nextSessionId)
+      if (isMobileLayout.value) {
+        returnToMobileList()
+      }
     } else {
       openCreateMode()
+      if (isMobileLayout.value) {
+        returnToMobileList()
+      }
     }
   } catch (err) {
     error.value = err.message
@@ -411,6 +462,23 @@ watch(
 
     if (open) {
       window.addEventListener('keydown', handleKeydown)
+      if (typeof window !== 'undefined' && typeof window.matchMedia === 'function' && !mobileMediaQueryList) {
+        mobileMediaQueryList = window.matchMedia(MOBILE_BREAKPOINT_QUERY)
+        syncMobileLayout(mobileMediaQueryList.matches)
+        const handleMediaChange = (event) => {
+          syncMobileLayout(event.matches)
+        }
+
+        if (typeof mobileMediaQueryList.addEventListener === 'function') {
+          mobileMediaQueryList.addEventListener('change', handleMediaChange)
+          removeMobileMediaQueryListener = () => mobileMediaQueryList?.removeEventListener('change', handleMediaChange)
+        } else if (typeof mobileMediaQueryList.addListener === 'function') {
+          mobileMediaQueryList.addListener(handleMediaChange)
+          removeMobileMediaQueryListener = () => mobileMediaQueryList?.removeListener(handleMediaChange)
+        }
+      } else if (mobileMediaQueryList) {
+        syncMobileLayout(mobileMediaQueryList.matches)
+      }
       initializeDialog()
       handleRefresh().catch(() => {})
       return
@@ -454,6 +522,7 @@ watch(
 )
 
 onBeforeUnmount(() => {
+  removeMobileMediaQueryListener()
   document.body.classList.remove('overflow-hidden')
   window.removeEventListener('keydown', handleKeydown)
 })
@@ -507,7 +576,7 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
-        <div class="grid min-h-0 flex-1 gap-0 lg:grid-cols-[minmax(0,300px)_minmax(0,1fr)]">
+        <div v-if="!isMobileLayout" class="grid min-h-0 flex-1 gap-0 lg:grid-cols-[minmax(0,300px)_minmax(0,1fr)]">
           <aside class="theme-divider border-b bg-[var(--theme-appPanelMuted)] px-3 py-3 sm:px-4 sm:py-4 lg:border-b-0 lg:border-r">
             <div class="flex items-center justify-between gap-3">
               <div>
@@ -520,7 +589,7 @@ onBeforeUnmount(() => {
                 type="button"
                 class="tool-button tool-button-primary inline-flex items-center gap-2 px-3 py-2 text-xs"
                 :disabled="busy"
-                @click="openCreateMode"
+                @click="handleCreateIntent"
               >
                 <Plus class="h-4 w-4" />
                 <span>新建</span>
@@ -539,7 +608,7 @@ onBeforeUnmount(() => {
                     : isCurrentSession(session.id)
                       ? 'theme-status-info'
                       : 'border-[var(--theme-borderDefault)] bg-[var(--theme-appPanelStrong)] hover:border-[var(--theme-borderStrong)] hover:bg-[var(--theme-appPanel)]'"
-                @click="!busy && openEditMode(session.id)"
+                @click="handleSessionCardClick(session.id)"
               >
                 <span
                   v-if="mode === 'edit' && editingSessionId === session.id"
@@ -684,6 +753,236 @@ onBeforeUnmount(() => {
                     ? (creating ? '创建中...' : '创建项目')
                     : (saving ? '保存中...' : '保存修改') }}
                 </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div v-else class="flex min-h-0 flex-1 flex-col overflow-hidden">
+          <div v-if="mobileView === 'list'" class="flex min-h-0 flex-1 flex-col overflow-hidden">
+            <div class="theme-divider flex items-center justify-between gap-3 border-b px-4 py-3">
+              <div>
+                <div class="theme-heading text-sm font-medium">项目列表</div>
+                <p v-if="!hasSessions" class="theme-muted-text mt-1 text-xs">
+                  还没有项目，先新建一个固定工作目录。
+                </p>
+              </div>
+              <button
+                type="button"
+                class="tool-button tool-button-primary inline-flex items-center gap-2 px-3 py-2 text-xs"
+                :disabled="busy"
+                @click="handleCreateIntent"
+              >
+                <Plus class="h-4 w-4" />
+                <span>新建</span>
+              </button>
+            </div>
+
+            <div class="min-h-0 flex-1 overflow-y-auto px-3 py-3">
+              <div class="space-y-2">
+                <article
+                  v-for="session in sortedSessions"
+                  :key="session.id"
+                  class="relative cursor-pointer rounded-sm border p-3 transition"
+                  :class="mode === 'edit' && editingSessionId === session.id
+                    ? 'border-[var(--theme-accent)] bg-[var(--theme-appPanelStrong)] shadow-sm'
+                    : isSessionRunning(session.id)
+                      ? 'theme-status-warning'
+                      : isCurrentSession(session.id)
+                        ? 'theme-status-info'
+                        : 'border-[var(--theme-borderDefault)] bg-[var(--theme-appPanelStrong)] hover:border-[var(--theme-borderStrong)] hover:bg-[var(--theme-appPanel)]'"
+                  @click="handleSessionCardClick(session.id)"
+                >
+                  <span
+                    v-if="mode === 'edit' && editingSessionId === session.id"
+                    class="absolute inset-y-3 left-0 w-1 rounded-full bg-[var(--theme-accent)]"
+                  />
+                  <div class="w-full text-left">
+                    <div class="theme-heading flex flex-wrap items-center gap-2 text-sm font-medium">
+                      <span class="truncate">{{ session.title || '未命名项目' }}</span>
+                      <span
+                        class="inline-flex items-center gap-1 rounded-sm border border-dashed px-1.5 py-0.5 text-[10px]"
+                        :class="getRuntimeStatusClass(session.id)"
+                      >
+                        <span v-if="isSessionRunning(session.id)" class="h-1.5 w-1.5 rounded-full bg-current animate-pulse" />
+                        {{ getRuntimeStatusLabel(session.id) }}
+                      </span>
+                      <span class="rounded-sm border border-dashed px-1.5 py-0.5 text-[10px]" :class="getThreadStatusClass(session)">
+                        {{ getThreadStatusLabel(session) }}
+                      </span>
+                    </div>
+                    <div class="theme-muted-text mt-2 break-all font-mono text-[11px] leading-5">
+                      {{ session.cwd }}
+                    </div>
+                  </div>
+                </article>
+              </div>
+            </div>
+          </div>
+
+          <div v-else class="flex min-h-0 flex-1 flex-col overflow-hidden">
+            <div class="theme-divider flex items-center gap-3 border-b px-4 py-3">
+              <button
+                type="button"
+                class="tool-button inline-flex items-center gap-1.5 px-3 py-2 text-xs"
+                :disabled="busy"
+                @click="returnToMobileList"
+              >
+                <ArrowLeft class="h-4 w-4" />
+                <span>列表</span>
+              </button>
+              <div class="min-w-0 flex-1">
+                <div class="theme-heading truncate text-sm font-medium">
+                  {{ mode === 'create' ? '新建项目' : activeSession?.title || '未命名项目' }}
+                </div>
+                <p v-if="mode === 'edit' && activeSession?.cwd" class="theme-muted-text mt-1 truncate text-xs">
+                  {{ activeSession.cwd }}
+                </p>
+              </div>
+            </div>
+
+            <div class="theme-divider border-b px-4 py-3">
+              <div class="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  class="tool-button px-3 py-2 text-sm"
+                  :class="mobileDetailTab === 'basic' ? 'tool-button-primary' : ''"
+                  @click="mobileDetailTab = 'basic'"
+                >
+                  基本信息
+                </button>
+                <button
+                  type="button"
+                  class="tool-button px-3 py-2 text-sm"
+                  :class="mobileDetailTab === 'status' ? 'tool-button-primary' : ''"
+                  :disabled="mode === 'create'"
+                  @click="mobileDetailTab = 'status'"
+                >
+                  状态
+                </button>
+              </div>
+            </div>
+
+            <div class="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+              <div v-if="mobileDetailTab === 'basic'">
+                <div class="grid gap-4">
+                  <label class="theme-muted-text block text-xs">
+                    <span>项目标题（可选）</span>
+                    <input
+                      v-model="form.title"
+                      type="text"
+                      maxlength="140"
+                      placeholder=""
+                      class="tool-input mt-1"
+                      :disabled="busy"
+                    >
+                  </label>
+
+                  <label class="theme-muted-text block text-xs">
+                    <span>工作目录</span>
+                    <div class="mt-1 flex gap-2">
+                      <input
+                        v-model="form.cwd"
+                        type="text"
+                        list="codex-manager-workspace-suggestions-mobile"
+                        placeholder=""
+                        class="tool-input min-w-0 flex-1 disabled:cursor-not-allowed disabled:opacity-80"
+                        :class="duplicateCwdMessage ? 'border-[var(--theme-warning)]' : ''"
+                        :disabled="busy || (mode === 'edit' && !canEditCwd)"
+                      >
+                      <button
+                        type="button"
+                        class="tool-button inline-flex shrink-0 items-center gap-2 px-3 py-2 text-xs"
+                        :disabled="busy || (mode === 'edit' && !canEditCwd)"
+                        @click="showDirectoryPicker = true"
+                      >
+                        <FolderOpen class="h-4 w-4" />
+                        <span>选择</span>
+                      </button>
+                    </div>
+                    <datalist id="codex-manager-workspace-suggestions-mobile">
+                      <option v-for="item in workspaceSuggestions" :key="item" :value="item" />
+                    </datalist>
+                    <p v-if="duplicateCwdMessage" class="mt-2 text-[11px] leading-5 text-[var(--theme-warningText)]">
+                      {{ duplicateCwdMessage }}
+                    </p>
+                    <p v-else-if="cwdReadonlyMessage" class="theme-muted-text mt-2 text-[11px] leading-5">
+                      {{ cwdReadonlyMessage }}
+                    </p>
+                  </label>
+                </div>
+
+                <p v-if="error" class="theme-danger-text mt-4 inline-flex items-center gap-2 text-sm">
+                  <CircleAlert class="h-4 w-4" />
+                  <span>{{ error }}</span>
+                </p>
+
+                <div class="theme-divider mt-6 flex flex-col gap-3 border-t border-dashed pt-4">
+                  <button
+                    type="button"
+                    class="tool-button tool-button-primary w-full px-3 py-2 text-sm"
+                    :disabled="busy"
+                    @click="handleSubmit"
+                  >
+                    {{ mode === 'create'
+                      ? (creating ? '创建中...' : '创建项目')
+                      : (saving ? '保存中...' : '保存修改') }}
+                  </button>
+                  <button
+                    v-if="mode === 'edit' && activeSession"
+                    type="button"
+                    class="tool-button theme-danger-text theme-danger-hover w-full px-3 py-2 text-sm"
+                    :disabled="busy || sending"
+                    @click="showDeleteDialog = true"
+                  >
+                    {{ deleting ? '删除中...' : '删除项目' }}
+                  </button>
+                </div>
+              </div>
+
+              <div v-else class="space-y-3">
+                <div class="dashed-panel px-3 py-3">
+                  <div class="theme-muted-text text-[11px]">运行状态</div>
+                  <div class="mt-2 flex flex-wrap gap-2">
+                    <span class="inline-flex items-center gap-1 rounded-sm border border-dashed px-2 py-1 text-xs" :class="getRuntimeStatusClass(activeSession?.id)">
+                      <span v-if="isSessionRunning(activeSession?.id)" class="h-1.5 w-1.5 rounded-full bg-current animate-pulse" />
+                      {{ getRuntimeStatusLabel(activeSession?.id) }}
+                    </span>
+                    <span class="inline-flex items-center gap-1 rounded-sm border border-dashed px-2 py-1 text-xs" :class="getThreadStatusClass(activeSession)">
+                      {{ getThreadStatusLabel(activeSession) }}
+                    </span>
+                    <span
+                      v-if="activeSession?.id && isCurrentSession(activeSession.id)"
+                      class="theme-status-info inline-flex items-center gap-1 rounded-sm border border-dashed px-2 py-1 text-xs"
+                    >
+                      当前项目
+                    </span>
+                  </div>
+                </div>
+
+                <div class="dashed-panel px-3 py-3">
+                  <div class="theme-muted-text text-[11px]">工作目录</div>
+                  <div class="mt-2 break-all font-mono text-xs leading-6 text-[var(--theme-textPrimary)]">
+                    {{ activeSession?.cwd || '未设置' }}
+                  </div>
+                </div>
+
+                <div class="dashed-panel px-3 py-3">
+                  <div class="theme-muted-text text-[11px]">最近更新</div>
+                  <div class="mt-2 text-sm text-[var(--theme-textPrimary)]">
+                    {{ formatUpdatedAt(activeSession?.updatedAt) }}
+                  </div>
+                </div>
+
+                <div class="dashed-panel px-3 py-3">
+                  <div class="theme-muted-text inline-flex items-center gap-2 text-[11px]">
+                    <Info class="h-3.5 w-3.5" />
+                    <span>说明</span>
+                  </div>
+                  <p class="mt-2 text-xs leading-6 text-[var(--theme-textSecondary)]">
+                    项目绑定目录，目录不变时会继续复用同一个 Codex 线程。
+                  </p>
+                </div>
               </div>
             </div>
           </div>

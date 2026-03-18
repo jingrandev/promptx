@@ -70,11 +70,11 @@ onBeforeUnmount(() => {
   <Teleport to="body">
     <div
       v-if="open"
-      class="fixed inset-0 z-50 flex items-center justify-center bg-black/45 px-4 py-6 backdrop-blur-sm"
+      class="fixed inset-0 z-50 flex items-end justify-center bg-black/45 px-0 py-0 backdrop-blur-sm sm:items-center sm:px-4 sm:py-6"
       @click.self="emit('close')"
     >
-      <section class="panel flex h-[min(90vh,960px)] w-full max-w-[min(96vw,1560px)] min-h-0 flex-col overflow-hidden">
-        <div class="theme-divider flex items-start justify-between gap-4 border-b px-5 py-4">
+      <section class="panel flex h-full w-full min-h-0 flex-col overflow-hidden sm:h-[min(90vh,960px)] sm:max-w-[min(96vw,1560px)]">
+        <div class="theme-divider flex items-start justify-between gap-4 border-b px-4 py-4 sm:px-5">
           <div class="min-w-0">
             <div class="theme-heading inline-flex items-center gap-2 text-sm font-medium">
               <FileDiff class="h-4 w-4" />
@@ -91,7 +91,7 @@ onBeforeUnmount(() => {
           </button>
         </div>
 
-        <div class="min-h-0 flex-1 overflow-hidden p-4">
+        <div class="min-h-0 flex-1 overflow-hidden p-3 sm:p-4">
           <TaskDiffReviewPanel
             :task-slug="taskSlug"
             :active="open"

@@ -50,7 +50,7 @@ function getOptionClass(selected) {
     :options="sessions"
     :loading="loading"
     :disabled="disabled"
-    placeholder="请选择 PromptX 项目"
+    placeholder="请选择项目"
     empty-text="还没有项目，请先到管理弹窗里新建。"
     :get-option-value="(session) => session?.id || ''"
     @update:model-value="emit('update:modelValue', $event)"
@@ -69,7 +69,7 @@ function getOptionClass(selected) {
       </template>
       <template v-else>
         <div class="theme-muted-text text-sm">
-          {{ loading ? '正在同步项目...' : '请选择 PromptX 项目' }}
+          {{ loading ? '正在同步项目...' : '请选择项目' }}
         </div>
       </template>
     </template>

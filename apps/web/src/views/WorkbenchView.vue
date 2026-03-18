@@ -5,6 +5,7 @@ import {
   Blocks,
   CircleAlert,
   Copy,
+  PencilLine,
   Plus,
   SendHorizontal,
   Settings2,
@@ -36,6 +37,7 @@ const { toastMessage, flashToast, clearToast } = useToast()
 const codexPanelRef = ref(null)
 const isMobileLayout = ref(false)
 const mobileView = ref('tasks')
+const mobileDetailTab = ref('activity')
 const MOBILE_BREAKPOINT_QUERY = '(max-width: 1023px)'
 const MOBILE_DETAIL_HISTORY_KEY = 'promptxWorkbenchMobileView'
 let mobileMediaQueryList = null
@@ -97,6 +99,14 @@ const currentRenderedTask = computed(() =>
   renderedTasks.value.find((task) => task.slug === currentTaskSlug.value) || null
 )
 const currentTaskDiffSupported = computed(() => Boolean(currentRenderedTask.value?.workspaceDiffSummary?.supported))
+
+function resolvePreferredMobileDetailTab(task) {
+  if (task?.sending || Number(task?.codexRunCount || 0) > 0) {
+    return 'activity'
+  }
+
+  return 'input'
+}
 
 usePageTitle(pageTitle)
 
@@ -310,6 +320,7 @@ async function copyCodexPrompt() {
 async function handleCreateTask() {
   const created = await createTaskAndSelect()
   if (created && isMobileLayout.value) {
+    mobileDetailTab.value = 'input'
     enterMobileDetail()
   }
 }
@@ -325,6 +336,7 @@ async function handleTaskSelect(taskSlug) {
   }
 
   if (isMobileLayout.value && currentTaskSlug.value === targetSlug) {
+    mobileDetailTab.value = resolvePreferredMobileDetailTab(currentRenderedTask.value)
     enterMobileDetail()
   }
 }
@@ -341,6 +353,9 @@ async function sendToCodex() {
     return
   }
 
+  if (isMobileLayout.value) {
+    mobileDetailTab.value = 'activity'
+  }
   clearCurrentTaskContent({ silent: true })
   await saveTask({ auto: false, silent: true })
 }
@@ -789,17 +804,43 @@ onBeforeUnmount(() => {
                 <button
                   v-else
                   type="button"
-                  class="block w-full truncate bg-transparent p-0 text-left text-sm font-semibold leading-6"
+                  class="inline-flex w-full items-center gap-2 truncate bg-transparent p-0 text-left text-sm font-semibold leading-6"
                   :disabled="!currentTaskSlug"
                   @click="beginTaskTitleEdit(currentTaskSlug)"
-                >{{ currentTaskDisplayTitle || '未命名任务' }}</button>
+                >
+                  <span class="truncate">{{ currentTaskDisplayTitle || '未命名任务' }}</span>
+                  <PencilLine class="h-3.5 w-3.5 shrink-0 opacity-50" />
+                </button>
               </div>
             </div>
           </div>
         </section>
 
-        <div class="grid min-h-0 flex-1 gap-3 grid-rows-[minmax(0,1.3fr)_minmax(0,0.7fr)] overflow-hidden">
-          <div class="min-h-0 min-w-0 overflow-hidden">
+        <section class="panel shrink-0 overflow-hidden">
+          <div class="theme-divider border-b px-3 py-3">
+            <div class="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                class="tool-button px-3 py-2 text-sm"
+                :class="mobileDetailTab === 'activity' ? 'tool-button-primary' : ''"
+                @click="mobileDetailTab = 'activity'"
+              >
+                执行
+              </button>
+              <button
+                type="button"
+                class="tool-button px-3 py-2 text-sm"
+                :class="mobileDetailTab === 'input' ? 'tool-button-primary' : ''"
+                @click="mobileDetailTab = 'input'"
+              >
+                输入
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <div class="min-h-0 flex-1 overflow-hidden">
+          <div v-show="mobileDetailTab === 'activity'" class="h-full min-h-0">
             <div v-if="currentRenderedTask" class="h-full min-h-0">
               <CodexSessionPanel
                 ref="codexPanelRef"
@@ -820,7 +861,7 @@ onBeforeUnmount(() => {
             </section>
           </div>
 
-          <div class="min-h-0 min-w-0 overflow-hidden">
+          <div v-show="mobileDetailTab === 'input'" class="h-full min-h-0">
             <section v-if="loadingTask && !draft.blocks.length" class="panel theme-muted-text flex h-full items-center px-5 py-4 text-sm">
               正在加载任务内容...
             </section>
