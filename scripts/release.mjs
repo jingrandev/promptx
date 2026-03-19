@@ -46,6 +46,7 @@ function runCommand(command, commandArgs = [], options = {}) {
     const child = spawn(command, commandArgs, {
       cwd: rootDir,
       stdio: 'inherit',
+      windowsHide: true,
       env: {
         ...process.env,
         ...(options.env || {}),
@@ -73,6 +74,7 @@ function execCapture(command, commandArgs = []) {
     const child = spawn(command, commandArgs, {
       cwd: rootDir,
       stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
       env: process.env,
       shell: false,
     })

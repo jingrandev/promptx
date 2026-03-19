@@ -13,6 +13,7 @@ function spawnChild(command, args, env = {}) {
   return spawn(command, args, {
     cwd: process.cwd(),
     stdio: 'inherit',
+    windowsHide: true,
     env: {
       ...process.env,
       ...env,

@@ -67,6 +67,7 @@ function resolveCodexBinary() {
     const output = execFileSync('where.exe', [CODEX_BIN], {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
+      windowsHide: true,
     }).trim()
 
     if (!output) {
@@ -93,12 +94,14 @@ function execCodex(args = []) {
     return execFileSync(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', resolvedCodexBin, ...args], {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
     })
   }
 
   return execFileSync(resolvedCodexBin, args, {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: true,
   })
 }
 

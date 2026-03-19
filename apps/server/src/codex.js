@@ -49,6 +49,7 @@ function resolveCodexBinary() {
     const output = execFileSync('where.exe', [CODEX_BIN], {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
+      windowsHide: true,
     }).trim()
 
     if (!output) {
@@ -73,6 +74,7 @@ function createCodexSpawn(commandArgs = [], cwd = '') {
   const options = {
     env: process.env,
     stdio: ['pipe', 'pipe', 'pipe'],
+    windowsHide: true,
   }
   const normalizedCwd = String(cwd || '').trim()
 
@@ -570,6 +572,7 @@ export function streamPromptToCodexSession(sessionInput, prompt, callbacks = {})
         try {
           execFileSync('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], {
             stdio: 'ignore',
+            windowsHide: true,
           })
           return
         } catch {

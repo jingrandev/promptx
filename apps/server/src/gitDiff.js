@@ -58,6 +58,7 @@ function runGit(repoRoot = '', args = [], options = {}) {
   const result = spawnSync('git', ['-C', repoRoot, ...args], {
     encoding: 'utf8',
     maxBuffer: 8 * 1024 * 1024,
+    windowsHide: true,
     ...options,
   })
 
@@ -72,6 +73,7 @@ function runGitBuffer(repoRoot = '', args = [], options = {}) {
   const result = spawnSync('git', ['-C', repoRoot, ...args], {
     encoding: 'buffer',
     maxBuffer: 8 * 1024 * 1024,
+    windowsHide: true,
     ...options,
   })
 

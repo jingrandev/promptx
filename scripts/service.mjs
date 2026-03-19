@@ -170,6 +170,7 @@ async function startService() {
     cwd: rootDir,
     detached: true,
     stdio: ['ignore', logFd, logFd],
+    windowsHide: true,
     env: {
       ...process.env,
       HOST: host,

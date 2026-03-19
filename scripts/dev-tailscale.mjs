@@ -89,6 +89,7 @@ function detectTailscaleIp() {
   const output = execFileSync('tailscale', ['ip', '-4'], {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: true,
   })
 
   const candidates = String(output || '')
@@ -122,6 +123,7 @@ function spawnChild(command, childArgs, options = {}) {
   return spawn(command, childArgs, {
     cwd: process.cwd(),
     stdio: 'inherit',
+    windowsHide: true,
     env: {
       ...process.env,
       ...(options.env || {}),

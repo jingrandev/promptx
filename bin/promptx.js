@@ -55,6 +55,7 @@ function runNodeScript(scriptPath, args = []) {
     cwd: rootDir,
     stdio: 'inherit',
     env: process.env,
+    windowsHide: true,
   })
 
   child.on('exit', (code, signal) => {
