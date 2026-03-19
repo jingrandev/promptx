@@ -10,6 +10,7 @@ const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const packageJsonPath = path.join(rootDir, 'package.json')
 const serviceScriptPath = path.join(rootDir, 'scripts', 'service.mjs')
 const doctorScriptPath = path.join(rootDir, 'scripts', 'doctor.mjs')
+const relayScriptPath = path.join(rootDir, 'scripts', 'relay.mjs')
 
 function readCliVersion() {
   try {
@@ -39,6 +40,7 @@ PromptX CLI
   promptx status
   promptx doctor
   promptx version
+  promptx relay start
 
 说明：
   - start: 后台启动 PromptX，本机默认地址 http://127.0.0.1:3000
@@ -47,6 +49,7 @@ PromptX CLI
   - status: 查看当前运行状态
   - doctor: 检查 Node、Codex、数据目录、端口和打包产物
   - version: 输出当前版本
+  - relay start: 启动 PromptX Relay 中转服务
 `.trim())
 }
 
@@ -68,6 +71,7 @@ function runNodeScript(scriptPath, args = []) {
 }
 
 const command = String(process.argv[2] || 'help').trim()
+const subCommand = String(process.argv[3] || '').trim()
 
 if (
   !command
@@ -89,8 +93,10 @@ if (
   runNodeScript(serviceScriptPath, [command])
 } else if (command === 'doctor') {
   runNodeScript(doctorScriptPath)
+} else if (command === 'relay' && subCommand === 'start') {
+  runNodeScript(relayScriptPath)
 } else {
   console.error(`[promptx] 不支持的命令：${command}`)
-  console.error('[promptx] 可用命令：start / stop / restart / status / doctor / version')
+  console.error('[promptx] 可用命令：start / stop / restart / status / doctor / version / relay start')
   process.exitCode = 1
 }

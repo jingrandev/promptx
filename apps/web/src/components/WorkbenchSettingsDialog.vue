@@ -1,8 +1,8 @@
 <script setup>
-import { onBeforeUnmount, ref, watch } from 'vue'
-import { Settings2, X } from 'lucide-vue-next'
+import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
+import { LoaderCircle, Settings2, Wifi, X } from 'lucide-vue-next'
 import ThemeToggle from './ThemeToggle.vue'
-import { getMeta } from '../lib/api.js'
+import { getMeta, getRelayConfig, updateRelayConfig } from '../lib/api.js'
 
 const props = defineProps({
   open: {
@@ -15,6 +15,44 @@ const emit = defineEmits(['close'])
 const version = ref('')
 const versionLoading = ref(false)
 const versionError = ref('')
+const relayLoading = ref(false)
+const relaySaving = ref(false)
+const relayError = ref('')
+const relaySuccess = ref('')
+const relayStatus = ref(null)
+const relayManagedByEnv = ref(false)
+const relayForm = reactive({
+  enabled: false,
+  relayUrl: '',
+  deviceId: '',
+  deviceToken: '',
+})
+
+const relayStatusLabel = computed(() => {
+  if (relaySaving.value) {
+    return '保存中...'
+  }
+  if (relayLoading.value) {
+    return '读取中...'
+  }
+  if (relayStatus.value?.connected) {
+    return '已连接'
+  }
+  if (relayForm.enabled) {
+    return '未连接'
+  }
+  return '未启用'
+})
+
+const relayStatusClass = computed(() => {
+  if (relayStatus.value?.connected) {
+    return 'theme-status-success'
+  }
+  if (relayForm.enabled) {
+    return 'theme-status-warning'
+  }
+  return 'theme-status-neutral'
+})
 
 async function loadMeta() {
   versionLoading.value = true
@@ -35,6 +73,56 @@ async function loadMeta() {
   }
 }
 
+function syncRelayForm(payload = {}) {
+  relayForm.enabled = Boolean(payload?.enabled)
+  relayForm.relayUrl = String(payload?.relayUrl || '')
+  relayForm.deviceId = String(payload?.deviceId || '')
+  relayForm.deviceToken = String(payload?.deviceToken || '')
+}
+
+async function loadRelayConfig() {
+  relayLoading.value = true
+  relayError.value = ''
+  relaySuccess.value = ''
+
+  try {
+    const payload = await getRelayConfig()
+    syncRelayForm(payload?.config || {})
+    relayManagedByEnv.value = Boolean(payload?.managedByEnv)
+    relayStatus.value = payload?.relay || null
+  } catch (error) {
+    relayError.value = error?.message || '远程访问配置读取失败。'
+    relayStatus.value = null
+  } finally {
+    relayLoading.value = false
+  }
+}
+
+async function handleSaveRelay() {
+  relaySaving.value = true
+  relayError.value = ''
+  relaySuccess.value = ''
+
+  try {
+    const payload = await updateRelayConfig({
+      enabled: relayForm.enabled,
+      relayUrl: relayForm.relayUrl,
+      deviceId: relayForm.deviceId,
+      deviceToken: relayForm.deviceToken,
+    })
+    syncRelayForm(payload?.config || {})
+    relayManagedByEnv.value = Boolean(payload?.managedByEnv)
+    relayStatus.value = payload?.relay || null
+    relaySuccess.value = relayForm.enabled
+      ? '远程访问配置已保存，PromptX 正在尝试连接 Relay。'
+      : '远程访问已关闭。'
+  } catch (error) {
+    relayError.value = error?.message || '远程访问配置保存失败。'
+  } finally {
+    relaySaving.value = false
+  }
+}
+
 function handleKeydown(event) {
   if (!props.open) {
     return
@@ -52,6 +140,7 @@ watch(
     if (open) {
       window.addEventListener('keydown', handleKeydown)
       loadMeta()
+      loadRelayConfig()
       return
     }
 
@@ -95,6 +184,112 @@ onBeforeUnmount(() => {
         <div class="space-y-6 px-5 py-5">
           <section class="rounded-sm border border-dashed border-[var(--theme-borderDefault)] bg-[var(--theme-appPanelMuted)] px-4 py-4">
             <ThemeToggle />
+          </section>
+
+          <section class="space-y-4 rounded-sm border border-dashed border-[var(--theme-borderDefault)] bg-[var(--theme-appPanelMuted)] px-4 py-4">
+            <div class="flex items-start justify-between gap-3">
+              <div>
+                <div class="theme-heading inline-flex items-center gap-2 text-sm font-medium">
+                  <Wifi class="h-4 w-4" />
+                  <span>远程访问 Relay</span>
+                </div>
+                <p class="theme-muted-text mt-1 text-xs leading-5">
+                  配好后，本机 PromptX 会主动连接你的公网 Relay，手机可通过该地址访问。
+                </p>
+              </div>
+              <span
+                class="rounded-sm border border-dashed px-2.5 py-1 text-xs font-medium"
+                :class="relayStatusClass"
+              >
+                {{ relayStatusLabel }}
+              </span>
+            </div>
+
+            <label class="flex items-center justify-between gap-3 rounded-sm border border-dashed border-[var(--theme-borderDefault)] bg-[var(--theme-appPanelStrong)] px-3 py-2">
+              <div>
+                <div class="text-sm font-medium text-[var(--theme-textPrimary)]">启用远程访问</div>
+                <p class="theme-muted-text mt-1 text-xs">关闭后，本机会主动断开当前 Relay 连接。</p>
+              </div>
+                <input
+                  v-model="relayForm.enabled"
+                  type="checkbox"
+                  class="h-4 w-4"
+                  :disabled="relayManagedByEnv"
+                />
+              </label>
+
+            <div class="grid gap-4 sm:grid-cols-2">
+              <label class="space-y-1.5 sm:col-span-2">
+                <span class="theme-muted-text text-xs">Relay 地址</span>
+                <input
+                  v-model="relayForm.relayUrl"
+                  type="text"
+                  placeholder="https://relay.example.com"
+                  class="w-full rounded-sm border border-[var(--theme-inputBorder)] bg-[var(--theme-inputBg)] px-3 py-2 text-sm text-[var(--theme-textPrimary)] outline-none transition focus:border-[var(--theme-borderStrong)]"
+                  :disabled="relayManagedByEnv"
+                >
+              </label>
+
+              <label class="space-y-1.5">
+                <span class="theme-muted-text text-xs">设备 ID</span>
+                <input
+                  v-model="relayForm.deviceId"
+                  type="text"
+                  placeholder="my-macbook"
+                  class="w-full rounded-sm border border-[var(--theme-inputBorder)] bg-[var(--theme-inputBg)] px-3 py-2 text-sm text-[var(--theme-textPrimary)] outline-none transition focus:border-[var(--theme-borderStrong)]"
+                  :disabled="relayManagedByEnv"
+                >
+              </label>
+
+              <label class="space-y-1.5">
+                <span class="theme-muted-text text-xs">设备 Token</span>
+                <input
+                  v-model="relayForm.deviceToken"
+                  type="password"
+                  placeholder="请输入云端 Relay 的设备 token"
+                  class="w-full rounded-sm border border-[var(--theme-inputBorder)] bg-[var(--theme-inputBg)] px-3 py-2 text-sm text-[var(--theme-textPrimary)] outline-none transition focus:border-[var(--theme-borderStrong)]"
+                  :disabled="relayManagedByEnv"
+                >
+              </label>
+            </div>
+
+            <div class="flex flex-wrap items-center justify-between gap-3">
+              <div class="min-w-0 space-y-1">
+                <p
+                  v-if="relayManagedByEnv"
+                  class="theme-status-warning text-xs leading-5"
+                >
+                  当前 Relay 配置由环境变量接管，设置页仅展示实际值，修改环境变量后需重启服务。
+                </p>
+                <p v-if="relayError" class="theme-danger-text text-xs leading-5">{{ relayError }}</p>
+                <p v-else-if="relaySuccess" class="theme-status-success text-xs leading-5">{{ relaySuccess }}</p>
+                <p
+                  v-else-if="relayStatus?.lastError"
+                  class="theme-danger-text text-xs leading-5"
+                >
+                  最近错误：{{ relayStatus.lastError }}
+                </p>
+                <p
+                  v-else-if="relayStatus?.lastConnectedAt"
+                  class="theme-muted-text text-xs leading-5"
+                >
+                  最近连接：{{ new Date(relayStatus.lastConnectedAt).toLocaleString('zh-CN') }}
+                </p>
+                <p v-else class="theme-muted-text text-xs leading-5">
+                  建议公网 Relay 使用 HTTPS，并确保云端与本机使用同一个设备 Token。
+                </p>
+              </div>
+
+              <button
+                type="button"
+                class="tool-button tool-button-primary inline-flex items-center gap-2 px-3 py-2 text-xs"
+                :disabled="relayLoading || relaySaving || relayManagedByEnv"
+                @click="handleSaveRelay"
+              >
+                <LoaderCircle v-if="relaySaving" class="h-4 w-4 animate-spin" />
+                <span>{{ relaySaving ? '保存中...' : '保存远程访问配置' }}</span>
+              </button>
+            </div>
           </section>
 
           <section class="rounded-sm border border-dashed border-[var(--theme-borderDefault)] bg-[var(--theme-appPanelMuted)] px-4 py-4">

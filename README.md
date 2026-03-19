@@ -36,11 +36,17 @@ promptx doctor
 promptx start
 promptx status
 promptx stop
+promptx relay start
 ```
 
 ```bash
 promptx doctor
 ```
+
+其中：
+
+- `promptx start`：启动本机 PromptX 工作台
+- `promptx relay start`：启动公网中转服务，适合部署到你自己的云服务器
 
 ## 使用方式
 
@@ -49,6 +55,32 @@ promptx doctor
 3. 在中间选择一个 PromptX 项目
 4. 点击发送，把当前内容交给 Codex
 5. 在中间继续查看执行过程，并按需多轮发送
+
+## 远程访问 Relay（预览）
+
+如果你希望在手机上远程访问自己电脑上的 PromptX，可以把同一个 npm 包安装到公网机器上，启动一个专用的 PromptX Relay。
+
+云服务器上：
+
+```bash
+export PROMPTX_RELAY_HOST=0.0.0.0
+export PROMPTX_RELAY_PORT=3030
+export PROMPTX_RELAY_PUBLIC_URL=https://relay.example.com
+export PROMPTX_RELAY_DEVICE_TOKEN=请换成你自己的长 token
+export PROMPTX_RELAY_ACCESS_TOKEN=手机端访问用的口令
+promptx relay start
+```
+
+本地 PromptX 所在电脑上：
+
+```bash
+export PROMPTX_RELAY_URL=https://relay.example.com
+export PROMPTX_RELAY_DEVICE_ID=my-macbook
+export PROMPTX_RELAY_DEVICE_TOKEN=请与云端保持一致
+promptx start
+```
+
+此时手机访问你的 Relay 地址即可。为了浏览器、WebSocket 与上传更稳定，强烈建议公网 Relay 使用 HTTPS。
 
 ## 禅道扩展
 
