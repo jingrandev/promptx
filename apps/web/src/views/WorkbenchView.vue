@@ -1,6 +1,7 @@
 <script setup>
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
+import EditTaskDialog from '../components/EditTaskDialog.vue'
 import WorkbenchActivityPanel from '../components/WorkbenchActivityPanel.vue'
 import WorkbenchInputPanel from '../components/WorkbenchInputPanel.vue'
 import WorkbenchMobileDetailHeader from '../components/WorkbenchMobileDetailHeader.vue'
@@ -15,6 +16,7 @@ const showClearDialog = ref(false)
 const showDeleteDialog = ref(false)
 const showDiffDialog = ref(false)
 const showSettingsDialog = ref(false)
+const showEditTaskDialog = ref(false)
 const editingTaskTitleSlug = ref('')
 const diffFocusToken = ref(0)
 const preferredDiffScope = ref('workspace')
@@ -40,6 +42,7 @@ function scrollCurrentPanelToBottom() {
 }
 
 const {
+  applyTaskSettingsUpdate,
   buildPromptForTask,
   getPromptBlocksForTask,
   clearCurrentTaskContent,
@@ -171,6 +174,22 @@ function openSettingsDialog() {
 
 function closeSettingsDialog() {
   showSettingsDialog.value = false
+}
+
+function openEditTaskDialog() {
+  if (!currentTaskSlug.value) {
+    return
+  }
+
+  showEditTaskDialog.value = true
+}
+
+function closeEditTaskDialog() {
+  showEditTaskDialog.value = false
+}
+
+function handleTaskSettingsSaved(task) {
+  applyTaskSettingsUpdate(task)
 }
 
 function updateDraftTitle(value) {
@@ -309,6 +328,7 @@ async function sendToCodex() {
     return
   }
 
+  const shouldPreserveDraftAfterSend = Boolean(currentRenderedTask.value?.automation?.enabled)
   await flushCurrentEditorInput()
   updateLastPromptPreview(taskSlug, buildPromptForTask(taskSlug))
   const didSend = await getCurrentPanelRef(taskSlug)?.send?.()
@@ -319,12 +339,11 @@ async function sendToCodex() {
   if (isMobileLayout.value) {
     mobileDetailTab.value = 'activity'
   }
-  clearCurrentTaskContent({ silent: true })
-  await saveTask({ auto: false, silent: true })
-}
 
-function stopCodex() {
-  getCurrentPanelRef(currentTaskSlug.value)?.stop?.()
+  if (!shouldPreserveDraftAfterSend) {
+    clearCurrentTaskContent({ silent: true })
+  }
+  await saveTask({ auto: false, silent: true })
 }
 
 function focusMobileEditorIfNeeded() {
@@ -391,11 +410,12 @@ watch(
 )
 
 const taskListPanelListeners = {
-  'update:draft-title': updateDraftTitle,
+  'update:draftTitle': updateDraftTitle,
   'cancel-title-edit': () => {
     editingTaskTitleSlug.value = ''
   },
   'create-task': handleCreateTask,
+  'edit-task': openEditTaskDialog,
   'delete-task': openDeleteDialog,
   'open-settings': openSettingsDialog,
   'select-task': handleTaskSelect,
@@ -415,7 +435,6 @@ const inputPanelListeners = {
   'import-pdf-files': handleImportPdfFiles,
   'import-text-files': handleImportTextFiles,
   'send-request': sendToCodex,
-  'stop-request': stopCodex,
   'upload-files': handleUpload,
 }
 
@@ -426,7 +445,7 @@ const mobileDetailHeaderListeners = {
     editingTaskTitleSlug.value = ''
   },
   'title-blur': handleTaskTitleBlur,
-  'update:title-input-value': updateDraftTitle,
+  'update:titleInputValue': updateDraftTitle,
 }
 </script>
 
@@ -468,6 +487,14 @@ const mobileDetailHeaderListeners = {
       v-if="showSettingsDialog"
       :open="showSettingsDialog"
       @close="closeSettingsDialog"
+    />
+    <EditTaskDialog
+      v-if="showEditTaskDialog"
+      :open="showEditTaskDialog"
+      :task-slug="currentTaskSlug"
+      :task-title="currentTaskDisplayTitle"
+      @close="closeEditTaskDialog"
+      @saved="handleTaskSettingsSaved"
     />
 
     <div v-if="!isMobileLayout" class="grid min-h-0 flex-1 gap-4 lg:grid-cols-[260px_minmax(0,1fr)] lg:grid-rows-1">

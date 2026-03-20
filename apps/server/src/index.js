@@ -19,9 +19,12 @@ import {
   createTask,
   deleteTask,
   getTaskBySlug,
+  listAutomationEnabledTasks,
   listTasks,
   purgeExpiredTasks,
+  updateTaskAutomationRuntime,
   updateTaskCodexSession,
+  updateTaskNotificationDelivery,
   updateTask,
 } from './repository.js'
 import {
@@ -62,6 +65,7 @@ import { ensurePromptxStorageReady, serverRootDir } from './appPaths.js'
 import { createRelayClient } from './relayClient.js'
 import { getRelayConfigForClient, isRelayConfigManagedByEnv, writeStoredRelayConfig } from './relayConfig.js'
 import { createSseHub } from './sseHub.js'
+import { createTaskAutomationService } from './taskAutomation.js'
 
 const app = Fastify({ logger: true })
 const port = Number(process.env.PORT || 3000)
@@ -94,9 +98,37 @@ const relayClient = createRelayClient({
 
 let lastExpiredPurgeAt = 0
 const sseHub = createSseHub()
+const localServerBaseUrl = process.env.PROMPTX_RELAY_LOCAL_BASE_URL || `http://127.0.0.1:${port}`
+const publicServerBaseUrl = String(
+  process.env.PROMPTX_PUBLIC_URL
+  || relayConfig?.relayUrl
+  || localServerBaseUrl
+).trim().replace(/\/+$/, '')
 
 function broadcastServerEvent(type, payload = {}) {
   sseHub.broadcast(type, payload)
+}
+
+function updateTaskAutomationRuntimeWithBroadcast(taskSlug, patch = {}) {
+  const task = updateTaskAutomationRuntime(taskSlug, patch)
+  if (task) {
+    broadcastServerEvent('tasks.changed', {
+      taskSlug,
+      reason: 'automation-updated',
+    })
+  }
+  return task
+}
+
+function updateTaskNotificationDeliveryWithBroadcast(taskSlug, patch = {}) {
+  const task = updateTaskNotificationDelivery(taskSlug, patch)
+  if (task) {
+    broadcastServerEvent('tasks.changed', {
+      taskSlug,
+      reason: 'notification-updated',
+    })
+  }
+  return task
 }
 
 function getRunningSessionIdSet() {
@@ -195,6 +227,77 @@ function listTaskWorkspaceDiffSummaries(limit = 30) {
   }))
 }
 
+function buildTaskDetailUrl(taskSlug = '', options = {}) {
+  const normalizedSlug = String(taskSlug || '').trim()
+  if (!normalizedSlug) {
+    return publicServerBaseUrl || localServerBaseUrl
+  }
+
+  if (options.raw) {
+    return `${localServerBaseUrl}/api/tasks/${normalizedSlug}/raw`
+  }
+
+  return `${publicServerBaseUrl || localServerBaseUrl}/?task=${encodeURIComponent(normalizedSlug)}`
+}
+
+function startTaskRunForTask({ taskSlug = '', sessionId = '', prompt = '', promptBlocks = [] } = {}) {
+  const normalizedTaskSlug = String(taskSlug || '').trim()
+  const normalizedSessionId = String(sessionId || '').trim()
+  const normalizedPrompt = String(prompt || '').trim()
+
+  if (!normalizedTaskSlug) {
+    throw new Error('任务不存在。')
+  }
+  if (!normalizedSessionId) {
+    throw new Error('请先选择一个 PromptX 项目。')
+  }
+  if (!normalizedPrompt) {
+    throw new Error('没有可发送的提示词。')
+  }
+
+  const task = getTaskBySlug(normalizedTaskSlug)
+  if (!task || task.expired) {
+    throw new Error('任务不存在。')
+  }
+
+  const session = getPromptxCodexSessionById(normalizedSessionId)
+  if (!session) {
+    throw new Error('没有找到对应的 PromptX 项目。')
+  }
+
+  const runningRunOnSession = getRunningCodexRunBySessionId(normalizedSessionId)
+  if (runningRunOnSession) {
+    throw new Error('当前项目正在执行中，请等待完成后再发送。')
+  }
+
+  const runRecord = createCodexRun({
+    taskSlug: normalizedTaskSlug,
+    sessionId: normalizedSessionId,
+    prompt: normalizedPrompt,
+    promptBlocks: Array.isArray(promptBlocks) ? promptBlocks : [],
+  })
+
+  updateTaskCodexSession(normalizedTaskSlug, normalizedSessionId)
+  codexRunRuntime.start(runRecord)
+
+  broadcastServerEvent('tasks.changed', {
+    taskSlug: normalizedTaskSlug,
+    reason: 'session-linked',
+  })
+  broadcastServerEvent('runs.changed', {
+    taskSlug: normalizedTaskSlug,
+    runId: runRecord.id,
+  })
+  broadcastServerEvent('sessions.changed', {
+    sessionId: normalizedSessionId,
+  })
+
+  return {
+    run: getCodexRunById(runRecord.id),
+    session: decorateCodexSession(getPromptxCodexSessionById(normalizedSessionId)),
+  }
+}
+
 const codexRunRuntime = createAgentRunRuntime({
   decorateSession: decorateCodexSession,
   onRunEvent({ taskSlug, runId, event }) {
@@ -209,12 +312,28 @@ const codexRunRuntime = createAgentRunRuntime({
       taskSlug,
       runId,
     })
+    const run = getCodexRunById(runId)
+    if (run?.completed) {
+      taskAutomationService.notifyRun(taskSlug, runId).catch(() => {})
+    }
   },
   onSessionChanged({ sessionId }) {
     broadcastServerEvent('sessions.changed', {
       sessionId,
     })
   },
+})
+
+const taskAutomationService = createTaskAutomationService({
+  logger: app.log,
+  getRunningCodexRunByTaskSlug,
+  listAutomationEnabledTasks,
+  updateTaskAutomationRuntime: updateTaskAutomationRuntimeWithBroadcast,
+  updateTaskNotificationDelivery: updateTaskNotificationDeliveryWithBroadcast,
+  createTaskRun: async (payload) => startTaskRunForTask(payload),
+  getTaskBySlug,
+  getRunById: getCodexRunById,
+  detailUrlBuilder: buildTaskDetailUrl,
 })
 
 function buildServerAccessUrls(hostname, currentPort) {
@@ -421,7 +540,12 @@ app.get('/api/tasks/workspace-diff-summaries', async (request) => {
 
 app.post('/api/tasks', async (request, reply) => {
   purgeExpiredContent()
-  const task = createTask(request.body || {})
+  let task
+  try {
+    task = createTask(request.body || {})
+  } catch (error) {
+    return reply.code(400).send({ message: error.message || '任务创建失败。' })
+  }
   broadcastServerEvent('tasks.changed', {
     taskSlug: task.slug,
     reason: 'created',
@@ -447,7 +571,12 @@ app.get('/api/tasks/:slug', async (request, reply) => {
 
 app.put('/api/tasks/:slug', async (request, reply) => {
   purgeExpiredContent()
-  const result = updateTask(request.params.slug, request.body || {})
+  let result
+  try {
+    result = updateTask(request.params.slug, request.body || {})
+  } catch (error) {
+    return reply.code(400).send({ message: error.message || '任务更新失败。' })
+  }
   if (result.error === 'not_found') {
     return reply.code(404).send({ message: '任务不存在。' })
   }
@@ -560,58 +689,27 @@ app.get('/api/tasks/:slug/git-diff', async (request, reply) => {
 
 app.post('/api/tasks/:slug/codex-runs', async (request, reply) => {
   purgeExpiredContent()
-  const task = getTaskBySlug(request.params.slug)
-  if (!task || task.expired) {
-    return reply.code(404).send({ message: '任务不存在。' })
+  try {
+    const payload = startTaskRunForTask({
+      taskSlug: request.params.slug,
+      sessionId: request.body?.sessionId,
+      prompt: request.body?.prompt,
+      promptBlocks: request.body?.promptBlocks,
+    })
+    return reply.code(201).send(payload)
+  } catch (error) {
+    const message = String(error?.message || '')
+    if (message.includes('请先选择') || message.includes('没有可发送')) {
+      return reply.code(400).send({ message })
+    }
+    if (message.includes('没有找到对应的 PromptX 项目') || message.includes('任务不存在')) {
+      return reply.code(404).send({ message })
+    }
+    if (message.includes('当前项目正在执行中')) {
+      return reply.code(409).send({ message })
+    }
+    throw error
   }
-
-  const sessionId = String(request.body?.sessionId || '').trim()
-  const prompt = String(request.body?.prompt || '').trim()
-  const promptBlocks = Array.isArray(request.body?.promptBlocks) ? request.body.promptBlocks : []
-
-  if (!sessionId) {
-    return reply.code(400).send({ message: '请先选择一个 PromptX 项目。' })
-  }
-  if (!prompt) {
-    return reply.code(400).send({ message: '没有可发送的提示词。' })
-  }
-
-  const session = getPromptxCodexSessionById(sessionId)
-  if (!session) {
-    return reply.code(404).send({ message: '没有找到对应的 PromptX 项目。' })
-  }
-
-  const runningRunOnSession = getRunningCodexRunBySessionId(sessionId)
-  if (runningRunOnSession) {
-    return reply.code(409).send({ message: '当前项目正在执行中，请等待完成后再发送。' })
-  }
-
-  const runRecord = createCodexRun({
-    taskSlug: request.params.slug,
-    sessionId,
-    prompt,
-    promptBlocks,
-  })
-
-  updateTaskCodexSession(request.params.slug, sessionId)
-  codexRunRuntime.start(runRecord)
-
-  broadcastServerEvent('tasks.changed', {
-    taskSlug: request.params.slug,
-    reason: 'session-linked',
-  })
-  broadcastServerEvent('runs.changed', {
-    taskSlug: request.params.slug,
-    runId: runRecord.id,
-  })
-  broadcastServerEvent('sessions.changed', {
-    sessionId,
-  })
-
-  return reply.code(201).send({
-    run: getCodexRunById(runRecord.id),
-    session: decorateCodexSession(getPromptxCodexSessionById(sessionId)),
-  })
 })
 
 app.delete('/api/tasks/:slug/codex-runs', async (request, reply) => {
@@ -977,6 +1075,7 @@ app.listen({ port, host }).then(() => {
   buildServerAccessUrls(host, port).forEach((message) => {
     app.log.info(message)
   })
+  taskAutomationService.start()
   relayClient.start()
 })
 

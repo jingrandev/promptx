@@ -1,5 +1,5 @@
 <script setup>
-import { Blocks, CircleAlert, Plus, Settings2, Trash2 } from 'lucide-vue-next'
+import { Blocks, CircleAlert, PencilLine, Plus, Settings2, Trash2 } from 'lucide-vue-next'
 
 const props = defineProps({
   loadingTasks: {
@@ -64,6 +64,7 @@ const emit = defineEmits([
   'title-blur',
   'cancel-title-edit',
   'update:draftTitle',
+  'edit-task',
   'delete-task',
 ])
 
@@ -221,15 +222,26 @@ function getTaskWorkspaceBadgeClass(task) {
         <CircleAlert class="mt-0.5 h-4 w-4 shrink-0" />
         <span class="min-w-0 break-words">{{ error }}</span>
       </div>
-      <button
-        type="button"
-        class="tool-button theme-danger-text theme-danger-hover inline-flex w-full items-center justify-center gap-2 px-3 py-2 text-sm"
-        :disabled="!currentTaskSlug || removingTask || creatingTask || isCurrentTaskSending"
-        @click="emit('delete-task')"
-      >
-        <Trash2 class="h-4 w-4" />
-        <span>{{ removingTask ? '删除中...' : '删除当前任务' }}</span>
-      </button>
+      <div class="grid grid-cols-2 gap-2">
+        <button
+          type="button"
+          class="tool-button inline-flex w-full items-center justify-center gap-2 px-3 py-2 text-sm"
+          :disabled="!currentTaskSlug || removingTask || creatingTask"
+          @click="emit('edit-task')"
+        >
+          <PencilLine class="h-4 w-4" />
+          <span>编辑任务</span>
+        </button>
+        <button
+          type="button"
+          class="tool-button theme-danger-text theme-danger-hover inline-flex w-full items-center justify-center gap-2 px-3 py-2 text-sm"
+          :disabled="!currentTaskSlug || removingTask || creatingTask || isCurrentTaskSending"
+          @click="emit('delete-task')"
+        >
+          <Trash2 class="h-4 w-4" />
+          <span>{{ removingTask ? '删除中...' : '删除任务' }}</span>
+        </button>
+      </div>
     </div>
   </aside>
 </template>

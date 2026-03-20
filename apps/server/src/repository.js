@@ -1,10 +1,19 @@
 import { customAlphabet } from 'nanoid'
 import {
   BLOCK_TYPES,
+  TASK_AUTOMATION_CONCURRENCY_POLICIES,
+  TASK_NOTIFICATION_CHANNELS,
+  TASK_NOTIFICATION_MESSAGE_MODES,
+  TASK_NOTIFICATION_TRIGGERS,
   buildRawTaskText,
   clampText,
   deriveTitleFromBlocks,
   getExpiryValue,
+  normalizeTaskAutomationConcurrencyPolicy,
+  normalizeTaskAutomationTimezone,
+  normalizeTaskNotificationChannel,
+  normalizeTaskNotificationMessageMode,
+  normalizeTaskNotificationTrigger,
   normalizeExpiry,
   normalizeVisibility,
   resolveExpiresAt,
@@ -12,6 +21,7 @@ import {
   summarizeTask,
 } from '../../../packages/shared/src/index.js'
 import { all, get, run, transaction } from './db.js'
+import { getNextCronOccurrence, normalizeCronExpression } from './taskAutomation.js'
 
 const slugTail = customAlphabet('abcdefghijkmnpqrstuvwxyz23456789', 6)
 const tokenId = customAlphabet('abcdefghijkmnpqrstuvwxyz23456789', 20)
@@ -41,9 +51,80 @@ function toTask(row, blocks = [], options = {}) {
     expiresAt: row.expires_at,
     expiry: getExpiryValue(row.expires_at),
     codexRunCount,
+    automation: {
+      enabled: Boolean(Number(row.automation_enabled) || 0),
+      cron: String(row.automation_cron || ''),
+      timezone: normalizeTaskAutomationTimezone(row.automation_timezone),
+      concurrencyPolicy: normalizeTaskAutomationConcurrencyPolicy(row.automation_concurrency_policy),
+      lastTriggeredAt: String(row.automation_last_triggered_at || ''),
+      nextTriggerAt: String(row.automation_next_trigger_at || ''),
+    },
+    notification: {
+      enabled: Boolean(Number(row.notification_enabled) || 0),
+      channelType: normalizeTaskNotificationChannel(row.notification_channel_type),
+      webhookUrl: String(row.notification_webhook_url || ''),
+      secret: String(row.notification_secret || ''),
+      triggerOn: normalizeTaskNotificationTrigger(row.notification_trigger_on),
+      messageMode: normalizeTaskNotificationMessageMode(row.notification_message_mode),
+      lastStatus: String(row.notification_last_status || ''),
+      lastError: String(row.notification_last_error || ''),
+      lastSentAt: String(row.notification_last_sent_at || ''),
+    },
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     blocks,
+  }
+}
+
+function mapTaskAutomationSummary(row) {
+  return {
+    enabled: Boolean(Number(row.automation_enabled) || 0),
+    cron: String(row.automation_cron || ''),
+    nextTriggerAt: String(row.automation_next_trigger_at || ''),
+  }
+}
+
+function mapTaskNotificationSummary(row) {
+  return {
+    enabled: Boolean(Number(row.notification_enabled) || 0),
+    channelType: normalizeTaskNotificationChannel(row.notification_channel_type),
+    triggerOn: normalizeTaskNotificationTrigger(row.notification_trigger_on),
+    lastStatus: String(row.notification_last_status || ''),
+    lastSentAt: String(row.notification_last_sent_at || ''),
+  }
+}
+
+function normalizeAutomationInput(input = {}, fallback = {}) {
+  const enabled = Boolean(input?.enabled)
+  const cron = enabled ? normalizeCronExpression(clampText(input?.cron || '', 80).trim()) : ''
+  let nextTriggerAt = ''
+
+  if (enabled && cron) {
+    nextTriggerAt = getNextCronOccurrence(cron, new Date()).toISOString()
+  }
+
+  return {
+    enabled,
+    cron,
+    timezone: normalizeTaskAutomationTimezone(input?.timezone || fallback.timezone),
+    concurrencyPolicy: normalizeTaskAutomationConcurrencyPolicy(input?.concurrencyPolicy || fallback.concurrencyPolicy),
+    lastTriggeredAt: clampText(input?.lastTriggeredAt || fallback.lastTriggeredAt || '', 40).trim(),
+    nextTriggerAt,
+  }
+}
+
+function normalizeNotificationInput(input = {}, fallback = {}) {
+  const enabled = Boolean(input?.enabled)
+  return {
+    enabled,
+    channelType: normalizeTaskNotificationChannel(input?.channelType || fallback.channelType),
+    webhookUrl: enabled ? clampText(input?.webhookUrl || '', 2000).trim() : '',
+    secret: enabled ? clampText(input?.secret || '', 200).trim() : '',
+    triggerOn: normalizeTaskNotificationTrigger(input?.triggerOn || fallback.triggerOn),
+    messageMode: normalizeTaskNotificationMessageMode(input?.messageMode || fallback.messageMode),
+    lastStatus: clampText(input?.lastStatus || fallback.lastStatus || '', 32).trim(),
+    lastError: clampText(input?.lastError || fallback.lastError || '', 500).trim(),
+    lastSentAt: clampText(input?.lastSentAt || fallback.lastSentAt || '', 40).trim(),
   }
 }
 
@@ -199,6 +280,8 @@ function mapTaskSummary(row, firstText = '', blockCount = 0, codexRunCount = 0) 
     preview: summarizeTask({ blocks: textBlock }),
     codexRunCount: Math.max(0, Number(codexRunCount) || 0),
     blockCount,
+    automation: mapTaskAutomationSummary(row),
+    notification: mapTaskNotificationSummary(row),
   }
 }
 
@@ -232,7 +315,10 @@ function normalizeBlockInput(block = {}) {
 
 export function listTasks(limit = 30) {
   const rows = all(
-    `SELECT id, slug, title, auto_title, last_prompt_preview, codex_session_id, visibility, expires_at, created_at, updated_at
+    `SELECT id, slug, title, auto_title, last_prompt_preview, codex_session_id,
+            automation_enabled, automation_cron, automation_timezone, automation_concurrency_policy, automation_last_triggered_at, automation_next_trigger_at,
+            notification_enabled, notification_channel_type, notification_webhook_url, notification_secret, notification_trigger_on, notification_message_mode, notification_last_status, notification_last_error, notification_last_sent_at,
+            visibility, expires_at, created_at, updated_at
      FROM tasks
      ORDER BY updated_at DESC
      LIMIT ?`,
@@ -258,7 +344,10 @@ export function listTasks(limit = 30) {
 
 export function getTaskBySlug(slug) {
   const row = get(
-    `SELECT id, slug, title, auto_title, last_prompt_preview, codex_session_id, visibility, expires_at, created_at, updated_at
+    `SELECT id, slug, title, auto_title, last_prompt_preview, codex_session_id,
+            automation_enabled, automation_cron, automation_timezone, automation_concurrency_policy, automation_last_triggered_at, automation_next_trigger_at,
+            notification_enabled, notification_channel_type, notification_webhook_url, notification_secret, notification_trigger_on, notification_message_mode, notification_last_status, notification_last_error, notification_last_sent_at,
+            visibility, expires_at, created_at, updated_at
      FROM tasks
      WHERE slug = ?`,
     [slug]
@@ -280,6 +369,8 @@ export function createTask(input = {}) {
   const autoTitle = clampText(input.autoTitle || '', 140)
   const lastPromptPreview = clampText(input.lastPromptPreview || '', 280)
   const codexSessionId = clampText(input.codexSessionId || '', 120)
+  const automation = normalizeAutomationInput(input.automation)
+  const notification = normalizeNotificationInput(input.notification)
   const visibility = normalizeVisibility(input.visibility)
   const expiresAt = resolveExpiresAt(normalizeExpiry(input.expiry || 'none'))
   const slug = ensureSlug(title)
@@ -287,9 +378,40 @@ export function createTask(input = {}) {
 
   transaction(() => {
     run(
-      `INSERT INTO tasks (slug, edit_token, title, auto_title, last_prompt_preview, codex_session_id, visibility, expires_at, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [slug, editToken, title, autoTitle, lastPromptPreview, codexSessionId, visibility, expiresAt, now, now]
+      `INSERT INTO tasks (
+        slug, edit_token, title, auto_title, last_prompt_preview, codex_session_id,
+        automation_enabled, automation_cron, automation_timezone, automation_concurrency_policy, automation_last_triggered_at, automation_next_trigger_at,
+        notification_enabled, notification_channel_type, notification_webhook_url, notification_secret, notification_trigger_on, notification_message_mode, notification_last_status, notification_last_error, notification_last_sent_at,
+        visibility, expires_at, created_at, updated_at
+      )
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        slug,
+        editToken,
+        title,
+        autoTitle,
+        lastPromptPreview,
+        codexSessionId,
+        automation.enabled ? 1 : 0,
+        automation.cron,
+        automation.timezone,
+        automation.concurrencyPolicy,
+        automation.lastTriggeredAt,
+        automation.nextTriggerAt,
+        notification.enabled ? 1 : 0,
+        notification.channelType,
+        notification.webhookUrl,
+        notification.secret,
+        notification.triggerOn,
+        notification.messageMode,
+        notification.lastStatus,
+        notification.lastError,
+        notification.lastSentAt,
+        visibility,
+        expiresAt,
+        now,
+        now,
+      ]
     )
   })
 
@@ -301,7 +423,10 @@ export function createTask(input = {}) {
 
 export function updateTask(slug, input = {}) {
   const existing = get(
-    `SELECT id, edit_token, codex_session_id
+    `SELECT id, edit_token, title, auto_title, last_prompt_preview, codex_session_id,
+            automation_enabled, automation_cron, automation_timezone, automation_concurrency_policy, automation_last_triggered_at, automation_next_trigger_at,
+            notification_enabled, notification_channel_type, notification_webhook_url, notification_secret, notification_trigger_on, notification_message_mode, notification_last_status, notification_last_error, notification_last_sent_at,
+            visibility, expires_at
      FROM tasks
      WHERE slug = ?`,
     [slug]
@@ -310,26 +435,108 @@ export function updateTask(slug, input = {}) {
     return { error: 'not_found' }
   }
 
-  const title = clampText(input.title || '', 140)
-  const autoTitle = clampText(input.autoTitle || '', 140)
-  const lastPromptPreview = clampText(input.lastPromptPreview || '', 280)
+  const title = Object.prototype.hasOwnProperty.call(input, 'title')
+    ? clampText(input.title || '', 140)
+    : String(existing.title || '')
+  const autoTitle = Object.prototype.hasOwnProperty.call(input, 'autoTitle')
+    ? clampText(input.autoTitle || '', 140)
+    : String(existing.auto_title || '')
+  const lastPromptPreview = Object.prototype.hasOwnProperty.call(input, 'lastPromptPreview')
+    ? clampText(input.lastPromptPreview || '', 280)
+    : String(existing.last_prompt_preview || '')
   const codexSessionId = Object.prototype.hasOwnProperty.call(input, 'codexSessionId')
     ? clampText(input.codexSessionId || '', 120)
     : String(existing.codex_session_id || '')
-  const visibility = normalizeVisibility(input.visibility)
-  const expiresAt = resolveExpiresAt(normalizeExpiry(input.expiry || 'none'))
+  const visibility = Object.prototype.hasOwnProperty.call(input, 'visibility')
+    ? normalizeVisibility(input.visibility)
+    : normalizeVisibility(existing.visibility)
+  const expiresAt = Object.prototype.hasOwnProperty.call(input, 'expiry')
+    ? resolveExpiresAt(normalizeExpiry(input.expiry || 'none'))
+    : existing.expires_at
+  const automation = Object.prototype.hasOwnProperty.call(input, 'automation')
+    ? normalizeAutomationInput(input.automation, {
+        enabled: existing.automation_enabled,
+        cron: existing.automation_cron,
+        timezone: existing.automation_timezone,
+        concurrencyPolicy: existing.automation_concurrency_policy,
+        lastTriggeredAt: existing.automation_last_triggered_at,
+        nextTriggerAt: existing.automation_next_trigger_at,
+      })
+    : normalizeAutomationInput({
+        enabled: existing.automation_enabled,
+        cron: existing.automation_cron,
+        timezone: existing.automation_timezone,
+        concurrencyPolicy: existing.automation_concurrency_policy,
+        lastTriggeredAt: existing.automation_last_triggered_at,
+        nextTriggerAt: existing.automation_next_trigger_at,
+      })
+  const notification = Object.prototype.hasOwnProperty.call(input, 'notification')
+    ? normalizeNotificationInput(input.notification, {
+        enabled: existing.notification_enabled,
+        channelType: existing.notification_channel_type,
+        webhookUrl: existing.notification_webhook_url,
+        secret: existing.notification_secret,
+        triggerOn: existing.notification_trigger_on,
+        messageMode: existing.notification_message_mode,
+        lastStatus: existing.notification_last_status,
+        lastError: existing.notification_last_error,
+        lastSentAt: existing.notification_last_sent_at,
+      })
+    : normalizeNotificationInput({
+        enabled: existing.notification_enabled,
+        channelType: existing.notification_channel_type,
+        webhookUrl: existing.notification_webhook_url,
+        secret: existing.notification_secret,
+        triggerOn: existing.notification_trigger_on,
+        messageMode: existing.notification_message_mode,
+        lastStatus: existing.notification_last_status,
+        lastError: existing.notification_last_error,
+        lastSentAt: existing.notification_last_sent_at,
+      })
   const updatedAt = new Date().toISOString()
-  const blocks = Array.isArray(input.blocks) ? input.blocks.map(normalizeBlockInput) : []
+  const hasBlocks = Array.isArray(input.blocks)
+  const blocks = hasBlocks ? input.blocks.map(normalizeBlockInput) : []
   const currentBlocks = loadBlocks(existing.id)
   const currentBlockMap = new Map(currentBlocks.map((block) => [block.id, block]))
 
   transaction(() => {
     run(
       `UPDATE tasks
-       SET title = ?, auto_title = ?, last_prompt_preview = ?, codex_session_id = ?, visibility = ?, expires_at = ?, updated_at = ?
+       SET title = ?, auto_title = ?, last_prompt_preview = ?, codex_session_id = ?,
+           automation_enabled = ?, automation_cron = ?, automation_timezone = ?, automation_concurrency_policy = ?, automation_last_triggered_at = ?, automation_next_trigger_at = ?,
+           notification_enabled = ?, notification_channel_type = ?, notification_webhook_url = ?, notification_secret = ?, notification_trigger_on = ?, notification_message_mode = ?, notification_last_status = ?, notification_last_error = ?, notification_last_sent_at = ?,
+           visibility = ?, expires_at = ?, updated_at = ?
        WHERE slug = ?`,
-      [title, autoTitle, lastPromptPreview, codexSessionId, visibility, expiresAt, updatedAt, slug]
+      [
+        title,
+        autoTitle,
+        lastPromptPreview,
+        codexSessionId,
+        automation.enabled ? 1 : 0,
+        automation.cron,
+        automation.timezone,
+        automation.concurrencyPolicy,
+        automation.lastTriggeredAt,
+        automation.nextTriggerAt,
+        notification.enabled ? 1 : 0,
+        notification.channelType,
+        notification.webhookUrl,
+        notification.secret,
+        notification.triggerOn,
+        notification.messageMode,
+        notification.lastStatus,
+        notification.lastError,
+        notification.lastSentAt,
+        visibility,
+        expiresAt,
+        updatedAt,
+        slug,
+      ]
     )
+
+    if (!hasBlocks) {
+      return
+    }
 
     const incomingIds = new Set()
 
@@ -481,4 +688,82 @@ export function clearTaskCodexSessionReferences(codexSessionId = '') {
   })
 
   return matchedTaskSlugs
+}
+
+export function listAutomationEnabledTasks(limit = 200) {
+  const rows = all(
+    `SELECT id, slug, title, auto_title, last_prompt_preview, codex_session_id,
+            automation_enabled, automation_cron, automation_timezone, automation_concurrency_policy, automation_last_triggered_at, automation_next_trigger_at,
+            notification_enabled, notification_channel_type, notification_webhook_url, notification_secret, notification_trigger_on, notification_message_mode, notification_last_status, notification_last_error, notification_last_sent_at,
+            visibility, expires_at, created_at, updated_at
+     FROM tasks
+     WHERE automation_enabled = 1
+       AND TRIM(automation_cron) != ''
+     ORDER BY updated_at DESC
+     LIMIT ?`,
+    [Math.max(1, Number(limit) || 200)]
+  )
+
+  return rows.map((row) => toTask(row, loadBlocks(row.id), {
+    codexRunCount: getCodexRunCountByTaskSlug(row.slug),
+  }))
+}
+
+export function updateTaskAutomationRuntime(slug, patch = {}) {
+  const existing = get(
+    `SELECT slug, automation_last_triggered_at, automation_next_trigger_at
+     FROM tasks
+     WHERE slug = ?`,
+    [slug]
+  )
+  if (!existing) {
+    return null
+  }
+
+  const lastTriggeredAt = Object.prototype.hasOwnProperty.call(patch, 'lastTriggeredAt')
+    ? clampText(patch.lastTriggeredAt || '', 40).trim()
+    : String(existing.automation_last_triggered_at || '')
+  const nextTriggerAt = Object.prototype.hasOwnProperty.call(patch, 'nextTriggerAt')
+    ? clampText(patch.nextTriggerAt || '', 40).trim()
+    : String(existing.automation_next_trigger_at || '')
+
+  run(
+    `UPDATE tasks
+     SET automation_last_triggered_at = ?, automation_next_trigger_at = ?
+     WHERE slug = ?`,
+    [lastTriggeredAt, nextTriggerAt, slug]
+  )
+
+  return getTaskBySlug(slug)
+}
+
+export function updateTaskNotificationDelivery(slug, patch = {}) {
+  const existing = get(
+    `SELECT slug, notification_last_status, notification_last_error, notification_last_sent_at
+     FROM tasks
+     WHERE slug = ?`,
+    [slug]
+  )
+  if (!existing) {
+    return null
+  }
+
+  const status = Object.prototype.hasOwnProperty.call(patch, 'lastStatus')
+    ? clampText(patch.lastStatus || '', 32).trim()
+    : String(existing.notification_last_status || '')
+  const errorMessage = Object.prototype.hasOwnProperty.call(patch, 'lastError')
+    ? clampText(patch.lastError || '', 500).trim()
+    : String(existing.notification_last_error || '')
+  const sentAt = Object.prototype.hasOwnProperty.call(patch, 'lastSentAt')
+    ? clampText(patch.lastSentAt || '', 40).trim()
+    : String(existing.notification_last_sent_at || '')
+
+  run(
+    `UPDATE tasks
+     SET notification_last_status = ?, notification_last_error = ?, notification_last_sent_at = ?
+     WHERE slug = ?`,
+    [status, errorMessage, sentAt, slug]
+  )
+
+  return getTaskBySlug(slug)
 }

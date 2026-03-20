@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { Eye, EyeOff, Info, LoaderCircle, Palette, Settings2, Wifi, X } from 'lucide-vue-next'
+import DialogSideNav from './DialogSideNav.vue'
 import ThemeToggle from './ThemeToggle.vue'
 import { getMeta, getRelayConfig, updateRelayConfig } from '../lib/api.js'
 
@@ -250,26 +251,10 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="settings-dialog-body min-h-0 flex flex-1 flex-col sm:flex-row">
-          <aside class="theme-divider settings-dialog-nav border-b px-3 py-3 sm:w-60 sm:shrink-0 sm:border-b-0 sm:border-r sm:px-4 sm:py-4">
-            <nav class="settings-nav flex gap-2 overflow-x-auto sm:flex-col sm:overflow-visible">
-              <button
-                v-for="section in settingsSections"
-                :key="section.id"
-                type="button"
-                class="settings-nav__item flex min-w-0 items-start gap-3 rounded-sm border px-3 py-3 text-left transition sm:w-full"
-                :class="activeSection === section.id
-                  ? 'border-[var(--theme-accent)] bg-[var(--theme-accentSoft)] text-[var(--theme-textPrimary)]'
-                  : 'border-dashed border-[var(--theme-borderDefault)] bg-[var(--theme-appPanelMuted)] hover:border-[var(--theme-borderStrong)] hover:bg-[var(--theme-appPanelStrong)]'"
-                @click="activeSection = section.id"
-              >
-                <component :is="section.icon" class="mt-0.5 h-4 w-4 shrink-0" />
-                <div class="min-w-0">
-                  <div class="text-sm font-medium">{{ section.label }}</div>
-                  <p class="theme-muted-text mt-1 hidden text-xs leading-5 sm:block">{{ section.description }}</p>
-                </div>
-              </button>
-            </nav>
-          </aside>
+          <DialogSideNav
+            v-model="activeSection"
+            :sections="settingsSections"
+          />
 
           <div class="settings-dialog-content min-h-0 flex-1 overflow-y-auto px-5 py-5">
             <section

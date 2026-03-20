@@ -50,6 +50,50 @@ export const BLOCK_TYPE_LABELS = {
   [BLOCK_TYPES.IMPORTED_TEXT]: '导入文件',
 }
 
+export const TASK_AUTOMATION_TIMEZONE_OPTIONS = [
+  { value: 'local', label: '跟随本机时区' },
+]
+
+export const TASK_AUTOMATION_CONCURRENCY_POLICIES = {
+  SKIP: 'skip',
+}
+
+export const TASK_AUTOMATION_CONCURRENCY_POLICY_OPTIONS = [
+  { value: TASK_AUTOMATION_CONCURRENCY_POLICIES.SKIP, label: '已有运行时跳过本次' },
+]
+
+export const TASK_NOTIFICATION_CHANNELS = {
+  DINGTALK: 'dingtalk',
+  FEISHU: 'feishu',
+  WEBHOOK: 'webhook',
+}
+
+export const TASK_NOTIFICATION_CHANNEL_OPTIONS = [
+  { value: TASK_NOTIFICATION_CHANNELS.DINGTALK, label: '钉钉 Webhook' },
+  { value: TASK_NOTIFICATION_CHANNELS.FEISHU, label: '飞书 Webhook' },
+  { value: TASK_NOTIFICATION_CHANNELS.WEBHOOK, label: '通用 Webhook' },
+]
+
+export const TASK_NOTIFICATION_TRIGGERS = {
+  COMPLETED: 'completed',
+  SUCCESS: 'success',
+  ERROR: 'error',
+}
+
+export const TASK_NOTIFICATION_TRIGGER_OPTIONS = [
+  { value: TASK_NOTIFICATION_TRIGGERS.COMPLETED, label: '本次运行结束后' },
+  { value: TASK_NOTIFICATION_TRIGGERS.SUCCESS, label: '本次运行成功后' },
+  { value: TASK_NOTIFICATION_TRIGGERS.ERROR, label: '本次运行失败后' },
+]
+
+export const TASK_NOTIFICATION_MESSAGE_MODES = {
+  SUMMARY: 'summary',
+}
+
+export const TASK_NOTIFICATION_MESSAGE_MODE_OPTIONS = [
+  { value: TASK_NOTIFICATION_MESSAGE_MODES.SUMMARY, label: '摘要消息' },
+]
+
 export function normalizeVisibility(value) {
   return 'private'
 }
@@ -65,6 +109,35 @@ export function getVisibilityLabel(value) {
 export function normalizeAgentEngine(value) {
   const normalized = String(value || '').trim().toLowerCase()
   return AGENT_ENGINE_OPTIONS.find((item) => item.value === normalized)?.value || AGENT_ENGINES.CODEX
+}
+
+export function normalizeTaskAutomationTimezone(value) {
+  const normalized = String(value || '').trim().toLowerCase()
+  return TASK_AUTOMATION_TIMEZONE_OPTIONS.find((item) => item.value === normalized)?.value || 'local'
+}
+
+export function normalizeTaskAutomationConcurrencyPolicy(value) {
+  const normalized = String(value || '').trim().toLowerCase()
+  return TASK_AUTOMATION_CONCURRENCY_POLICY_OPTIONS.find((item) => item.value === normalized)?.value
+    || TASK_AUTOMATION_CONCURRENCY_POLICIES.SKIP
+}
+
+export function normalizeTaskNotificationChannel(value) {
+  const normalized = String(value || '').trim().toLowerCase()
+  return TASK_NOTIFICATION_CHANNEL_OPTIONS.find((item) => item.value === normalized)?.value
+    || TASK_NOTIFICATION_CHANNELS.DINGTALK
+}
+
+export function normalizeTaskNotificationTrigger(value) {
+  const normalized = String(value || '').trim().toLowerCase()
+  return TASK_NOTIFICATION_TRIGGER_OPTIONS.find((item) => item.value === normalized)?.value
+    || TASK_NOTIFICATION_TRIGGERS.COMPLETED
+}
+
+export function normalizeTaskNotificationMessageMode(value) {
+  const normalized = String(value || '').trim().toLowerCase()
+  return TASK_NOTIFICATION_MESSAGE_MODE_OPTIONS.find((item) => item.value === normalized)?.value
+    || TASK_NOTIFICATION_MESSAGE_MODES.SUMMARY
 }
 
 export function getAgentEngineLabel(value) {

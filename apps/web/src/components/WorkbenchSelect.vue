@@ -46,6 +46,14 @@ const selectedOption = computed(() => {
   return props.options.find((option) => String(props.getOptionValue(option) ?? '') === currentValue) || null
 })
 
+function getOptionLabel(option) {
+  if (option && typeof option === 'object' && Object.prototype.hasOwnProperty.call(option, 'label')) {
+    return String(option.label || '')
+  }
+
+  return String(props.getOptionValue(option) ?? '')
+}
+
 function openDropdown() {
   if (props.disabled) {
     return
@@ -187,7 +195,7 @@ onBeforeUnmount(() => {
           :disabled="disabled"
         >
           <div class="theme-muted-text text-sm">
-            {{ selectedOption ? String(getOptionValue(selectedOption)) : placeholder }}
+            {{ selectedOption ? getOptionLabel(selectedOption) : placeholder }}
           </div>
         </slot>
       </div>
@@ -202,7 +210,7 @@ onBeforeUnmount(() => {
       <div
         v-if="open"
         ref="panelRef"
-        class="workbench-select-panel theme-popover fixed z-[70] flex overflow-hidden rounded-sm border"
+        class="workbench-select-panel theme-popover fixed z-[90] flex overflow-hidden rounded-sm border"
         :style="panelStyle"
       >
         <div class="flex min-h-0 w-full flex-col">
@@ -227,7 +235,7 @@ onBeforeUnmount(() => {
                   class="workbench-select-option theme-filter-idle w-full rounded-sm border border-dashed px-3 py-2 text-left text-sm"
                   @click="selectOption(option)"
                 >
-                  {{ String(getOptionValue(option) ?? '') }}
+                  {{ getOptionLabel(option) }}
                 </button>
               </slot>
             </template>

@@ -217,6 +217,22 @@ function toTaskSummary(taskRecord) {
     preview: String(taskRecord.lastPromptPreview || ''),
     updatedAt: taskRecord.updatedAt || taskRecord.createdAt || new Date().toISOString(),
     createdAt: taskRecord.createdAt || taskRecord.updatedAt || new Date().toISOString(),
+    automation: taskRecord?.automation
+      ? {
+          enabled: Boolean(taskRecord.automation.enabled),
+          cron: String(taskRecord.automation.cron || ''),
+          nextTriggerAt: String(taskRecord.automation.nextTriggerAt || ''),
+        }
+      : undefined,
+    notification: taskRecord?.notification
+      ? {
+          enabled: Boolean(taskRecord.notification.enabled),
+          channelType: String(taskRecord.notification.channelType || ''),
+          triggerOn: String(taskRecord.notification.triggerOn || ''),
+          lastStatus: String(taskRecord.notification.lastStatus || ''),
+          lastSentAt: String(taskRecord.notification.lastSentAt || ''),
+        }
+      : undefined,
   }
 
   if (Object.prototype.hasOwnProperty.call(taskRecord, 'workspaceDiffSummary')) {
@@ -539,6 +555,31 @@ export function useWorkbenchTasks(options = {}) {
       lastPromptPreview: String(draft.value.lastPromptPreview || ''),
       codexSessionId: String(selectedSessionMap.value[currentTaskSlug.value] || draft.value.codexSessionId || ''),
       preview: String(draft.value.lastPromptPreview || ''),
+    })
+  }
+
+  function applyTaskSettingsUpdate(taskRecord = {}) {
+    const slug = String(taskRecord?.slug || '').trim()
+    if (!slug) {
+      return
+    }
+
+    const summary = toTaskSummary(taskRecord)
+    upsertTaskSummary(summary)
+
+    if (slug !== currentTaskSlug.value) {
+      return
+    }
+
+    if (Object.prototype.hasOwnProperty.call(taskRecord, 'title')) {
+      draft.value.title = String(taskRecord.title || '')
+    }
+    if (Object.prototype.hasOwnProperty.call(taskRecord, 'autoTitle')) {
+      draft.value.autoTitle = String(taskRecord.autoTitle || '')
+    }
+
+    setTaskDraftState(slug, {
+      ...draft.value,
     })
   }
 
@@ -1207,6 +1248,7 @@ export function useWorkbenchTasks(options = {}) {
   )
 
   return {
+    applyTaskSettingsUpdate,
     buildPromptForTask,
     getPromptBlocksForTask,
     buildPromptPreview,
