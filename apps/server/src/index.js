@@ -519,11 +519,13 @@ app.get('/api/tasks/:slug/codex-runs', async (request, reply) => {
   }
 
   const includeEvents = String(request.query?.includeEvents || '').trim() === 'true'
+  const includeLatestEvents = String(request.query?.includeLatestEvents || '').trim() === 'true'
 
   return {
     items: listTaskCodexRunsWithOptions(request.params.slug, {
       limit: request.query?.limit,
       includeEvents,
+      includeLatestEvents,
     }),
   }
 })

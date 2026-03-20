@@ -5,6 +5,7 @@ import { createRequire } from 'node:module'
 import { execFileSync, spawn } from 'node:child_process'
 import iconv from 'iconv-lite'
 import initSqlJs from 'sql.js'
+import { AGENT_RUN_EVENT_TYPES } from '../../../packages/shared/src/index.js'
 
 const CODEX_BIN = process.env.CODEX_BIN || 'codex'
 const CODEX_HOME = process.env.CODEX_HOME || path.join(os.homedir(), '.codex')
@@ -327,7 +328,7 @@ function extractCodexError(stderr = '', stdout = '') {
 }
 
 function trackThreadId(event, setThreadId) {
-  if (event?.type === 'thread.started' && event.thread_id) {
+  if (event?.type === AGENT_RUN_EVENT_TYPES.THREAD_STARTED && event.thread_id) {
     setThreadId(String(event.thread_id))
   }
 }
@@ -341,7 +342,7 @@ function parseThreadIdFromStdout(stdout = '') {
 
   for (const line of lines) {
     const event = parseJsonLine(line)
-    if (event?.type === 'thread.started' && event.thread_id) {
+    if (event?.type === AGENT_RUN_EVENT_TYPES.THREAD_STARTED && event.thread_id) {
       return String(event.thread_id)
     }
   }

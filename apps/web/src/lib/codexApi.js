@@ -129,12 +129,16 @@ export function listTaskCodexRuns(taskSlug, options = {}) {
   const params = new URLSearchParams()
   const limit = Number(options.limit || 20)
   const includeEvents = Boolean(options.includeEvents)
+  const includeLatestEvents = Boolean(options.includeLatestEvents)
 
   if (Number.isFinite(limit) && limit > 0) {
     params.set('limit', String(limit))
   }
   if (includeEvents) {
     params.set('includeEvents', 'true')
+  }
+  if (includeLatestEvents) {
+    params.set('includeLatestEvents', 'true')
   }
 
   const query = params.toString()

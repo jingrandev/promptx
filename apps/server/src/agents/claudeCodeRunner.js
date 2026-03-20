@@ -1,7 +1,16 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { execFileSync, spawn } from 'node:child_process'
-import { AGENT_ENGINES, getAgentEngineLabel } from '../../../../packages/shared/src/index.js'
+import {
+  AGENT_ENGINES,
+  AGENT_RUN_ITEM_TYPES,
+  createErrorEvent,
+  createItemCompletedEvent,
+  createItemStartedEvent,
+  createThreadStartedEvent,
+  createTurnCompletedEvent,
+  getAgentEngineLabel,
+} from '../../../../packages/shared/src/index.js'
 
 const CLAUDE_CODE_BIN = process.env.CLAUDE_CODE_BIN || 'claude'
 const CLAUDE_DEFAULT_ARGS = ['--dangerously-skip-permissions']
@@ -251,12 +260,11 @@ function createClaudeToolUseEvent(block = {}, state = createClaudeNormalizationS
   }
 
   return {
-    type: 'item.started',
-    item: {
-      type: 'command_execution',
+    ...createItemStartedEvent({
+      type: AGENT_RUN_ITEM_TYPES.COMMAND_EXECUTION,
       command,
       status: 'in_progress',
-    },
+    }),
   }
 }
 
@@ -271,14 +279,13 @@ function createClaudeToolResultEvent(block = {}, state = createClaudeNormalizati
   }
 
   return {
-    type: 'item.completed',
-    item: {
-      type: 'command_execution',
+    ...createItemCompletedEvent({
+      type: AGENT_RUN_ITEM_TYPES.COMMAND_EXECUTION,
       command: remembered?.command || remembered?.name || 'Claude Code tool',
       status: isError ? 'failed' : 'completed',
       exit_code: isError ? 1 : 0,
       aggregated_output: output,
-    },
+    }),
   }
 }
 
@@ -287,10 +294,7 @@ export function normalizeClaudeEvents(event = {}, state = createClaudeNormalizat
   const normalizedEvents = []
 
   if (eventType === 'system' && String(event?.subtype || '').trim().toLowerCase() === 'init') {
-    return [{
-      type: 'thread.started',
-      thread_id: extractClaudeSessionId(event),
-    }]
+    return [createThreadStartedEvent(extractClaudeSessionId(event))]
   }
 
   if (eventType === 'assistant') {
@@ -302,11 +306,10 @@ export function normalizeClaudeEvents(event = {}, state = createClaudeNormalizat
         const text = String(block?.thinking || block?.text || '').trim()
         if (text) {
           normalizedEvents.push({
-            type: 'item.started',
-            item: {
-              type: 'reasoning',
+            ...createItemStartedEvent({
+              type: AGENT_RUN_ITEM_TYPES.REASONING,
               text,
-            },
+            }),
           })
         }
         return
@@ -321,11 +324,10 @@ export function normalizeClaudeEvents(event = {}, state = createClaudeNormalizat
         const text = String(block?.text || '').trim()
         if (text) {
           normalizedEvents.push({
-            type: 'item.completed',
-            item: {
-              type: 'agent_message',
+            ...createItemCompletedEvent({
+              type: AGENT_RUN_ITEM_TYPES.AGENT_MESSAGE,
               text,
-            },
+            }),
           })
         }
       }
@@ -358,19 +360,15 @@ export function normalizeClaudeEvents(event = {}, state = createClaudeNormalizat
           cached_input_tokens: Number(event.usage.cached_input_tokens ?? event.usage.cache_read_input_tokens) || 0,
         }
       : null
-    return [{
-      type: 'turn.completed',
+    return [createTurnCompletedEvent({
       result: text,
       ...(usage ? { usage } : {}),
-    }]
+    })]
   }
 
   if (eventType === 'error') {
     const message = extractClaudeResultText(event) || extractClaudeAssistantText(event) || String(event?.error || event?.message || '').trim()
-    return [{
-      type: 'error',
-      message,
-    }]
+    return [createErrorEvent(message)]
   }
 
   return [{

@@ -4,7 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 
-test('listTaskCodexRunsWithOptions omits events by default and can include them on demand', async () => {
+test('listTaskCodexRunsWithOptions 默认省略事件，并支持按需附带事件', async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-codex-runs-'))
   const originalCwd = process.cwd()
   const originalDataDir = process.env.PROMPTX_DATA_DIR
@@ -61,6 +61,11 @@ test('listTaskCodexRunsWithOptions omits events by default and can include them 
     assert.equal(detailedRuns[0].lastEventSeq, 2)
     assert.equal(detailedRuns[0].eventsIncluded, true)
     assert.deepEqual(detailedRuns[0].events.map((item) => item.seq), [1, 2])
+
+    const latestRuns = listTaskCodexRunsWithOptions('task-1', { limit: 20, includeLatestEvents: true })
+    assert.equal(latestRuns?.length, 1)
+    assert.equal(latestRuns[0].eventsIncluded, true)
+    assert.deepEqual(latestRuns[0].events.map((item) => item.seq), [1, 2])
   } finally {
     process.chdir(originalCwd)
     if (typeof originalDataDir === 'string') {

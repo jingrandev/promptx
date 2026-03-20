@@ -1,0 +1,348 @@
+import { computed } from 'vue'
+import {
+  createCodexSession,
+  createTaskCodexRun,
+  deleteCodexSession,
+  listCodexSessions,
+  listCodexWorkspaces,
+  stopCodexRun,
+  updateCodexSession,
+} from '../lib/api.js'
+import { sortSessions } from './codexSessionPanelTurns.js'
+
+const SESSION_REFRESH_TTL = 1500
+const WORKSPACE_REFRESH_TTL = 30000
+
+export function useCodexSessionActions(options = {}) {
+  const {
+    props,
+    sessions,
+    workspaces,
+    loading,
+    managerBusy,
+    sending,
+    sessionError,
+    showManager,
+    selectedSessionId,
+    currentRunningRunId,
+    supportsServerEvents,
+    mergeSession,
+    applyCreatedRun,
+    refreshRunHistory,
+    markFallbackSessionPollNow,
+  } = options
+
+  let sessionsLoadPromise = null
+  let workspacesLoadPromise = null
+  let lastSessionsLoadedAt = 0
+  let lastWorkspacesLoadedAt = 0
+
+  const hasPrompt = computed(() => typeof props.buildPrompt === 'function' || Boolean(String(props.prompt || '').trim()))
+  const hasSessions = computed(() => sessions.value.length > 0)
+  const sortedSessions = computed(() => sortSessions(sessions.value, selectedSessionId.value))
+  const helperText = computed(() => {
+    if (!hasSessions.value) {
+      return '还没有 PromptX 项目，请先在管理弹窗里新建一个固定工作目录。'
+    }
+    return ''
+  })
+
+  async function loadSessions(options = {}) {
+    const { force = false } = options
+
+    if (sessionsLoadPromise) {
+      return sessionsLoadPromise
+    }
+
+    const now = Date.now()
+    if (!force && lastSessionsLoadedAt && now - lastSessionsLoadedAt < SESSION_REFRESH_TTL) {
+      return {
+        items: sessions.value,
+        workspaces: workspaces.value,
+      }
+    }
+
+    sessionsLoadPromise = (async () => {
+      loading.value = true
+      sessionError.value = ''
+
+      try {
+        const sessionPayload = await listCodexSessions()
+        const nextSessions = sessionPayload.items || []
+
+        sessions.value = nextSessions
+        lastSessionsLoadedAt = Date.now()
+
+        return {
+          items: nextSessions,
+          workspaces: workspaces.value,
+        }
+      } catch (err) {
+        sessionError.value = err.message
+        throw err
+      } finally {
+        loading.value = false
+        sessionsLoadPromise = null
+      }
+    })()
+
+    return sessionsLoadPromise
+  }
+
+  async function loadWorkspaces(options = {}) {
+    const { force = false } = options
+
+    if (workspacesLoadPromise) {
+      return workspacesLoadPromise
+    }
+
+    const now = Date.now()
+    if (!force && lastWorkspacesLoadedAt && now - lastWorkspacesLoadedAt < WORKSPACE_REFRESH_TTL) {
+      return {
+        items: workspaces.value,
+      }
+    }
+
+    workspacesLoadPromise = (async () => {
+      try {
+        const workspacePayload = await listCodexWorkspaces()
+        workspaces.value = workspacePayload.items || []
+        lastWorkspacesLoadedAt = Date.now()
+        return {
+          items: workspaces.value,
+        }
+      } finally {
+        workspacesLoadPromise = null
+      }
+    })()
+
+    return workspacesLoadPromise
+  }
+
+  async function loadSessionResources(options = {}) {
+    const { forceSessions = false, forceWorkspaces = false } = options
+    const [sessionPayload, workspacePayload] = await Promise.all([
+      loadSessions({ force: forceSessions }),
+      loadWorkspaces({ force: forceWorkspaces }),
+    ])
+
+    return {
+      items: sessionPayload?.items || sessions.value,
+      workspaces: workspacePayload?.items || workspaces.value,
+    }
+  }
+
+  function upsertWorkspace(cwd = '') {
+    const normalized = String(cwd || '').trim()
+    if (!normalized || workspaces.value.includes(normalized)) {
+      return
+    }
+    workspaces.value = [normalized, ...workspaces.value]
+  }
+
+  function openManager() {
+    showManager.value = true
+    loadWorkspaces().catch(() => {})
+  }
+
+  function closeManager() {
+    showManager.value = false
+  }
+
+  function handleSelectSession(sessionId) {
+    const normalizedSessionId = String(sessionId || '').trim()
+    if (
+      props.sessionSelectionLocked
+      && normalizedSessionId
+      && normalizedSessionId !== selectedSessionId.value
+    ) {
+      sessionError.value = props.sessionSelectionLockReason || '该任务已有项目历史，不能再切换项目；如需使用新项目，请新建任务。'
+      return
+    }
+
+    selectedSessionId.value = normalizedSessionId
+  }
+
+  function refreshSessionsForSelection() {
+    loadSessionResources({
+      forceSessions: true,
+      forceWorkspaces: true,
+    }).catch(() => {})
+  }
+
+  async function handleCreateSession(payload) {
+    managerBusy.value = true
+    sessionError.value = ''
+
+    try {
+      const session = await createCodexSession(payload)
+      mergeSession(session)
+      upsertWorkspace(session.cwd)
+      selectedSessionId.value = session.id
+      return session
+    } catch (err) {
+      sessionError.value = err.message
+      throw err
+    } finally {
+      managerBusy.value = false
+    }
+  }
+
+  async function handleUpdateSession(sessionId, payload) {
+    managerBusy.value = true
+    sessionError.value = ''
+
+    try {
+      const session = await updateCodexSession(sessionId, payload)
+      mergeSession(session)
+      upsertWorkspace(session.cwd)
+      return session
+    } catch (err) {
+      sessionError.value = err.message
+      throw err
+    } finally {
+      managerBusy.value = false
+    }
+  }
+
+  async function handleDeleteSession(sessionId) {
+    const targetId = String(sessionId || '').trim()
+    if (!targetId) {
+      return {
+        deletedSessionId: '',
+        selectedSessionId: selectedSessionId.value,
+      }
+    }
+
+    managerBusy.value = true
+    sessionError.value = ''
+
+    try {
+      await deleteCodexSession(targetId)
+      const remainingSessions = sessions.value.filter((session) => session.id !== targetId)
+      sessions.value = remainingSessions
+
+      let nextSelectedSessionId = selectedSessionId.value
+      if (selectedSessionId.value === targetId) {
+        nextSelectedSessionId = sortSessions(remainingSessions, '')[0]?.id || ''
+        selectedSessionId.value = nextSelectedSessionId
+      }
+
+      return {
+        deletedSessionId: targetId,
+        selectedSessionId: nextSelectedSessionId,
+      }
+    } catch (err) {
+      sessionError.value = err.message
+      throw err
+    } finally {
+      managerBusy.value = false
+    }
+  }
+
+  async function handleSend() {
+    if (!props.taskSlug || !hasPrompt.value || sending.value) {
+      return false
+    }
+
+    if (!selectedSessionId.value) {
+      openManager()
+      sessionError.value = '请先选择一个 PromptX 项目。'
+      return false
+    }
+
+    sessionError.value = ''
+
+    try {
+      await loadSessionResources({
+        forceSessions: true,
+      })
+
+      const latestSelectedSession = sessions.value.find((session) => session.id === selectedSessionId.value) || null
+      if (!latestSelectedSession) {
+        sessionError.value = '当前项目不存在，请重新选择。'
+        return false
+      }
+
+      if (latestSelectedSession.running) {
+        sessionError.value = '当前项目正在运行中，请等待完成后再发送。'
+        return false
+      }
+
+      const prompt = typeof props.buildPrompt === 'function'
+        ? await props.buildPrompt()
+        : props.prompt
+      const promptBlocks = typeof props.buildPromptBlocks === 'function'
+        ? await props.buildPromptBlocks()
+        : []
+
+      if (!String(prompt || '').trim()) {
+        sessionError.value = '没有可发送的提示词。'
+        return false
+      }
+
+      const result = await createTaskCodexRun(props.taskSlug, {
+        sessionId: selectedSessionId.value,
+        prompt,
+        promptBlocks,
+      })
+      applyCreatedRun(result)
+      if (typeof props.afterSend === 'function') {
+        Promise.resolve(props.afterSend()).catch((err) => {
+          console.error('[promptx] afterSend failed', err)
+        })
+      }
+
+      if (!supportsServerEvents) {
+        markFallbackSessionPollNow()
+        Promise.all([
+          refreshRunHistory({ force: true }),
+          loadSessions({ force: true }),
+        ]).catch((err) => {
+          sessionError.value = err.message
+        })
+      }
+      return true
+    } catch (err) {
+      sessionError.value = err.message
+      return false
+    }
+  }
+
+  async function stopSending() {
+    if (!currentRunningRunId.value) {
+      return
+    }
+
+    try {
+      await stopCodexRun(currentRunningRunId.value)
+      if (!supportsServerEvents) {
+        markFallbackSessionPollNow()
+        await Promise.all([
+          refreshRunHistory({ force: true }),
+          loadSessions({ force: true }),
+        ])
+      }
+    } catch (err) {
+      sessionError.value = err.message
+    }
+  }
+
+  return {
+    closeManager,
+    handleCreateSession,
+    handleDeleteSession,
+    handleSelectSession,
+    handleSend,
+    handleUpdateSession,
+    hasPrompt,
+    helperText,
+    loadSessions,
+    loadSessionResources,
+    loadWorkspaces,
+    openManager,
+    refreshSessionsForSelection,
+    sortedSessions,
+    stopSending,
+  }
+}

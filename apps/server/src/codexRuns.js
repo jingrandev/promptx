@@ -248,6 +248,7 @@ export function listTaskCodexRunsWithOptions(taskSlug, options = {}) {
 
   flushPendingRunEvents()
   const includeEvents = Boolean(options.includeEvents)
+  const includeLatestEvents = !includeEvents && Boolean(options.includeLatestEvents)
   const limit = Math.max(1, Number(options.limit) || 20)
   const rows = all(
     `SELECT
@@ -290,10 +291,17 @@ export function listTaskCodexRunsWithOptions(taskSlug, options = {}) {
     [task.slug, limit]
   )
 
-  const eventsByRunId = includeEvents
-    ? loadEventsForRunIds(rows.map((row) => row.id))
-    : null
-  return rows.map((row) => toCodexRun(row, includeEvents ? (eventsByRunId.get(row.id) || []) : null))
+  const eventRunIds = includeEvents
+    ? rows.map((row) => row.id)
+    : includeLatestEvents && rows.length
+      ? [rows[0].id]
+      : []
+  const eventsByRunId = eventRunIds.length ? loadEventsForRunIds(eventRunIds) : null
+
+  return rows.map((row, index) => {
+    const shouldAttachEvents = includeEvents || (includeLatestEvents && index === 0)
+    return toCodexRun(row, shouldAttachEvents ? (eventsByRunId?.get(row.id) || []) : null)
+  })
 }
 
 export function listCodexRunEvents(runId, options = {}) {
