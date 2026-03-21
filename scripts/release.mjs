@@ -43,6 +43,7 @@ function parseArgs(argv = []) {
 
 function runCommand(command, commandArgs = [], options = {}) {
   return new Promise((resolve, reject) => {
+    const useShell = process.platform === 'win32' && ['pnpm', 'npm'].includes(String(command || '').toLowerCase())
     const child = spawn(command, commandArgs, {
       cwd: rootDir,
       stdio: 'inherit',
@@ -51,7 +52,7 @@ function runCommand(command, commandArgs = [], options = {}) {
         ...process.env,
         ...(options.env || {}),
       },
-      shell: false,
+      shell: useShell,
     })
 
     child.on('error', reject)
@@ -71,12 +72,13 @@ function runCommand(command, commandArgs = [], options = {}) {
 
 function execCapture(command, commandArgs = []) {
   return new Promise((resolve, reject) => {
+    const useShell = process.platform === 'win32' && ['pnpm', 'npm'].includes(String(command || '').toLowerCase())
     const child = spawn(command, commandArgs, {
       cwd: rootDir,
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
       env: process.env,
-      shell: false,
+      shell: useShell,
     })
 
     let stdout = ''
