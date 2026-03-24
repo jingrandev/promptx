@@ -864,8 +864,6 @@ export function useWorkbenchTasks(options = {}) {
     loadingTask.value = true
     error.value = ''
     clearToast()
-    currentTaskSlug.value = targetSlug
-    persistActiveTaskSlug(targetSlug)
 
     try {
       let state = force ? null : getTaskDraftState(targetSlug)
@@ -888,6 +886,8 @@ export function useWorkbenchTasks(options = {}) {
         return false
       }
 
+      currentTaskSlug.value = targetSlug
+      persistActiveTaskSlug(targetSlug)
       draft.value = cloneDraftState(state)
       setTaskDraftState(targetSlug, state)
       if (summary) {

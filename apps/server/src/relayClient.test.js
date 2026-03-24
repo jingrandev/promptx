@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { EventEmitter } from 'node:events'
 import test from 'node:test'
 import { setTimeout as delay } from 'node:timers/promises'
 import { WebSocketServer } from 'ws'
@@ -68,6 +69,27 @@ function createSilentLogger(logs = []) {
     error(...args) {
       logs.push(['error', args])
     },
+  }
+}
+
+class FakeSocket extends EventEmitter {
+  constructor() {
+    super()
+    this.readyState = 0
+    this.sentPayloads = []
+  }
+
+  send(payload) {
+    this.sentPayloads.push(JSON.parse(String(payload || '{}')))
+  }
+
+  close(code = 1000, reason = '') {
+    this.readyState = 3
+    this.emit('close', code, Buffer.from(String(reason || '')))
+  }
+
+  terminate() {
+    this.close(1006, 'terminated')
   }
 }
 
@@ -399,4 +421,58 @@ test('relay client supports manual reconnect', async () => {
       client.stop()
     }
   })
+})
+
+test('relay client ignores stale close events from previous socket instances', async () => {
+  const sockets = []
+  const client = createRelayClient({
+    relayUrl: 'http://relay.example.com',
+    deviceId: 'my-device',
+    deviceToken: 'secret',
+    healthCheckIntervalMs: 60_000,
+    logger: createSilentLogger(),
+    createWebSocket() {
+      const socket = new FakeSocket()
+      sockets.push(socket)
+      return socket
+    },
+  })
+
+  try {
+    client.start()
+    assert.equal(sockets.length, 1)
+
+    const firstSocket = sockets[0]
+    firstSocket.readyState = 1
+    firstSocket.emit('open')
+    firstSocket.emit('message', Buffer.from(JSON.stringify({
+      type: 'hello.ack',
+      ok: true,
+      deviceId: 'my-device',
+    })), false)
+
+    assert.equal(client.getStatus().connected, true)
+
+    firstSocket.readyState = 2
+    client.start()
+    assert.equal(sockets.length, 2)
+
+    const secondSocket = sockets[1]
+    secondSocket.readyState = 1
+    secondSocket.emit('open')
+    secondSocket.emit('message', Buffer.from(JSON.stringify({
+      type: 'hello.ack',
+      ok: true,
+      deviceId: 'my-device',
+    })), false)
+
+    firstSocket.emit('close', 1000, Buffer.from('stale_socket_closed'))
+
+    const status = client.getStatus()
+    assert.equal(status.connected, true)
+    assert.equal(status.socketReadyState, 1)
+    assert.equal(status.recentEvents.some((event) => event.type === 'stale_close_ignored'), true)
+  } finally {
+    client.stop()
+  }
 })

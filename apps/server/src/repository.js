@@ -362,7 +362,7 @@ export function listTasks(limit = 30) {
             notification_enabled, notification_channel_type, notification_webhook_url, notification_secret, notification_trigger_on, notification_message_mode, notification_last_status, notification_last_error, notification_last_sent_at,
             visibility, expires_at, created_at, updated_at
      FROM tasks
-     ORDER BY updated_at DESC
+     ORDER BY created_at DESC, id DESC
      LIMIT ?`,
     [Math.max(1, Number(limit) || 30)]
   )

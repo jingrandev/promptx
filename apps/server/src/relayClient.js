@@ -112,6 +112,7 @@ function createRelayClient({
   localBaseUrl,
   logger = console,
   appVersion = '0.0.0',
+  createWebSocket = (url) => new WebSocket(url),
   reconnectDelayStrategy = getReconnectDelayMs,
   healthCheckIntervalMs = DEFAULT_HEALTH_CHECK_INTERVAL_MS,
   heartbeatTimeoutMs = DEFAULT_HEARTBEAT_TIMEOUT_MS,
@@ -141,6 +142,7 @@ function createRelayClient({
   let authenticated = false
   let pendingReconnectSource = ''
   let lastHealthCheckTickAt = 0
+  let connectionSequence = 0
 
   function updateStatus(patch = {}) {
     Object.assign(status, patch)
@@ -550,10 +552,15 @@ function createRelayClient({
 
     appendRecentEvent('connect_start')
     logInfo('[relay] 开始连接', getLogContext())
-    socket = new WebSocket(config.websocketUrl)
+    const currentSocket = createWebSocket(config.websocketUrl)
+    const connectionId = ++connectionSequence
+    socket = currentSocket
     authenticated = false
 
-    socket.on('open', () => {
+    currentSocket.on('open', () => {
+      if (socket !== currentSocket) {
+        return
+      }
       appendRecentEvent('ws_open')
       sendFrame({
         type: 'hello',
@@ -561,10 +568,15 @@ function createRelayClient({
         deviceToken: config.deviceToken,
         version: appVersion,
       })
-      logInfo('[relay] WebSocket 已建立，等待设备认证', getLogContext())
+      logInfo('[relay] WebSocket 已建立，等待设备认证', getLogContext({
+        connectionId,
+      }))
     })
 
-    socket.on('message', (payload, isBinary) => {
+    currentSocket.on('message', (payload, isBinary) => {
+      if (socket !== currentSocket) {
+        return
+      }
       if (isBinary) {
         return
       }
@@ -590,10 +602,12 @@ function createRelayClient({
         appendRecentEvent('auth_ok', {
           tenantKey: String(message?.tenantKey || '').trim(),
           reconnectCount: Number(status.reconnectCount || 0),
+          connectionId,
         })
         logInfo('[relay] 设备认证成功，连接已就绪', getLogContext({
           tenantKey: String(message?.tenantKey || '').trim(),
           reconnectCount: Number(status.reconnectCount || 0),
+          connectionId,
         }))
         return
       }
@@ -601,19 +615,38 @@ function createRelayClient({
       handleIncomingFrame(JSON.stringify(message))
     })
 
-    socket.on('ping', () => {
+    currentSocket.on('ping', () => {
+      if (socket !== currentSocket) {
+        return
+      }
       updateStatus({
         lastHeartbeatAt: nowIso(),
       })
     })
 
-    socket.on('pong', () => {
+    currentSocket.on('pong', () => {
+      if (socket !== currentSocket) {
+        return
+      }
       updateStatus({
         lastHeartbeatAt: nowIso(),
       })
     })
 
-    socket.on('close', (code, reason) => {
+    currentSocket.on('close', (code, reason) => {
+      if (socket !== currentSocket) {
+        appendRecentEvent('stale_close_ignored', {
+          code: Number(code || 0),
+          reason: parseCloseReason(reason).closeReason || '',
+          connectionId,
+        })
+        logInfo('[relay] 已忽略旧连接的 close 事件', getLogContext({
+          code: Number(code || 0),
+          connectionId,
+        }))
+        return
+      }
+
       const wasAuthenticated = authenticated
       const reconnectSource = pendingReconnectSource
       pendingReconnectSource = ''
@@ -635,6 +668,7 @@ function createRelayClient({
         rawReason: rawReason || '',
         authenticated: wasAuthenticated,
         reconnectSource: reconnectSource || '',
+        connectionId,
       })
       socket = null
       authenticated = false
@@ -643,6 +677,7 @@ function createRelayClient({
         reason: closeReason || 'none',
         authenticated: wasAuthenticated,
         reconnectSource: reconnectSource || '',
+        connectionId,
       }))
 
       if (reconnectSource) {
@@ -658,15 +693,20 @@ function createRelayClient({
       scheduleReconnect({ source: rawReason || 'close' })
     })
 
-    socket.on('error', (error) => {
+    currentSocket.on('error', (error) => {
+      if (socket !== currentSocket) {
+        return
+      }
       updateStatus({
         lastError: error?.message || 'Relay 连接失败。',
       })
       appendRecentEvent('error', {
         error: error?.message || String(error || ''),
+        connectionId,
       })
       logWarn('[relay] 连接异常', getLogContext({
         error: error?.message || String(error || ''),
+        connectionId,
       }))
     })
   }
