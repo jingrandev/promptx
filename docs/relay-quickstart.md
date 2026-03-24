@@ -141,6 +141,8 @@ promptx relay stop
 promptx relay restart
 ```
 
+如果只是升级 Relay 的租户统计能力，只需要在云端更新代码并重启 Relay，本地同事的 PromptX 不需要升级。
+
 ### 7. 发给同事的信息
 
 新增好租户后，把这 4 项发给同事：
@@ -164,7 +166,36 @@ curl -H 'Host: user1.promptx.mushayu.com' http://127.0.0.1:3030/health
 {"ok":true,"tenant":"user1","host":"user1.promptx.mushayu.com","deviceOnline":true}
 ```
 
-### 9. Nginx 配置
+### 9. 查看使用统计
+
+Relay 现在自带一个轻量统计页，用来看“今天有哪些租户实际使用了 Relay”。
+
+直接打开：
+
+```text
+https://你的域名/relay/admin/usage
+```
+
+如果你没有配置管理口令，这个页面可直接访问；如果后面想加保护，可以额外配置：
+
+```bash
+export PROMPTX_RELAY_ADMIN_TOKEN=你自己的管理口令
+```
+
+统计页会展示：
+
+- 今日活跃租户数
+- 今日设备连接次数
+- 今日转发请求数
+- 每个租户的最近活跃时间、最近设备、API 请求数、上传请求数
+
+统计文件默认保存在：
+
+```text
+~/.promptx/data/relay-usage.json
+```
+
+### 10. Nginx 配置
 
 建议让 Nginx 负责 HTTPS，并把请求转发到本机 `3030`：
 
@@ -194,7 +225,7 @@ server {
 }
 ```
 
-### 10. DNS 配置
+### 11. DNS 配置
 
 最省事的是泛解析：
 
@@ -202,7 +233,7 @@ server {
 *.promptx.mushayu.com -> 云服务器公网 IP
 ```
 
-### 11. 常见问题
+### 12. 常见问题
 
 - `设备令牌不匹配`
   - 同事本地填写的 `deviceToken` 不对
@@ -213,7 +244,7 @@ server {
 - `503 PromptX 本地设备暂未连接到 relay`
   - 云端 Relay 正常，但对应同事的本机 PromptX 没连上
 
-### 12. 开发环境源码启动
+### 13. 开发环境源码启动
 
 如果不是 npm 安装版，而是源码测试：
 

@@ -15,10 +15,12 @@ import {
   parseCookieHeader,
   sanitizeProxyHeaders,
 } from './relayProtocol.js'
+import { createRelayUsageStore } from './relayUsageStore.js'
 
 const DEFAULT_RELAY_PORT = 3030
 const DEFAULT_RELAY_HOST = '0.0.0.0'
 const DEFAULT_COOKIE_NAME = 'promptx_relay_access'
+const DEFAULT_ADMIN_COOKIE_NAME = 'promptx_relay_admin'
 const DEVICE_AUTH_TIMEOUT_MS = 5_000
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 25_000
 const DEFAULT_HEARTBEAT_TIMEOUT_MS = 55_000
@@ -128,6 +130,9 @@ function readRelayServerConfig() {
     host: String(process.env.PROMPTX_RELAY_HOST || process.env.HOST || DEFAULT_RELAY_HOST).trim() || DEFAULT_RELAY_HOST,
     port: Math.max(1, Number(process.env.PROMPTX_RELAY_PORT || process.env.PORT) || DEFAULT_RELAY_PORT),
     accessCookieName: String(process.env.PROMPTX_RELAY_ACCESS_COOKIE || DEFAULT_COOKIE_NAME).trim() || DEFAULT_COOKIE_NAME,
+    adminCookieName: String(process.env.PROMPTX_RELAY_ADMIN_COOKIE || DEFAULT_ADMIN_COOKIE_NAME).trim() || DEFAULT_ADMIN_COOKIE_NAME,
+    adminToken: String(process.env.PROMPTX_RELAY_ADMIN_TOKEN || '').trim(),
+    usageFile: String(process.env.PROMPTX_RELAY_USAGE_FILE || '').trim(),
     tenants: tenantConfig.tenants,
     tenantSource: tenantConfig.source,
   }
@@ -219,6 +224,245 @@ function buildUnknownTenantPage(host = '') {
 </html>`
 }
 
+function buildAdminLoginPage({ errorMessage = '', redirectPath = '/relay/admin/usage' } = {}) {
+  const escapedError = String(errorMessage || '').replace(/[<>&"]/g, '')
+  const escapedRedirect = String(redirectPath || '/relay/admin/usage').replace(/"/g, '&quot;')
+
+  return `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PromptX Relay 管理登录</title>
+  <style>
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #f5f5f4; color: #1c1917; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+    .card { width: min(92vw, 440px); border: 1px solid #d6d3d1; background: #fafaf9; box-shadow: 8px 8px 0 rgba(28,25,23,.06); padding: 24px; }
+    h1 { margin: 0 0 10px; font-size: 22px; }
+    p { margin: 0 0 16px; line-height: 1.6; color: #57534e; }
+    label { display: block; margin-bottom: 8px; font-size: 13px; color: #44403c; }
+    input { box-sizing: border-box; width: 100%; border: 1px solid #a8a29e; padding: 10px 12px; background: white; }
+    button { margin-top: 14px; width: 100%; border: 1px solid #166534; background: #16a34a; color: white; padding: 10px 12px; cursor: pointer; }
+    .error { margin-bottom: 12px; color: #b91c1c; font-size: 13px; }
+    .hint { margin-top: 14px; font-size: 12px; color: #78716c; }
+  </style>
+</head>
+<body>
+  <form class="card" action="/relay/admin/login" method="get">
+    <h1>Relay 使用统计</h1>
+    <p>请输入管理口令，查看今天有哪些租户正在使用你的 PromptX Relay。</p>
+    ${escapedError ? `<div class="error">${escapedError}</div>` : ''}
+    <input type="hidden" name="redirect" value="${escapedRedirect}" />
+    <label for="token">管理口令</label>
+    <input id="token" name="token" type="password" autocomplete="current-password" required />
+    <button type="submit">进入统计页</button>
+    <div class="hint">可通过环境变量 <code>PROMPTX_RELAY_ADMIN_TOKEN</code> 配置。</div>
+  </form>
+</body>
+</html>`
+}
+
+function buildRelayUsagePage() {
+  return `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PromptX Relay 使用统计</title>
+  <style>
+    :root { color-scheme: light; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #f5f5f4; color: #1c1917; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+    main { max-width: 1160px; margin: 0 auto; padding: 28px 18px 40px; }
+    .header { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+    .title { margin: 0; font-size: 28px; }
+    .muted { color: #57534e; }
+    .toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+    .toolbar select, .toolbar button { height: 38px; border: 1px solid #d6d3d1; background: white; padding: 0 12px; }
+    .toolbar button { cursor: pointer; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin: 16px 0 20px; }
+    .card { border: 1px solid #d6d3d1; background: #ffffff; box-shadow: 6px 6px 0 rgba(28,25,23,.04); padding: 16px; }
+    .card h2 { margin: 0 0 8px; font-size: 13px; color: #57534e; font-weight: 600; }
+    .metric { font-size: 30px; font-weight: 700; }
+    .metric-sub { margin-top: 6px; color: #78716c; font-size: 12px; }
+    .layout { display: grid; grid-template-columns: minmax(0, 2fr) minmax(300px, 1fr); gap: 14px; }
+    .panel-title { margin: 0 0 12px; font-size: 16px; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { border-top: 1px solid #e7e5e4; padding: 10px 8px; text-align: left; vertical-align: top; }
+    th { border-top: 0; color: #57534e; font-weight: 600; font-size: 12px; }
+    tbody tr:hover { background: #fafaf9; }
+    .badge { display: inline-flex; align-items: center; padding: 2px 8px; border: 1px dashed #a8a29e; font-size: 12px; color: #44403c; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+    .day-list { display: grid; gap: 10px; }
+    .day-row { border: 1px dashed #d6d3d1; background: #fafaf9; padding: 10px 12px; }
+    .day-row strong { display: block; margin-bottom: 4px; }
+    .empty { padding: 24px; border: 1px dashed #d6d3d1; background: #fafaf9; color: #78716c; text-align: center; }
+    .error { padding: 14px 16px; border: 1px solid #fecaca; background: #fef2f2; color: #991b1b; }
+    @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="header">
+      <div>
+        <h1 class="title">Relay 使用统计</h1>
+        <div id="generatedAt" class="muted">读取中...</div>
+      </div>
+      <div class="toolbar">
+        <label class="muted" for="days">最近</label>
+        <select id="days">
+          <option value="7">7 天</option>
+          <option value="14">14 天</option>
+          <option value="30">30 天</option>
+        </select>
+        <button id="refreshBtn" type="button">刷新</button>
+      </div>
+    </div>
+
+    <section class="grid" id="summaryCards"></section>
+
+    <div class="layout">
+      <section class="card">
+        <h2 class="panel-title">今日活跃租户</h2>
+        <div id="todayTableWrap"></div>
+      </section>
+      <section class="card">
+        <h2 class="panel-title">最近几天</h2>
+        <div id="recentDays"></div>
+      </section>
+    </div>
+  </main>
+
+  <script>
+    const generatedAtEl = document.getElementById('generatedAt')
+    const summaryCardsEl = document.getElementById('summaryCards')
+    const todayTableWrapEl = document.getElementById('todayTableWrap')
+    const recentDaysEl = document.getElementById('recentDays')
+    const daysSelectEl = document.getElementById('days')
+    const refreshBtnEl = document.getElementById('refreshBtn')
+
+    function escapeHtml(value) {
+      return String(value || '').replace(/[&<>"']/g, (char) => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;',
+      }[char] || char))
+    }
+
+    function formatDateTime(value) {
+      const raw = String(value || '').trim()
+      if (!raw) return '-'
+      const date = new Date(raw)
+      if (Number.isNaN(date.getTime())) return raw
+      return date.toLocaleString('zh-CN')
+    }
+
+    function renderSummary(today) {
+      const cards = [
+        { label: '今日活跃租户', value: today.tenantCount || 0, sub: '至少连接过一次或转发过一次请求' },
+        { label: '今日设备连接', value: today.connectCount || 0, sub: '设备成功连上 Relay 的次数' },
+        { label: '今日转发请求', value: today.proxyRequestCount || 0, sub: '真实通过 Relay 转发到本地的请求数' },
+        { label: '今日 API 请求', value: today.apiRequestCount || 0, sub: '只统计 /api/*' },
+      ]
+      summaryCardsEl.innerHTML = cards.map((item) => \`
+        <section class="card">
+          <h2>\${escapeHtml(item.label)}</h2>
+          <div class="metric">\${escapeHtml(item.value)}</div>
+          <div class="metric-sub">\${escapeHtml(item.sub)}</div>
+        </section>
+      \`).join('')
+    }
+
+    function renderTodayTable(today) {
+      const tenants = Array.isArray(today.tenants) ? today.tenants : []
+      if (!tenants.length) {
+        todayTableWrapEl.innerHTML = '<div class="empty">今天还没有租户使用 Relay。</div>'
+        return
+      }
+
+      todayTableWrapEl.innerHTML = \`
+        <table>
+          <thead>
+            <tr>
+              <th>租户</th>
+              <th>连接</th>
+              <th>请求</th>
+              <th>最近设备</th>
+              <th>最近活跃</th>
+            </tr>
+          </thead>
+          <tbody>
+            \${tenants.map((item) => \`
+              <tr>
+                <td>
+                  <div><strong>\${escapeHtml(item.tenantKey)}</strong></div>
+                  <div class="muted mono">\${escapeHtml(item.host || '-')}</div>
+                </td>
+                <td>\${escapeHtml(item.connectCount || 0)}</td>
+                <td>
+                  <div>\${escapeHtml(item.proxyRequestCount || 0)}</div>
+                  <div class="muted">API \${escapeHtml(item.apiRequestCount || 0)} / 上传 \${escapeHtml(item.uploadRequestCount || 0)}</div>
+                </td>
+                <td class="mono">\${escapeHtml(item.lastDeviceId || '-')}</td>
+                <td>\${escapeHtml(formatDateTime(item.lastSeenAt))}</td>
+              </tr>
+            \`).join('')}
+          </tbody>
+        </table>
+      \`
+    }
+
+    function renderRecentDays(days) {
+      if (!Array.isArray(days) || !days.length) {
+        recentDaysEl.innerHTML = '<div class="empty">还没有历史统计。</div>'
+        return
+      }
+
+      recentDaysEl.innerHTML = '<div class="day-list">' + days.map((item) => \`
+        <div class="day-row">
+          <strong>\${escapeHtml(item.date)}</strong>
+          <div class="muted">活跃租户 \${escapeHtml(item.tenantCount || 0)} / 连接 \${escapeHtml(item.connectCount || 0)} / 请求 \${escapeHtml(item.proxyRequestCount || 0)}</div>
+        </div>
+      \`).join('') + '</div>'
+    }
+
+    async function loadUsage() {
+      generatedAtEl.textContent = '读取中...'
+      todayTableWrapEl.innerHTML = ''
+      recentDaysEl.innerHTML = ''
+      const days = Number(daysSelectEl.value || 7) || 7
+      try {
+        const response = await fetch('/relay/admin/api/usage?days=' + encodeURIComponent(days), {
+          credentials: 'include',
+          headers: { accept: 'application/json' },
+        })
+        if (!response.ok) {
+          const payload = await response.json().catch(() => null)
+          throw new Error(payload && payload.message ? payload.message : '统计读取失败')
+        }
+        const payload = await response.json()
+        generatedAtEl.textContent = '最近更新：' + formatDateTime(payload.generatedAt)
+        renderSummary(payload.today || {})
+        renderTodayTable(payload.today || {})
+        renderRecentDays(payload.recentDays || [])
+      } catch (error) {
+        summaryCardsEl.innerHTML = ''
+        const message = escapeHtml(error && error.message ? error.message : '统计读取失败')
+        todayTableWrapEl.innerHTML = '<div class="error">' + message + '</div>'
+        recentDaysEl.innerHTML = ''
+        generatedAtEl.textContent = '读取失败'
+      }
+    }
+
+    daysSelectEl.addEventListener('change', loadUsage)
+    refreshBtnEl.addEventListener('click', loadUsage)
+    loadUsage()
+  </script>
+</body>
+</html>`
+}
+
 function getRequestPath(request) {
   return String(request.raw.url || '/').split('?')[0] || '/'
 }
@@ -237,6 +481,11 @@ function normalizeRedirectPath(value = '/') {
     return '/'
   }
   return raw
+}
+
+function normalizeAdminRedirectPath(value = '/relay/admin/usage') {
+  const normalized = normalizeRedirectPath(value || '/relay/admin/usage')
+  return normalized.startsWith('/relay/admin') ? normalized : '/relay/admin/usage'
 }
 
 function createCookieValue(name, value, secure = false) {
@@ -327,6 +576,9 @@ async function startRelayServer(options = {}) {
   const requestMap = new Map()
   const tenantStateMap = new Map(config.tenants.map((tenant) => [tenant.key, createTenantState(tenant)]))
   const tenantConfigMap = new Map(config.tenants.map((tenant) => [tenant.key, tenant]))
+  const usageStore = options.usageStore || createRelayUsageStore({
+    filePath: config.usageFile || undefined,
+  })
   const heartbeatIntervalMs = Math.max(100, Number(options.heartbeatIntervalMs) || DEFAULT_HEARTBEAT_INTERVAL_MS)
   const heartbeatTimeoutMs = Math.max(
     heartbeatIntervalMs,
@@ -406,6 +658,37 @@ async function startRelayServer(options = {}) {
     }
 
     return reply.code(401).send({ message: '未通过 relay 访问验证。' })
+  }
+
+  function isAdminAuthorized(request) {
+    if (!config.adminToken) {
+      return true
+    }
+
+    const bearerToken = String(request.headers.authorization || '').replace(/^Bearer\s+/i, '').trim()
+    if (bearerToken && constantTimeEqual(bearerToken, config.adminToken)) {
+      return true
+    }
+
+    const cookies = parseCookieHeader(request.headers.cookie)
+    return constantTimeEqual(cookies[config.adminCookieName] || '', config.adminToken)
+  }
+
+  function ensureAdminAuthorized(request, reply) {
+    if (isAdminAuthorized(request)) {
+      return true
+    }
+
+    if (isHtmlRequest(request)) {
+      return reply
+        .code(401)
+        .type('text/html; charset=utf-8')
+        .send(buildAdminLoginPage({
+          redirectPath: normalizeAdminRedirectPath(request.query?.redirect || getRequestPath(request)),
+        }))
+    }
+
+    return reply.code(401).send({ message: '未通过 Relay 管理验证。' })
   }
 
   function getActiveDeviceSocket(tenantKey) {
@@ -524,6 +807,13 @@ async function startRelayServer(options = {}) {
 
     try {
       sendRequestToDevice(deviceSocket, requestId, request)
+      usageStore.record({
+        tenantKey: tenant.key,
+        type: 'proxy_request',
+        host: getRequestHost(request),
+        deviceId: getTenantState(tenant.key)?.deviceId || '',
+        path: String(request.raw.url || '/'),
+      })
     } catch (error) {
       const record = requestMap.get(requestId)
       requestMap.delete(requestId)
@@ -589,6 +879,47 @@ async function startRelayServer(options = {}) {
       version: tenantState?.version || '',
       recentEvents: tenantState?.recentEvents || [],
     }
+  })
+
+  app.get('/relay/admin/login', async (request, reply) => {
+    if (!config.adminToken) {
+      return reply.redirect('/relay/admin/usage')
+    }
+
+    const token = String(request.query?.token || '').trim()
+    const redirectPath = normalizeAdminRedirectPath(request.query?.redirect)
+    if (token && constantTimeEqual(token, config.adminToken)) {
+      reply.header('Set-Cookie', createCookieValue(config.adminCookieName, config.adminToken, isHttpsRequest(request)))
+      return reply.redirect(redirectPath)
+    }
+
+    return reply
+      .code(token ? 401 : 200)
+      .type('text/html; charset=utf-8')
+      .send(buildAdminLoginPage({
+        errorMessage: token ? '管理口令不正确。' : '',
+        redirectPath,
+      }))
+  })
+
+  app.get('/relay/admin/api/usage', async (request, reply) => {
+    if (ensureAdminAuthorized(request, reply) !== true) {
+      return
+    }
+
+    const days = Math.max(1, Math.min(90, Number(request.query?.days) || 7))
+    return {
+      ok: true,
+      ...usageStore.getReport({ days }),
+    }
+  })
+
+  app.get('/relay/admin/usage', async (request, reply) => {
+    if (ensureAdminAuthorized(request, reply) !== true) {
+      return
+    }
+
+    return reply.type('text/html; charset=utf-8').send(buildRelayUsagePage())
   })
 
   app.get('/relay/login', async (request, reply) => {
@@ -812,6 +1143,12 @@ async function startRelayServer(options = {}) {
           tenantState.lastDisconnectReason = ''
           tenantState.version = String(message.version || '').trim()
         }
+        usageStore.record({
+          tenantKey: tenant.key,
+          type: 'connect',
+          host: tenant.hosts[0] || '',
+          deviceId: providedDeviceId || '',
+        })
         appendTenantEvent(tenant.key, 'auth_ok', {
           deviceId: providedDeviceId || '',
           version: String(message.version || '').trim(),
@@ -944,6 +1281,12 @@ async function startRelayServer(options = {}) {
   const accessUrl = `http://${config.host === '0.0.0.0' ? '127.0.0.1' : config.host}:${resolvedPort}`
   app.log.info(`promptx relay running at ${accessUrl}`)
   app.log.info(`[relay] 已加载 ${config.tenants.length} 个租户，来源：${config.tenantSource}`)
+  app.log.info({ usageFile: usageStore.filePath }, '[relay] 租户使用统计已启用')
+  if (config.adminToken) {
+    app.log.info({ adminPath: '/relay/admin/usage' }, '[relay] 管理统计页面已启用')
+  } else {
+    app.log.warn({ adminPath: '/relay/admin/usage' }, '[relay] 管理统计页面未配置口令，当前可直接访问')
+  }
   app.log.info({
     heartbeatIntervalMs,
     heartbeatTimeoutMs,
@@ -963,6 +1306,7 @@ async function startRelayServer(options = {}) {
     port: resolvedPort,
     async close() {
       clearInterval(heartbeatTimer)
+      usageStore.flush?.()
       await new Promise((resolve) => {
         try {
           wsServer.close(() => resolve())

@@ -52,7 +52,7 @@ async function waitFor(check, timeoutMs = 2_000) {
   throw new Error('waitFor timeout')
 }
 
-function requestRelay({ port, host, path: requestPath, method = 'GET', body = '' }) {
+function requestRelay({ port, host, path: requestPath, method = 'GET', body = '', headers = {} }) {
   const payload = typeof body === 'string' ? body : JSON.stringify(body)
 
   return new Promise((resolve, reject) => {
@@ -63,6 +63,7 @@ function requestRelay({ port, host, path: requestPath, method = 'GET', body = ''
       method,
       headers: {
         Host: host,
+        ...headers,
         ...(payload ? {
           'content-type': 'application/json',
           'content-length': Buffer.byteLength(payload),
@@ -73,9 +74,12 @@ function requestRelay({ port, host, path: requestPath, method = 'GET', body = ''
       response.on('data', (chunk) => chunks.push(chunk))
       response.on('end', () => {
         const responseBody = Buffer.concat(chunks).toString('utf8')
+        const responseType = String(response.headers['content-type'] || '').toLowerCase()
         resolve({
           statusCode: response.statusCode || 0,
-          body: responseBody ? JSON.parse(responseBody) : null,
+          body: responseBody
+            ? (responseType.includes('application/json') ? JSON.parse(responseBody) : responseBody)
+            : null,
         })
       })
     })
@@ -451,6 +455,168 @@ test('relay server closes stale device connection after heartbeat timeout', asyn
     assert.equal(status.body.recentEvents.some((event) => event.type === 'auth_ok'), true)
   } finally {
     socket.close()
+    await relay.close()
+  }
+})
+
+test('relay admin usage api returns today tenant activity summary', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-relay-admin-usage-'))
+  fs.writeFileSync(path.join(tempDir, 'index.html'), '<!doctype html><html><body>relay-admin-usage</body></html>\n', 'utf8')
+
+  const relay = await startRelayServer({
+    logger: false,
+    webDistDir: tempDir,
+    config: {
+      host: '127.0.0.1',
+      port: 0,
+      accessCookieName: 'promptx_relay_access',
+      adminCookieName: 'promptx_relay_admin',
+      adminToken: 'relay-admin-token',
+      usageFile: path.join(tempDir, 'relay-usage.json'),
+      tenantSource: 'test',
+      tenants: [
+        {
+          key: 'user1',
+          hosts: ['user1.promptx.test'],
+          expectedDeviceId: 'user1-mac',
+          deviceToken: 'token-1',
+          accessToken: '',
+        },
+        {
+          key: 'user2',
+          hosts: ['user2.promptx.test'],
+          expectedDeviceId: 'user2-win',
+          deviceToken: 'token-2',
+          accessToken: '',
+        },
+      ],
+    },
+  })
+
+  function connectDevice({ host, deviceId, deviceToken }) {
+    const socket = new WebSocket(`ws://127.0.0.1:${relay.port}/relay/connect`, {
+      headers: {
+        Host: host,
+        'x-forwarded-host': host,
+      },
+    })
+    const pending = new Map()
+    let acknowledged = false
+
+    socket.on('message', (payload, isBinary) => {
+      if (isBinary) {
+        return
+      }
+
+      const message = JSON.parse(payload.toString('utf8'))
+      if (message.type === 'hello.ack') {
+        acknowledged = true
+        return
+      }
+
+      if (message.type === 'request.start') {
+        pending.set(message.requestId, true)
+        return
+      }
+
+      if (message.type === 'request.body') {
+        return
+      }
+
+      if (message.type === 'request.end') {
+        socket.send(JSON.stringify({
+          type: 'response.start',
+          requestId: message.requestId,
+          status: 200,
+          headers: {
+            'content-type': 'application/json; charset=utf-8',
+          },
+        }))
+        socket.send(JSON.stringify({
+          type: 'response.body',
+          requestId: message.requestId,
+          chunk: Buffer.from(JSON.stringify({ ok: true })).toString('base64'),
+        }))
+        socket.send(JSON.stringify({
+          type: 'response.end',
+          requestId: message.requestId,
+        }))
+        pending.delete(message.requestId)
+      }
+    })
+
+    socket.once('open', () => {
+      socket.send(JSON.stringify({
+        type: 'hello',
+        deviceId,
+        deviceToken,
+        version: '0.1.12',
+      }))
+    })
+
+    return {
+      socket,
+      waitForAck() {
+        return waitFor(() => acknowledged === true)
+      },
+    }
+  }
+
+  try {
+    const user1Device = connectDevice({
+      host: 'user1.promptx.test',
+      deviceId: 'user1-mac',
+      deviceToken: 'token-1',
+    })
+    const user2Device = connectDevice({
+      host: 'user2.promptx.test',
+      deviceId: 'user2-win',
+      deviceToken: 'token-2',
+    })
+
+    await Promise.all([user1Device.waitForAck(), user2Device.waitForAck()])
+
+    const proxyResponse = await requestRelay({
+      port: relay.port,
+      host: 'user1.promptx.test',
+      path: '/api/tasks',
+      headers: {
+        accept: 'application/json',
+      },
+    })
+    assert.equal(proxyResponse.statusCode, 200)
+    assert.deepEqual(proxyResponse.body, { ok: true })
+
+    await delay(350)
+
+    const usageResponse = await requestRelay({
+      port: relay.port,
+      host: 'relay-admin.promptx.test',
+      path: '/relay/admin/api/usage?days=7',
+      headers: {
+        accept: 'application/json',
+        authorization: 'Bearer relay-admin-token',
+      },
+    })
+
+    assert.equal(usageResponse.statusCode, 200)
+    assert.equal(usageResponse.body.ok, true)
+    assert.equal(usageResponse.body.today.tenantCount, 2)
+    assert.equal(usageResponse.body.today.connectCount, 2)
+    assert.equal(usageResponse.body.today.proxyRequestCount, 1)
+
+    const user1 = usageResponse.body.today.tenants.find((item) => item.tenantKey === 'user1')
+    const user2 = usageResponse.body.today.tenants.find((item) => item.tenantKey === 'user2')
+    assert.equal(user1.connectCount, 1)
+    assert.equal(user1.proxyRequestCount, 1)
+    assert.equal(user1.apiRequestCount, 1)
+    assert.equal(user1.lastDeviceId, 'user1-mac')
+    assert.equal(user2.connectCount, 1)
+    assert.equal(user2.proxyRequestCount, 0)
+
+    user1Device.socket.close()
+    user2Device.socket.close()
+  } finally {
     await relay.close()
   }
 })
