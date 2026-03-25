@@ -37,6 +37,7 @@ function normalizeWorkspaceDiffSummary(summary = null) {
 function cloneBlocks(blocks = []) {
   return (blocks || []).map((block) => ({
     ...block,
+    clientId: String(block?.clientId || block?.id || globalThis.crypto?.randomUUID?.() || `block-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`),
     meta: block?.meta ? { ...block.meta } : {},
   }))
 }
@@ -388,12 +389,14 @@ export function useWorkbenchTasks(options = {}) {
     return content.slice(apiBase.length)
   }
 
-  function normalizeBlocksForSave(blocks = []) {
-    return blocks.map((block) => ({
-      ...block,
-      content: block.type === 'image' ? normalizeImageContent(block.content) : block.content,
-    }))
-  }
+function normalizeBlocksForSave(blocks = []) {
+  return blocks.map((block) => ({
+    id: Number.isInteger(Number(block?.id)) ? Number(block.id) : null,
+    type: block?.type,
+    content: block?.type === 'image' ? normalizeImageContent(block.content) : block.content,
+    meta: block?.meta ? { ...block.meta } : {},
+  }))
+}
 
   function createSnapshot(
     title = draft.value.title,
@@ -415,6 +418,10 @@ export function useWorkbenchTasks(options = {}) {
 
   function hasPendingDraftChanges() {
     return createSnapshot() !== lastSavedSnapshot.value
+  }
+
+  function isCurrentTaskEditorEditing() {
+    return Boolean(editorRef.value?.isEditing?.())
   }
 
   function getTaskSummary(slug) {
@@ -813,11 +820,22 @@ export function useWorkbenchTasks(options = {}) {
       return
     }
 
-    if (hasPendingDraftChanges() || hasUnsavedChanges.value || saving.value || uploading.value || loadingTask.value) {
+    if (
+      isCurrentTaskEditorEditing()
+      || hasPendingDraftChanges()
+      || hasUnsavedChanges.value
+      || saving.value
+      || uploading.value
+      || loadingTask.value
+    ) {
       return
     }
 
-    await loadTask(currentSlug, { force: true, skipIfDirtyOnApply: true })
+    await loadTask(currentSlug, {
+      force: true,
+      skipIfDirtyOnApply: true,
+      skipIfEditingOnApply: true,
+    })
   }
 
   function scheduleServerRefresh(taskSlug = '') {
@@ -868,7 +886,12 @@ export function useWorkbenchTasks(options = {}) {
   }
 
   async function loadTask(slug, options = {}) {
-    const { focusEditor = false, force = false, skipIfDirtyOnApply = false } = options
+    const {
+      focusEditor = false,
+      force = false,
+      skipIfDirtyOnApply = false,
+      skipIfEditingOnApply = false,
+    } = options
     const targetSlug = String(slug || '').trim()
     if (!targetSlug) {
       return false
@@ -896,6 +919,14 @@ export function useWorkbenchTasks(options = {}) {
         skipIfDirtyOnApply
         && targetSlug === currentTaskSlug.value
         && (hasPendingDraftChanges() || hasUnsavedChanges.value)
+      ) {
+        return false
+      }
+
+      if (
+        skipIfEditingOnApply
+        && targetSlug === currentTaskSlug.value
+        && isCurrentTaskEditorEditing()
       ) {
         return false
       }

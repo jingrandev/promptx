@@ -37,12 +37,15 @@ const mentionSessionId = computed(() => props.codexSessionId)
 const activeIndex = ref(0)
 const textareas = ref([])
 const composingBlockIndex = ref(-1)
+const focusedBlockIndex = ref(-1)
 const surfaceRef = ref(null)
 const contentRef = ref(null)
 const fileInputRef = ref(null)
 const mentionPickerRef = ref(null)
 const selectionMap = ref({})
 const previewImageUrl = ref('')
+const lastInputAt = ref(0)
+const EDITING_GRACE_PERIOD_MS = 1500
 
 const {
   mentionState,
@@ -85,8 +88,20 @@ function isNonTextBlock(block) {
   return block && block.type !== BLOCK_TYPES.TEXT
 }
 
+function createBlockClientId() {
+  return globalThis.crypto?.randomUUID?.() || `block-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+}
+
+function withBlockIdentity(block = {}) {
+  return {
+    ...block,
+    clientId: String(block?.clientId || block?.id || createBlockClientId()),
+    meta: block?.meta ? { ...block.meta } : {},
+  }
+}
+
 function createTextBlock(content = '') {
-  return { type: BLOCK_TYPES.TEXT, content, meta: {} }
+  return withBlockIdentity({ type: BLOCK_TYPES.TEXT, content, meta: {} })
 }
 
 function normalizeBlocksWithAnchors(inputBlocks = []) {
@@ -98,16 +113,17 @@ function normalizeBlocksWithAnchors(inputBlocks = []) {
   const normalized = []
 
   source.forEach((block, index) => {
+    const normalizedBlock = withBlockIdentity(block)
     const previous = normalized[normalized.length - 1]
-    if (!previous && isNonTextBlock(block)) {
+    if (!previous && isNonTextBlock(normalizedBlock)) {
       normalized.push(createTextBlock(''))
     }
-    if (previous && isNonTextBlock(previous) && isNonTextBlock(block)) {
+    if (previous && isNonTextBlock(previous) && isNonTextBlock(normalizedBlock)) {
       normalized.push(createTextBlock(''))
     }
-    normalized.push(block)
+    normalized.push(normalizedBlock)
 
-    if (index === source.length - 1 && isNonTextBlock(block)) {
+    if (index === source.length - 1 && isNonTextBlock(normalizedBlock)) {
       normalized.push(createTextBlock(''))
     }
   })
@@ -186,12 +202,15 @@ function resizeAllTextareas() {
   textareas.value.forEach((element) => resizeTextarea(element))
 }
 
-function scrollContentToBottom() {
-  nextTick(() => {
-    if (!contentRef.value) {
-      return
-    }
-    contentRef.value.scrollTop = contentRef.value.scrollHeight
+function scrollTextBlockIntoView(index) {
+  const target = textareas.value[index]
+  if (!target) {
+    return
+  }
+
+  target.scrollIntoView({
+    block: 'nearest',
+    inline: 'nearest',
   })
 }
 
@@ -203,6 +222,7 @@ function placeCursor(index, position = null) {
   const nextPosition = position ?? target.value.length
   target.focus()
   target.setSelectionRange(nextPosition, nextPosition)
+  scrollTextBlockIntoView(index)
   selectionMap.value[index] = {
     start: nextPosition,
     end: nextPosition,
@@ -210,6 +230,7 @@ function placeCursor(index, position = null) {
 }
 
 function updateText(index, content) {
+  lastInputAt.value = Date.now()
   const nextBlocks = blocks.value.map((block, itemIndex) =>
     itemIndex === index ? { ...block, content } : block
   )
@@ -678,6 +699,7 @@ function handleSurfaceClick(event) {
 }
 
 function handleTextInput(index, event) {
+  lastInputAt.value = Date.now()
   const mentionActive = mentionState.value.open && mentionState.value.blockIndex === index
   resizeTextarea(event.target, mentionActive
     ? {
@@ -686,25 +708,36 @@ function handleTextInput(index, event) {
         preserveSelection: false,
       }
     : undefined)
-  if (!(mentionState.value.open && mentionState.value.blockIndex === index)) {
-    scrollContentToBottom()
-  }
   syncMentionState(index, event.target)
 }
 
 function handleTextCompositionStart(index) {
   composingBlockIndex.value = index
+  focusedBlockIndex.value = index
+  lastInputAt.value = Date.now()
 }
 
 function handleTextCompositionUpdate(index, event) {
+  lastInputAt.value = Date.now()
   syncTextareaValueToBlock(index, event.target.value)
   handleTextInput(index, event)
 }
 
 function handleTextCompositionEnd(index, event) {
+  lastInputAt.value = Date.now()
   syncTextareaValueToBlock(index, event.target.value)
   composingBlockIndex.value = -1
   handleTextInput(index, event)
+}
+
+function handleTextFocusState(index) {
+  focusedBlockIndex.value = index
+}
+
+function handleTextBlurState(index) {
+  if (focusedBlockIndex.value === index) {
+    focusedBlockIndex.value = -1
+  }
 }
 
 async function handleTextKeydown(index, event) {
@@ -827,6 +860,14 @@ function focusEditor() {
   })
 }
 
+function isEditing() {
+  if (composingBlockIndex.value >= 0 || focusedBlockIndex.value >= 0) {
+    return true
+  }
+
+  return Date.now() - lastInputAt.value < EDITING_GRACE_PERIOD_MS
+}
+
 const blockLayoutSignature = computed(() =>
   blocks.value
     .map((block, index) => `${index}:${block.type}:${block.meta?.collapsed ? '1' : '0'}`)
@@ -848,7 +889,6 @@ watch(
   () => {
     nextTick(() => {
       resizeAllTextareas()
-      scrollContentToBottom()
     })
   },
   { immediate: true }
@@ -897,6 +937,7 @@ defineExpose({
   insertTextAtSelection,
   insertUploadedBlocks,
   isComposing,
+  isEditing,
   isImportedBlockActive: () => blocks.value[activeIndex.value]?.type === BLOCK_TYPES.IMPORTED_TEXT,
   openFilePicker,
 })
@@ -939,7 +980,7 @@ defineExpose({
 
     <div ref="contentRef" class="flex-1 overflow-y-auto px-5 py-5">
       <div class="flex flex-col gap-5">
-      <template v-for="(block, index) in blocks" :key="`${block.type}-${index}`">
+      <template v-for="(block, index) in blocks" :key="String(block.id || block.clientId || `${block.type}-${index}`)">
         <div v-if="block.type === BLOCK_TYPES.TEXT" class="group relative">
           <textarea
             :ref="(element) => setTextRef(element, index)"
@@ -947,7 +988,8 @@ defineExpose({
             :value="block.content"
             class="w-full resize-none overflow-hidden border-0 bg-transparent p-0 pr-12 text-[15px] leading-8 text-[var(--theme-textPrimary)] outline-none placeholder:text-[var(--theme-textMuted)]"
             :placeholder="index === 0 ? t('blockEditor.placeholderFirst') : t('blockEditor.placeholderNext')"
-            @focus="handleTextFocus(index)"
+            @focus="handleTextFocus(index); handleTextFocusState(index)"
+            @blur="handleTextBlurState(index)"
             @input="updateText(index, $event.target.value); handleTextInput(index, $event)"
             @compositionstart="handleTextCompositionStart(index)"
             @compositionupdate="handleTextCompositionUpdate(index, $event)"
@@ -1001,7 +1043,8 @@ defineExpose({
             :value="block.content"
             class="w-full resize-none overflow-hidden border-0 bg-transparent px-4 py-4 text-[15px] leading-8 text-[var(--theme-textPrimary)] outline-none placeholder:text-[var(--theme-textMuted)]"
             :placeholder="t('blockEditor.emptyImportPlaceholder')"
-            @focus="handleTextFocus(index)"
+            @focus="handleTextFocus(index); handleTextFocusState(index)"
+            @blur="handleTextBlurState(index)"
             @input="updateText(index, $event.target.value); handleTextInput(index, $event)"
             @compositionstart="handleTextCompositionStart(index)"
             @compositionupdate="handleTextCompositionUpdate(index, $event)"

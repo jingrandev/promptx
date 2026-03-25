@@ -91,6 +91,10 @@ function isComposing() {
   return blockEditorRef.value?.isComposing?.() || false
 }
 
+function isEditing() {
+  return blockEditorRef.value?.isEditing?.() || false
+}
+
 defineExpose({
   focusEditor,
   flushPendingInput,
@@ -98,6 +102,7 @@ defineExpose({
   insertImportedBlocks,
   insertUploadedBlocks,
   isComposing,
+  isEditing,
   isImportedBlockActive,
   openFilePicker,
 })

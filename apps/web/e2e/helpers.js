@@ -414,6 +414,28 @@ export async function openWorkbenchTask(page, slug, options = {}) {
   await page.waitForTimeout(1200)
 }
 
+export async function updateTaskViaApi(slug, payload = {}) {
+  const stack = await ensurePromptxE2EStack()
+  const apiUrl = String(stack?.apiUrl || DEFAULT_API_URL_CANDIDATES[0] || '').replace(/\/$/, '')
+  if (!apiUrl) {
+    throw new Error('未找到可用的 PromptX E2E API 地址')
+  }
+
+  const response = await fetch(`${apiUrl}/api/tasks/${encodeURIComponent(slug)}`, {
+    method: 'PUT',
+    headers: {
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  })
+
+  if (!response.ok) {
+    throw new Error(`更新任务失败：${response.status} ${await response.text()}`)
+  }
+
+  return response.json()
+}
+
 export async function readTranscriptState(page) {
   return page.evaluate(() => {
     const transcript = document.querySelector('.h-full.space-y-4.overflow-y-auto.px-4.py-4')
