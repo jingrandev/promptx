@@ -54,6 +54,9 @@ async function waitFor(check, timeoutMs = 2_000) {
 
 function requestRelay({ port, host, path: requestPath, method = 'GET', body = '', headers = {} }) {
   const payload = typeof body === 'string' ? body : JSON.stringify(body)
+  const normalizedHeaders = { ...headers }
+  const hasExplicitContentType = Object.keys(normalizedHeaders).some((key) => String(key).toLowerCase() === 'content-type')
+  const hasExplicitContentLength = Object.keys(normalizedHeaders).some((key) => String(key).toLowerCase() === 'content-length')
 
   return new Promise((resolve, reject) => {
     const request = http.request({
@@ -63,10 +66,10 @@ function requestRelay({ port, host, path: requestPath, method = 'GET', body = ''
       method,
       headers: {
         Host: host,
-        ...headers,
+        ...normalizedHeaders,
         ...(payload ? {
-          'content-type': 'application/json',
-          'content-length': Buffer.byteLength(payload),
+          ...(hasExplicitContentType ? {} : { 'content-type': 'application/json' }),
+          ...(hasExplicitContentLength ? {} : { 'content-length': Buffer.byteLength(payload) }),
         } : {}),
       },
     }, (response) => {
@@ -77,6 +80,7 @@ function requestRelay({ port, host, path: requestPath, method = 'GET', body = ''
         const responseType = String(response.headers['content-type'] || '').toLowerCase()
         resolve({
           statusCode: response.statusCode || 0,
+          headers: response.headers,
           body: responseBody
             ? (responseType.includes('application/json') ? JSON.parse(responseBody) : responseBody)
             : null,
@@ -184,6 +188,178 @@ test('readRelayServerConfig loads multi-tenant relay settings from file', () => 
       accessToken: 'access-2',
     })
   })
+})
+
+test('relay login page uses POST and successful login sets cookie without query token', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-relay-login-page-'))
+  fs.writeFileSync(path.join(tempDir, 'index.html'), '<!doctype html><html><body>relay-login</body></html>\n', 'utf8')
+
+  const relay = await startRelayServer({
+    logger: false,
+    webDistDir: tempDir,
+    config: {
+      host: '127.0.0.1',
+      port: 0,
+      accessCookieName: 'promptx_relay_access',
+      tenantSource: 'test',
+      tenants: [
+        {
+          key: 'user1',
+          hosts: ['user1.promptx.test'],
+          expectedDeviceId: 'user1-mac',
+          deviceToken: 'token-1',
+          accessToken: 'access-1',
+        },
+      ],
+    },
+  })
+
+  try {
+    const loginPage = await requestRelay({
+      port: relay.port,
+      host: 'user1.promptx.test',
+      path: '/relay/login?redirect=%2F',
+      headers: {
+        accept: 'text/html',
+      },
+    })
+    assert.equal(loginPage.statusCode, 200)
+    assert.match(String(loginPage.body || ''), /action="\/relay\/login" method="post"/)
+    assert.doesNotMatch(String(loginPage.body || ''), /name="token" type="password".*method="get"/s)
+
+    const loginResult = await requestRelay({
+      port: relay.port,
+      host: 'user1.promptx.test',
+      path: '/relay/login',
+      method: 'POST',
+      body: 'token=access-1&redirect=%2F',
+      headers: {
+        accept: 'text/html',
+        'content-type': 'application/x-www-form-urlencoded',
+      },
+    })
+    assert.equal(loginResult.statusCode, 302)
+    assert.equal(loginResult.headers.location, '/')
+    assert.match(String(loginResult.headers['set-cookie'] || ''), /promptx_relay_access=/)
+  } finally {
+    await relay.close()
+  }
+})
+
+test('relay login rate limit blocks repeated invalid attempts', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-relay-login-limit-'))
+  fs.writeFileSync(path.join(tempDir, 'index.html'), '<!doctype html><html><body>relay-limit</body></html>\n', 'utf8')
+
+  const relay = await startRelayServer({
+    logger: false,
+    webDistDir: tempDir,
+    loginRateLimitMaxAttempts: 2,
+    loginRateLimitWindowMs: 60_000,
+    config: {
+      host: '127.0.0.1',
+      port: 0,
+      accessCookieName: 'promptx_relay_access',
+      tenantSource: 'test',
+      tenants: [
+        {
+          key: 'user1',
+          hosts: ['user1.promptx.test'],
+          expectedDeviceId: 'user1-mac',
+          deviceToken: 'token-1',
+          accessToken: 'access-1',
+        },
+      ],
+    },
+  })
+
+  try {
+    const firstAttempt = await requestRelay({
+      port: relay.port,
+      host: 'user1.promptx.test',
+      path: '/relay/login',
+      method: 'POST',
+      body: 'token=wrong&redirect=%2F',
+      headers: {
+        accept: 'text/html',
+        'content-type': 'application/x-www-form-urlencoded',
+      },
+    })
+    assert.equal(firstAttempt.statusCode, 401)
+    assert.match(String(firstAttempt.body || ''), /访问令牌不正确/)
+
+    const secondAttempt = await requestRelay({
+      port: relay.port,
+      host: 'user1.promptx.test',
+      path: '/relay/login',
+      method: 'POST',
+      body: 'token=still-wrong&redirect=%2F',
+      headers: {
+        accept: 'text/html',
+        'content-type': 'application/x-www-form-urlencoded',
+      },
+    })
+    assert.equal(secondAttempt.statusCode, 429)
+    assert.match(String(secondAttempt.body || ''), /尝试次数过多/)
+  } finally {
+    await relay.close()
+  }
+})
+
+test('relay admin login uses POST and successful login sets admin cookie', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-relay-admin-login-'))
+  fs.writeFileSync(path.join(tempDir, 'index.html'), '<!doctype html><html><body>relay-admin-login</body></html>\n', 'utf8')
+
+  const relay = await startRelayServer({
+    logger: false,
+    webDistDir: tempDir,
+    config: {
+      host: '127.0.0.1',
+      port: 0,
+      accessCookieName: 'promptx_relay_access',
+      adminCookieName: 'promptx_relay_admin',
+      adminToken: 'relay-admin-token',
+      tenantSource: 'test',
+      tenants: [
+        {
+          key: 'user1',
+          hosts: ['user1.promptx.test'],
+          expectedDeviceId: 'user1-mac',
+          deviceToken: 'token-1',
+          accessToken: 'access-1',
+        },
+      ],
+    },
+  })
+
+  try {
+    const loginPage = await requestRelay({
+      port: relay.port,
+      host: 'relay-admin.promptx.test',
+      path: '/relay/admin/login?redirect=%2Frelay%2Fadmin%2Fusage',
+      headers: {
+        accept: 'text/html',
+      },
+    })
+    assert.equal(loginPage.statusCode, 200)
+    assert.match(String(loginPage.body || ''), /action="\/relay\/admin\/login" method="post"/)
+
+    const loginResult = await requestRelay({
+      port: relay.port,
+      host: 'relay-admin.promptx.test',
+      path: '/relay/admin/login',
+      method: 'POST',
+      body: 'token=relay-admin-token&redirect=%2Frelay%2Fadmin%2Fusage',
+      headers: {
+        accept: 'text/html',
+        'content-type': 'application/x-www-form-urlencoded',
+      },
+    })
+    assert.equal(loginResult.statusCode, 302)
+    assert.equal(loginResult.headers.location, '/relay/admin/usage')
+    assert.match(String(loginResult.headers['set-cookie'] || ''), /promptx_relay_admin=/)
+  } finally {
+    await relay.close()
+  }
 })
 
 test('multi-tenant relay routes requests to matching device sockets without cross-talk', async () => {

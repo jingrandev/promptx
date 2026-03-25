@@ -24,6 +24,8 @@ const DEFAULT_ADMIN_COOKIE_NAME = 'promptx_relay_admin'
 const DEVICE_AUTH_TIMEOUT_MS = 5_000
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 25_000
 const DEFAULT_HEARTBEAT_TIMEOUT_MS = 55_000
+const DEFAULT_LOGIN_RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000
+const DEFAULT_LOGIN_RATE_LIMIT_MAX_ATTEMPTS = 10
 const MAX_RECENT_EVENTS = 100
 
 function normalizeRelayHost(value = '') {
@@ -172,19 +174,25 @@ function buildLoginPage({
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>PromptX Relay 登录</title>
   <style>
-    body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #f5f5f4; color: #1c1917; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
-    .card { width: min(92vw, 420px); border: 1px solid #d6d3d1; background: #fffbeb; box-shadow: 8px 8px 0 rgba(28,25,23,.06); padding: 24px; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 16px; background: #f5f5f4; color: #1c1917; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+    .card { width: min(100%, 420px); border: 1px solid #d6d3d1; background: #fffbeb; box-shadow: 8px 8px 0 rgba(28,25,23,.06); padding: 24px; }
     h1 { margin: 0 0 10px; font-size: 22px; }
     p { margin: 0 0 16px; line-height: 1.6; color: #57534e; }
     label { display: block; margin-bottom: 8px; font-size: 13px; color: #44403c; }
-    input { box-sizing: border-box; width: 100%; border: 1px solid #a8a29e; padding: 10px 12px; background: white; }
-    button { margin-top: 14px; width: 100%; border: 1px solid #166534; background: #16a34a; color: white; padding: 10px 12px; cursor: pointer; }
+    input { box-sizing: border-box; width: 100%; min-height: 44px; border: 1px solid #a8a29e; padding: 10px 12px; background: white; font: inherit; }
+    button { margin-top: 14px; width: 100%; min-height: 44px; border: 1px solid #166534; background: #16a34a; color: white; padding: 10px 12px; cursor: pointer; font: inherit; }
     .error { margin-bottom: 12px; color: #b91c1c; font-size: 13px; }
     .tenant { display: inline-block; margin-bottom: 10px; padding: 2px 8px; border: 1px dashed #86efac; color: #166534; font-size: 12px; }
+    @media (max-width: 640px) {
+      body { padding: 12px; align-items: stretch; }
+      .card { padding: 18px 16px; box-shadow: 4px 4px 0 rgba(28,25,23,.05); }
+      h1 { font-size: 20px; }
+      p { font-size: 14px; }
+    }
   </style>
 </head>
 <body>
-  <form class="card" action="/relay/login" method="get">
+  <form class="card" action="/relay/login" method="post">
     ${escapedTenantLabel ? `<div class="tenant">${escapedTenantLabel}</div>` : ''}
     <h1>PromptX Relay</h1>
     <p>请输入远程访问令牌，进入你自己的 PromptX 工作台。</p>
@@ -235,19 +243,25 @@ function buildAdminLoginPage({ errorMessage = '', redirectPath = '/relay/admin/u
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>PromptX Relay 管理登录</title>
   <style>
-    body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #f5f5f4; color: #1c1917; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
-    .card { width: min(92vw, 440px); border: 1px solid #d6d3d1; background: #fafaf9; box-shadow: 8px 8px 0 rgba(28,25,23,.06); padding: 24px; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 16px; background: #f5f5f4; color: #1c1917; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+    .card { width: min(100%, 440px); border: 1px solid #d6d3d1; background: #fafaf9; box-shadow: 8px 8px 0 rgba(28,25,23,.06); padding: 24px; }
     h1 { margin: 0 0 10px; font-size: 22px; }
     p { margin: 0 0 16px; line-height: 1.6; color: #57534e; }
     label { display: block; margin-bottom: 8px; font-size: 13px; color: #44403c; }
-    input { box-sizing: border-box; width: 100%; border: 1px solid #a8a29e; padding: 10px 12px; background: white; }
-    button { margin-top: 14px; width: 100%; border: 1px solid #166534; background: #16a34a; color: white; padding: 10px 12px; cursor: pointer; }
+    input { box-sizing: border-box; width: 100%; min-height: 44px; border: 1px solid #a8a29e; padding: 10px 12px; background: white; font: inherit; }
+    button { margin-top: 14px; width: 100%; min-height: 44px; border: 1px solid #166534; background: #16a34a; color: white; padding: 10px 12px; cursor: pointer; font: inherit; }
     .error { margin-bottom: 12px; color: #b91c1c; font-size: 13px; }
     .hint { margin-top: 14px; font-size: 12px; color: #78716c; }
+    @media (max-width: 640px) {
+      body { padding: 12px; align-items: stretch; }
+      .card { padding: 18px 16px; box-shadow: 4px 4px 0 rgba(28,25,23,.05); }
+      h1 { font-size: 20px; }
+      p { font-size: 14px; }
+    }
   </style>
 </head>
 <body>
-  <form class="card" action="/relay/admin/login" method="get">
+  <form class="card" action="/relay/admin/login" method="post">
     <h1>Relay 使用统计</h1>
     <p>请输入管理口令，查看今天有哪些租户正在使用你的 PromptX Relay。</p>
     ${escapedError ? `<div class="error">${escapedError}</div>` : ''}
@@ -277,7 +291,7 @@ function buildRelayUsagePage() {
     .title { margin: 0; font-size: 28px; }
     .muted { color: #57534e; }
     .toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
-    .toolbar select, .toolbar button { height: 38px; border: 1px solid #d6d3d1; background: white; padding: 0 12px; }
+    .toolbar select, .toolbar button { height: 38px; border: 1px solid #d6d3d1; background: white; padding: 0 12px; font: inherit; }
     .toolbar button { cursor: pointer; }
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin: 16px 0 20px; }
     .card { border: 1px solid #d6d3d1; background: #ffffff; box-shadow: 6px 6px 0 rgba(28,25,23,.04); padding: 16px; }
@@ -286,6 +300,7 @@ function buildRelayUsagePage() {
     .metric-sub { margin-top: 6px; color: #78716c; font-size: 12px; }
     .layout { display: grid; grid-template-columns: minmax(0, 2fr) minmax(300px, 1fr); gap: 14px; }
     .panel-title { margin: 0 0 12px; font-size: 16px; }
+    .table-wrap { overflow-x: auto; }
     table { width: 100%; border-collapse: collapse; font-size: 13px; }
     th, td { border-top: 1px solid #e7e5e4; padding: 10px 8px; text-align: left; vertical-align: top; }
     th { border-top: 0; color: #57534e; font-weight: 600; font-size: 12px; }
@@ -298,6 +313,31 @@ function buildRelayUsagePage() {
     .empty { padding: 24px; border: 1px dashed #d6d3d1; background: #fafaf9; color: #78716c; text-align: center; }
     .error { padding: 14px 16px; border: 1px solid #fecaca; background: #fef2f2; color: #991b1b; }
     @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } }
+    @media (max-width: 640px) {
+      main { padding: 18px 12px 28px; }
+      .header { align-items: stretch; gap: 12px; }
+      .title { font-size: 22px; }
+      .toolbar { display: grid; grid-template-columns: 1fr 1fr; align-items: stretch; }
+      .toolbar label { display: none; }
+      .toolbar select, .toolbar button { width: 100%; min-height: 42px; }
+      .grid { grid-template-columns: 1fr 1fr; gap: 10px; }
+      .card { padding: 14px; box-shadow: 3px 3px 0 rgba(28,25,23,.04); }
+      .metric { font-size: 24px; }
+      .panel-title { font-size: 15px; }
+      .table-wrap { overflow: visible; }
+      table, thead, tbody, tr, th, td { display: block; width: 100%; }
+      thead { display: none; }
+      tbody { display: grid; gap: 10px; }
+      tr { border: 1px dashed #d6d3d1; background: #fafaf9; padding: 10px 12px; }
+      td { border: 0; padding: 4px 0; }
+      td::before {
+        content: attr(data-label);
+        display: block;
+        margin-bottom: 2px;
+        color: #78716c;
+        font-size: 12px;
+      }
+    }
   </style>
 </head>
 <body>
@@ -382,6 +422,7 @@ function buildRelayUsagePage() {
       }
 
       todayTableWrapEl.innerHTML = \`
+        <div class="table-wrap">
         <table>
           <thead>
             <tr>
@@ -395,21 +436,22 @@ function buildRelayUsagePage() {
           <tbody>
             \${tenants.map((item) => \`
               <tr>
-                <td>
+                <td data-label="租户">
                   <div><strong>\${escapeHtml(item.tenantKey)}</strong></div>
                   <div class="muted mono">\${escapeHtml(item.host || '-')}</div>
                 </td>
-                <td>\${escapeHtml(item.connectCount || 0)}</td>
-                <td>
+                <td data-label="连接">\${escapeHtml(item.connectCount || 0)}</td>
+                <td data-label="请求">
                   <div>\${escapeHtml(item.proxyRequestCount || 0)}</div>
                   <div class="muted">API \${escapeHtml(item.apiRequestCount || 0)} / 上传 \${escapeHtml(item.uploadRequestCount || 0)}</div>
                 </td>
-                <td class="mono">\${escapeHtml(item.lastDeviceId || '-')}</td>
-                <td>\${escapeHtml(formatDateTime(item.lastSeenAt))}</td>
+                <td class="mono" data-label="最近设备">\${escapeHtml(item.lastDeviceId || '-')}</td>
+                <td data-label="最近活跃">\${escapeHtml(formatDateTime(item.lastSeenAt))}</td>
               </tr>
             \`).join('')}
           </tbody>
         </table>
+        </div>
       \`
     }
 
@@ -490,6 +532,96 @@ function normalizeAdminRedirectPath(value = '/relay/admin/usage') {
 
 function createCookieValue(name, value, secure = false) {
   return `${name}=${encodeURIComponent(value)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000${secure ? '; Secure' : ''}`
+}
+
+function parseUrlEncodedBody(body) {
+  const rawBody = Buffer.isBuffer(body) ? body.toString('utf8') : String(body || '')
+  const params = new URLSearchParams(rawBody)
+  return Object.fromEntries(params.entries())
+}
+
+function getRequestClientIp(request) {
+  const forwardedFor = String(request?.headers?.['x-forwarded-for'] || '').split(',')[0]?.trim()
+  if (forwardedFor) {
+    return forwardedFor
+  }
+  return String(request?.ip || request?.socket?.remoteAddress || request?.raw?.socket?.remoteAddress || '').trim() || 'unknown'
+}
+
+function formatRetryAfterText(retryAfterMs = 0) {
+  const seconds = Math.max(1, Math.ceil(Number(retryAfterMs || 0) / 1000))
+  if (seconds < 60) {
+    return `${seconds} 秒`
+  }
+
+  const minutes = Math.ceil(seconds / 60)
+  return `${minutes} 分钟`
+}
+
+function createLoginRateLimiter({
+  windowMs = DEFAULT_LOGIN_RATE_LIMIT_WINDOW_MS,
+  maxAttempts = DEFAULT_LOGIN_RATE_LIMIT_MAX_ATTEMPTS,
+  now = () => Date.now(),
+} = {}) {
+  const attempts = new Map()
+
+  function cleanup() {
+    const currentTime = now()
+    for (const [key, value] of attempts.entries()) {
+      if (!value || currentTime >= value.resetAt) {
+        attempts.delete(key)
+      }
+    }
+  }
+
+  function getState(key) {
+    cleanup()
+    const existing = attempts.get(key)
+    if (!existing) {
+      return {
+        count: 0,
+        resetAt: now() + windowMs,
+      }
+    }
+    return existing
+  }
+
+  return {
+    getRemaining(key) {
+      const state = getState(key)
+      if (state.count >= maxAttempts) {
+        return {
+          ok: false,
+          retryAfterMs: Math.max(0, state.resetAt - now()),
+        }
+      }
+      return {
+        ok: true,
+        retryAfterMs: 0,
+      }
+    },
+    recordFailure(key) {
+      const state = getState(key)
+      const nextState = {
+        count: state.count + 1,
+        resetAt: state.resetAt,
+      }
+      attempts.set(key, nextState)
+      if (nextState.count >= maxAttempts) {
+        return {
+          ok: false,
+          retryAfterMs: Math.max(0, nextState.resetAt - now()),
+        }
+      }
+      return {
+        ok: true,
+        retryAfterMs: 0,
+      }
+    },
+    clear(key) {
+      attempts.delete(key)
+    },
+  }
 }
 
 function normalizeRequestBodyToBuffer(body) {
@@ -578,6 +710,10 @@ async function startRelayServer(options = {}) {
   const tenantConfigMap = new Map(config.tenants.map((tenant) => [tenant.key, tenant]))
   const usageStore = options.usageStore || createRelayUsageStore({
     filePath: config.usageFile || undefined,
+  })
+  const loginRateLimiter = createLoginRateLimiter({
+    windowMs: Math.max(1_000, Number(options.loginRateLimitWindowMs) || DEFAULT_LOGIN_RATE_LIMIT_WINDOW_MS),
+    maxAttempts: Math.max(1, Number(options.loginRateLimitMaxAttempts) || DEFAULT_LOGIN_RATE_LIMIT_MAX_ATTEMPTS),
   })
   const heartbeatIntervalMs = Math.max(100, Number(options.heartbeatIntervalMs) || DEFAULT_HEARTBEAT_INTERVAL_MS)
   const heartbeatTimeoutMs = Math.max(
@@ -689,6 +825,27 @@ async function startRelayServer(options = {}) {
     }
 
     return reply.code(401).send({ message: '未通过 Relay 管理验证。' })
+  }
+
+  function ensureLoginRateAllowed(request, reply, scope, redirectPath, pageBuilder) {
+    const key = `${scope}:${getRequestHost(request) || 'unknown-host'}:${getRequestClientIp(request)}`
+    const remaining = loginRateLimiter.getRemaining(key)
+    if (remaining.ok) {
+      return { ok: true, key }
+    }
+
+    const errorMessage = `尝试次数过多，请 ${formatRetryAfterText(remaining.retryAfterMs)} 后再试。`
+    return {
+      ok: false,
+      key,
+      handled: reply
+        .code(429)
+        .type('text/html; charset=utf-8')
+        .send(pageBuilder({
+          errorMessage,
+          redirectPath,
+        })),
+    }
   }
 
   function getActiveDeviceSocket(tenantKey) {
@@ -886,18 +1043,50 @@ async function startRelayServer(options = {}) {
       return reply.redirect('/relay/admin/usage')
     }
 
-    const token = String(request.query?.token || '').trim()
     const redirectPath = normalizeAdminRedirectPath(request.query?.redirect)
+    return reply
+      .code(200)
+      .type('text/html; charset=utf-8')
+      .send(buildAdminLoginPage({
+        redirectPath,
+      }))
+  })
+
+  app.post('/relay/admin/login', async (request, reply) => {
+    if (!config.adminToken) {
+      return reply.redirect('/relay/admin/usage')
+    }
+
+    const form = parseUrlEncodedBody(request.body)
+    const redirectPath = normalizeAdminRedirectPath(form.redirect)
+    const limit = ensureLoginRateAllowed(request, reply, 'admin-login', redirectPath, buildAdminLoginPage)
+    if (!limit.ok) {
+      return limit.handled
+    }
+
+    const token = String(form.token || '').trim()
     if (token && constantTimeEqual(token, config.adminToken)) {
+      loginRateLimiter.clear(limit.key)
       reply.header('Set-Cookie', createCookieValue(config.adminCookieName, config.adminToken, isHttpsRequest(request)))
       return reply.redirect(redirectPath)
     }
 
+    const nextState = loginRateLimiter.recordFailure(limit.key)
+    if (!nextState.ok) {
+      return reply
+        .code(429)
+        .type('text/html; charset=utf-8')
+        .send(buildAdminLoginPage({
+          errorMessage: `尝试次数过多，请 ${formatRetryAfterText(nextState.retryAfterMs)} 后再试。`,
+          redirectPath,
+        }))
+    }
+
     return reply
-      .code(token ? 401 : 200)
+      .code(401)
       .type('text/html; charset=utf-8')
       .send(buildAdminLoginPage({
-        errorMessage: token ? '管理口令不正确。' : '',
+        errorMessage: '管理口令不正确。',
         redirectPath,
       }))
   })
@@ -932,18 +1121,60 @@ async function startRelayServer(options = {}) {
       return reply.redirect('/')
     }
 
-    const token = String(request.query?.token || '').trim()
     const redirectPath = normalizeRedirectPath(request.query?.redirect)
+    return reply
+      .code(200)
+      .type('text/html; charset=utf-8')
+      .send(buildLoginPage({
+        redirectPath,
+        tenantLabel: tenant.key,
+      }))
+  })
+
+  app.post('/relay/login', async (request, reply) => {
+    const tenant = requireTenantRequest(request, reply)
+    if (!tenant) {
+      return
+    }
+
+    if (!tenant.accessToken) {
+      return reply.redirect('/')
+    }
+
+    const form = parseUrlEncodedBody(request.body)
+    const redirectPath = normalizeRedirectPath(form.redirect)
+    const limit = ensureLoginRateAllowed(request, reply, `tenant-login:${tenant.key}`, redirectPath, (payload) => buildLoginPage({
+      ...payload,
+      tenantLabel: tenant.key,
+    }))
+    if (!limit.ok) {
+      return limit.handled
+    }
+
+    const token = String(form.token || '').trim()
     if (token && constantTimeEqual(token, tenant.accessToken)) {
+      loginRateLimiter.clear(limit.key)
       reply.header('Set-Cookie', createCookieValue(config.accessCookieName, tenant.accessToken, isHttpsRequest(request)))
       return reply.redirect(redirectPath)
     }
 
+    const nextState = loginRateLimiter.recordFailure(limit.key)
+    if (!nextState.ok) {
+      return reply
+        .code(429)
+        .type('text/html; charset=utf-8')
+        .send(buildLoginPage({
+          errorMessage: `尝试次数过多，请 ${formatRetryAfterText(nextState.retryAfterMs)} 后再试。`,
+          redirectPath,
+          tenantLabel: tenant.key,
+        }))
+    }
+
     return reply
-      .code(token ? 401 : 200)
+      .code(401)
       .type('text/html; charset=utf-8')
       .send(buildLoginPage({
-        errorMessage: token ? '访问令牌不正确。' : '',
+        errorMessage: '访问令牌不正确。',
         redirectPath,
         tenantLabel: tenant.key,
       }))
