@@ -60,15 +60,15 @@ promptx stop
 
 ### 工作台
 
-![PromptX 工作台](docs/assets/workbench-overview.jpg)
+![PromptX 工作台](docs/assets/readme-workbench-glass.png)
 
 ### 设置
 
-![PromptX 设置](docs/assets/settings-panel.jpg)
+![PromptX 设置](docs/assets/readme-settings-theme-glass.png)
 
 ### 手机端
 
-![PromptX 手机端](docs/assets/mobile-remote.jpg)
+![PromptX 手机端](docs/assets/readme-mobile-remote-glass.png)
 
 ## 为什么好用
 

@@ -60,15 +60,15 @@ promptx stop
 
 ### Workspace
 
-![PromptX workspace](docs/assets/workbench-overview.jpg)
+![PromptX workspace](docs/assets/readme-workbench-glass.png)
 
 ### Settings
 
-![PromptX settings](docs/assets/settings-panel.jpg)
+![PromptX settings](docs/assets/readme-settings-theme-glass.png)
 
 ### Mobile
 
-![PromptX mobile](docs/assets/mobile-remote.jpg)
+![PromptX mobile](docs/assets/readme-mobile-remote-glass.png)
 
 ## Why It Helps
 
