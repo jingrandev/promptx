@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import {
   ChevronDown,
+  FileText,
   Image as ImageIcon,
   Trash2,
 } from 'lucide-vue-next'

@@ -23,6 +23,10 @@ const props = defineProps({
     type: String,
     default: '',
   },
+  suggestions: {
+    type: Array,
+    default: () => [],
+  },
 })
 
 const emit = defineEmits(['close', 'select'])
