@@ -470,6 +470,34 @@ body {
     backdrop-filter: blur(8px) saturate(120%);
   }
 
+  .dialog-shell-enter-active,
+  .dialog-shell-leave-active {
+    transition: opacity 180ms ease;
+  }
+
+  .dialog-shell-enter-from,
+  .dialog-shell-leave-to {
+    opacity: 0;
+  }
+
+  .dialog-shell-panel {
+    transition: transform 220ms ease, opacity 180ms ease;
+    will-change: transform, opacity;
+  }
+
+  .dialog-shell-enter-from .dialog-shell-panel,
+  .dialog-shell-leave-to .dialog-shell-panel {
+    transform: translateY(calc(100% + 1rem));
+    opacity: 0.98;
+  }
+
+  @media (min-width: 640px) {
+    .dialog-shell-enter-from .dialog-shell-panel,
+    .dialog-shell-leave-to .dialog-shell-panel {
+      transform: translateY(0.75rem) scale(0.995);
+    }
+  }
+
   .theme-option {
     border-color: var(--theme-borderMuted);
     background: transparent;
@@ -1390,7 +1418,7 @@ body {
   }
 
   .workbench-mobile-header {
-    padding: 0.7rem 0.85rem;
+    padding: 0.4rem 0.55rem;
   }
 
   .workbench-mobile-tabs {
@@ -1406,17 +1434,30 @@ body {
   .workbench-mobile-header .theme-icon-button,
   .workbench-mobile-header input,
   .workbench-mobile-header button {
-    min-height: 2.1rem;
+    min-height: 1.7rem;
   }
 
   .workbench-mobile-header input,
   .workbench-mobile-header button[type='button'] {
-    font-size: 0.875rem;
+    font-size: 0.78rem;
   }
 
   .settings-dialog-panel {
     height: min(100dvh - 1rem, 52rem);
-    border-radius: 0.9rem;
+  }
+
+  .dialog-shell-panel,
+  .settings-dialog-panel {
+    border-radius: 0;
+  }
+
+  .dialog-shell-panel .panel,
+  .dialog-shell-panel .settings-section-card,
+  .dialog-shell-panel .settings-form-card,
+  .dialog-shell-panel .theme-content-panel,
+  .dialog-shell-panel .theme-inline-panel,
+  .dialog-shell-panel .theme-empty-state {
+    border-radius: 0;
   }
 
   .settings-dialog-header {
@@ -1451,11 +1492,6 @@ body {
 
   .settings-nav__item .text-sm {
     font-size: 0.8125rem;
-  }
-
-  .settings-section-card,
-  .settings-form-card {
-    border-radius: 0.7rem;
   }
 
   .settings-form-footer {
@@ -1840,5 +1876,33 @@ body {
   .task-loading-dots__dot {
     animation: none;
     opacity: 0.65;
+  }
+}
+
+.dialog-shell-enter-active,
+.dialog-shell-leave-active {
+  transition: opacity 180ms ease;
+}
+
+.dialog-shell-enter-from,
+.dialog-shell-leave-to {
+  opacity: 0;
+}
+
+.dialog-shell-panel {
+  transition: transform 220ms ease, opacity 180ms ease;
+  will-change: transform, opacity;
+}
+
+.dialog-shell-enter-from .dialog-shell-panel,
+.dialog-shell-leave-to .dialog-shell-panel {
+  transform: translateY(calc(100% + 1rem));
+  opacity: 0.98;
+}
+
+@media (min-width: 640px) {
+  .dialog-shell-enter-from .dialog-shell-panel,
+  .dialog-shell-leave-to .dialog-shell-panel {
+    transform: translateY(0.75rem) scale(0.995);
   }
 }

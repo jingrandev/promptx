@@ -617,7 +617,7 @@ onBeforeUnmount(() => {
 <template>
   <DialogShell
     :open="open"
-    backdrop-class="z-[70] items-center justify-center px-4 py-6"
+    backdrop-class="z-[70] items-end justify-center px-0 py-0 sm:items-center sm:px-4 sm:py-6"
     panel-class="settings-dialog-panel h-full max-w-5xl sm:h-[42rem] sm:max-h-[88vh]"
     header-class="settings-dialog-header px-5 py-4"
     body-class="settings-dialog-body min-h-0 flex flex-1 flex-col sm:flex-row"

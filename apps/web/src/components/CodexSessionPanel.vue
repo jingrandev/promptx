@@ -217,7 +217,6 @@ defineExpose({
 <template>
   <section class="panel relative flex h-full min-h-0 flex-col overflow-hidden">
     <CodexSessionManagerDialog
-      v-if="showManager"
       :open="showManager"
       :sessions="sessions"
       :workspaces="workspaces"

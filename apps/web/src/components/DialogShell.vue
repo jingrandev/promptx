@@ -101,42 +101,44 @@ onBeforeUnmount(() => {
 
 <template>
   <Teleport to="body">
-    <div
-      v-if="open"
-      class="theme-modal-backdrop fixed inset-0 flex"
-      :class="backdropClass"
-      @click.self="handleBackdropClick"
-    >
-      <section class="panel flex min-h-0 w-full flex-col overflow-hidden" :class="panelClass">
-        <div
-          v-if="$slots.title || $slots.header || $slots['header-actions'] || showClose"
-          class="theme-divider flex items-start justify-between gap-4 border-b"
-          :class="headerClass"
-        >
-          <div class="min-w-0 flex-1">
-            <slot name="header">
-              <slot name="title" />
-            </slot>
+    <Transition name="dialog-shell">
+      <div
+        v-if="open"
+        class="theme-modal-backdrop dialog-shell-backdrop fixed inset-0 flex"
+        :class="backdropClass"
+        @click.self="handleBackdropClick"
+      >
+        <section class="panel dialog-shell-panel flex min-h-0 w-full flex-col overflow-hidden" :class="panelClass">
+          <div
+            v-if="$slots.title || $slots.header || $slots['header-actions'] || showClose"
+            class="theme-divider flex items-start justify-between gap-4 border-b"
+            :class="headerClass"
+          >
+            <div class="min-w-0 flex-1">
+              <slot name="header">
+                <slot name="title" />
+              </slot>
+            </div>
+
+            <div v-if="$slots['header-actions'] || showClose" class="flex items-center gap-2">
+              <slot name="header-actions" />
+              <button
+                v-if="showClose"
+                type="button"
+                class="theme-icon-button h-8 w-8 shrink-0"
+                :disabled="closeDisabled"
+                @click="requestClose"
+              >
+                <X class="h-4 w-4" />
+              </button>
+            </div>
           </div>
 
-          <div v-if="$slots['header-actions'] || showClose" class="flex items-center gap-2">
-            <slot name="header-actions" />
-            <button
-              v-if="showClose"
-              type="button"
-              class="theme-icon-button h-8 w-8 shrink-0"
-              :disabled="closeDisabled"
-              @click="requestClose"
-            >
-              <X class="h-4 w-4" />
-            </button>
+          <div :class="bodyClass">
+            <slot />
           </div>
-        </div>
-
-        <div :class="bodyClass">
-          <slot />
-        </div>
-      </section>
-    </div>
+        </section>
+      </div>
+    </Transition>
   </Teleport>
 </template>

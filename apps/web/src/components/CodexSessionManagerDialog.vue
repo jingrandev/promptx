@@ -589,9 +589,9 @@ watch(
   />
   <DialogShell
     :open="open"
-    panel-class="h-full max-w-5xl sm:h-auto sm:max-h-[88vh]"
-    header-class="px-4 py-3 sm:px-5 sm:py-4"
-    body-class="min-h-0 flex-1 overflow-hidden"
+    panel-class="settings-dialog-panel h-full max-w-5xl sm:h-auto sm:max-h-[88vh]"
+    header-class="settings-dialog-header px-5 py-4"
+    body-class="settings-dialog-body min-h-0 flex-1 overflow-hidden"
     :close-disabled="busy"
     :close-on-backdrop="!busy"
     :close-on-escape="!busy"

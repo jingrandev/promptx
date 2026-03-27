@@ -593,7 +593,6 @@ const mobileDetailHeaderListeners = {
       @use="handleUseTodo"
     />
     <TaskDiffReviewDialog
-      v-if="showDiffDialog"
       :open="showDiffDialog"
       :task-slug="currentTaskSlug"
       :task-title="currentTaskDisplayTitle"
@@ -602,13 +601,8 @@ const mobileDetailHeaderListeners = {
       :focus-token="diffFocusToken"
       @close="closeTaskDiff"
     />
-    <WorkbenchSettingsDialog
-      v-if="showSettingsDialog"
-      :open="showSettingsDialog"
-      @close="closeSettingsDialog"
-    />
+    <WorkbenchSettingsDialog :open="showSettingsDialog" @close="closeSettingsDialog" />
     <EditTaskDialog
-      v-if="showEditTaskDialog"
       :open="showEditTaskDialog"
       :task-slug="currentTaskSlug"
       :task-title="currentTaskDisplayTitle"

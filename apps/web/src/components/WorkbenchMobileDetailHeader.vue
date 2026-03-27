@@ -38,15 +38,16 @@ const { t } = useI18n()
 
 <template>
   <section class="panel workbench-mobile-header-panel shrink-0 overflow-hidden">
-    <div class="workbench-panel-header workbench-mobile-header theme-divider border-b px-4 py-3">
-      <div class="flex items-center gap-3">
+    <div class="workbench-panel-header workbench-mobile-header theme-divider border-b px-2.5 py-2">
+      <div class="flex items-center gap-2">
         <button
           type="button"
-          class="tool-button inline-flex shrink-0 items-center gap-1.5 px-3 py-2 text-xs"
+          class="tool-button inline-flex h-8 w-8 shrink-0 items-center justify-center px-0 py-0 text-[11px]"
+          :title="t('workbench.tasks')"
+          :aria-label="t('workbench.tasks')"
           @click="emit('back')"
         >
-          <ArrowLeft class="h-4 w-4" />
-          <span>{{ t('workbench.tasks') }}</span>
+          <ArrowLeft class="h-3.5 w-3.5" />
         </button>
 
         <div class="min-w-0 flex-1">
@@ -56,7 +57,7 @@ const { t } = useI18n()
             type="text"
             maxlength="140"
             data-task-title-input="current"
-            class="block w-full appearance-none border-0 bg-transparent p-0 text-left text-sm font-semibold leading-6 outline-none placeholder:text-[var(--theme-textMuted)]"
+            class="block w-full appearance-none border-0 bg-transparent p-0 text-left text-[13px] font-semibold leading-5 outline-none placeholder:text-[var(--theme-textMuted)]"
             :placeholder="currentTaskAutoTitle || t('workbench.untitledTask')"
             @input="emit('update:titleInputValue', $event.target.value)"
             @keydown.enter.prevent="$event.target.blur()"
@@ -66,12 +67,12 @@ const { t } = useI18n()
           <button
             v-else
             type="button"
-            class="inline-flex w-full items-center gap-2 truncate bg-transparent p-0 text-left text-sm font-semibold leading-6"
+            class="inline-flex w-full items-center gap-1 truncate bg-transparent p-0 text-left text-[13px] font-semibold leading-5"
             :disabled="!currentTaskSlug"
             @click="emit('begin-edit')"
           >
             <span class="truncate">{{ title || t('workbench.untitledTask') }}</span>
-            <PencilLine class="h-3.5 w-3.5 shrink-0 opacity-50" />
+            <PencilLine class="h-2.5 w-2.5 shrink-0 opacity-50" />
           </button>
         </div>
       </div>

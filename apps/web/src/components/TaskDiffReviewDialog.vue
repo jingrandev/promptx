@@ -44,8 +44,9 @@ const titleText = computed(() => {
 <template>
   <DialogShell
     :open="open"
-    panel-class="h-full sm:h-[min(90vh,960px)] sm:max-w-[min(96vw,1560px)]"
-    body-class="min-h-0 flex-1 overflow-hidden p-3 sm:p-4"
+    panel-class="settings-dialog-panel h-full sm:h-[min(90vh,960px)] sm:max-w-[min(96vw,1560px)]"
+    header-class="settings-dialog-header px-5 py-4"
+    body-class="settings-dialog-body min-h-0 flex-1 overflow-hidden p-3 sm:p-4"
     @close="emit('close')"
   >
     <template #title>
