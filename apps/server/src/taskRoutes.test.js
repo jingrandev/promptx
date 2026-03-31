@@ -86,6 +86,7 @@ test('task routes return 202 when runner dispatch remains pending', async () => 
     listTaskCodexRunsWithOptions: () => [],
     listTaskWorkspaceDiffSummaries: () => [],
     listTasks: () => [],
+    reorderTasks: () => ({ changed: false, items: [] }),
     purgeExpiredContent: () => {},
     removeAssetFiles: () => {},
     runDispatchService: {
@@ -136,6 +137,7 @@ test('task routes block clearing runs while task is active', async () => {
     listTaskCodexRunsWithOptions: () => [],
     listTaskWorkspaceDiffSummaries: () => [],
     listTasks: () => [],
+    reorderTasks: () => ({ changed: false, items: [] }),
     purgeExpiredContent: () => {},
     removeAssetFiles: () => {},
     runDispatchService: {
@@ -156,6 +158,108 @@ test('task routes block clearing runs while task is active', async () => {
 
     assert.equal(response.statusCode, 409)
     assert.match(response.json().message, /正在执行/)
+  } finally {
+    await app.close()
+  }
+})
+
+test('task routes reorder tasks and broadcast list change', async () => {
+  const broadcasts = []
+  const app = Fastify()
+  registerTaskRoutes(app, {
+    broadcastServerEvent: (type, payload) => broadcasts.push({ type, payload }),
+    buildTaskExports: () => ({ raw: '' }),
+    canEditTask: () => true,
+    createTask: () => null,
+    decorateTask: (task) => task,
+    decorateTaskList: (items) => items,
+    deleteTask: () => ({ error: 'not_found' }),
+    deleteTaskCodexRuns: () => {},
+    getPromptxCodexSessionById: () => null,
+    getRunningCodexRunByTaskSlug: () => null,
+    getTaskBySlug: (slug) => ({ slug, expired: false }),
+    getTaskGitDiffReviewInSubprocess: async () => ({}),
+    listTaskCodexRunsWithOptions: () => [],
+    listTaskWorkspaceDiffSummaries: () => [],
+    listTasks: () => [],
+    reorderTasks: (slugs) => ({
+      changed: true,
+      items: slugs.map((slug) => ({ slug })),
+    }),
+    purgeExpiredContent: () => {},
+    removeAssetFiles: () => {},
+    runDispatchService: {
+      async startTaskRunForTask() {
+        return null
+      },
+    },
+    updateTask: () => null,
+    updateTaskCodexSession: () => null,
+  })
+  await app.ready()
+
+  try {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/tasks/reorder',
+      payload: {
+        slugs: ['task-b', 'task-a'],
+      },
+    })
+
+    assert.equal(response.statusCode, 200)
+    assert.deepEqual(response.json().items, [{ slug: 'task-b' }, { slug: 'task-a' }])
+    assert.deepEqual(broadcasts, [{
+      type: 'tasks.changed',
+      payload: { reason: 'reordered' },
+    }])
+  } finally {
+    await app.close()
+  }
+})
+
+test('task routes reject invalid reorder payload', async () => {
+  const app = Fastify()
+  registerTaskRoutes(app, {
+    broadcastServerEvent: () => {},
+    buildTaskExports: () => ({ raw: '' }),
+    canEditTask: () => true,
+    createTask: () => null,
+    decorateTask: (task) => task,
+    decorateTaskList: (items) => items,
+    deleteTask: () => ({ error: 'not_found' }),
+    deleteTaskCodexRuns: () => {},
+    getPromptxCodexSessionById: () => null,
+    getRunningCodexRunByTaskSlug: () => null,
+    getTaskBySlug: (slug) => ({ slug, expired: false }),
+    getTaskGitDiffReviewInSubprocess: async () => ({}),
+    listTaskCodexRunsWithOptions: () => [],
+    listTaskWorkspaceDiffSummaries: () => [],
+    listTasks: () => [],
+    reorderTasks: () => ({ changed: false, items: [] }),
+    purgeExpiredContent: () => {},
+    removeAssetFiles: () => {},
+    runDispatchService: {
+      async startTaskRunForTask() {
+        return null
+      },
+    },
+    updateTask: () => null,
+    updateTaskCodexSession: () => null,
+  })
+  await app.ready()
+
+  try {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/tasks/reorder',
+      payload: {
+        slugs: ['', '   '],
+      },
+    })
+
+    assert.equal(response.statusCode, 400)
+    assert.match(response.json().message, /排序数据无效/)
   } finally {
     await app.close()
   }

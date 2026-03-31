@@ -7,6 +7,7 @@ export {
   getTask,
   listTasks,
   listTaskWorkspaceDiffSummaries,
+  reorderTasks,
   updateTask,
 } from './taskApi.js'
 export {

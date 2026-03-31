@@ -4,7 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 
-test('listTasks uses stable created-at order instead of updated-at order', async () => {
+test('listTasks uses stable sort order instead of updated-at order', async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-repository-'))
   const originalCwd = process.cwd()
   const originalDataDir = process.env.PROMPTX_DATA_DIR
@@ -44,6 +44,41 @@ test('listTasks uses stable created-at order instead of updated-at order', async
       items.map((item) => item.slug),
       [newerTask.slug, olderTask.slug]
     )
+  } finally {
+    process.chdir(originalCwd)
+    if (typeof originalDataDir === 'string') {
+      process.env.PROMPTX_DATA_DIR = originalDataDir
+    } else {
+      delete process.env.PROMPTX_DATA_DIR
+    }
+  }
+})
+
+test('reorderTasks persists manual task ordering', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-repository-'))
+  const originalCwd = process.cwd()
+  const originalDataDir = process.env.PROMPTX_DATA_DIR
+  const dataDir = path.join(tempDir, 'data')
+
+  fs.mkdirSync(dataDir, { recursive: true })
+  process.chdir(tempDir)
+  process.env.PROMPTX_DATA_DIR = dataDir
+
+  try {
+    const repository = await import(`./repository.js?test=${Date.now()}`)
+    const { createTask, listTasks, reorderTasks } = repository
+
+    const first = createTask({ title: 'first', visibility: 'private', expiry: 'none' })
+    const second = createTask({ title: 'second', visibility: 'private', expiry: 'none' })
+    const third = createTask({ title: 'third', visibility: 'private', expiry: 'none' })
+
+    const initialItems = listTasks()
+    assert.deepEqual(initialItems.slice(0, 3).map((item) => item.slug), [third.slug, second.slug, first.slug])
+
+    const result = reorderTasks([second.slug, third.slug, first.slug])
+    assert.equal(result.changed, true)
+    assert.deepEqual(result.items.slice(0, 3).map((item) => item.slug), [second.slug, third.slug, first.slug])
+    assert.deepEqual(listTasks().slice(0, 3).map((item) => item.slug), [second.slug, third.slug, first.slug])
   } finally {
     process.chdir(originalCwd)
     if (typeof originalDataDir === 'string') {

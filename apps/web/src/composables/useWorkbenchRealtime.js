@@ -4,6 +4,7 @@ import { subscribeServerEvents } from '../lib/serverEvents.js'
 const readyVersion = ref(0)
 const listSyncVersion = ref(0)
 const listSyncTaskSlug = ref('')
+const listSyncReason = ref('')
 const sessionsSyncVersion = ref(0)
 const taskRunSyncVersionMap = reactive({})
 const taskDiffSyncVersionMap = reactive({})
@@ -17,6 +18,7 @@ const TASK_LIST_SYNC_REASONS = new Set([
   'created',
   'updated',
   'deleted',
+  'reordered',
   'session-linked',
   'session-cleared',
 ])
@@ -100,12 +102,14 @@ function handleServerEvent(event = {}) {
   if (eventType === 'ready') {
     readyVersion.value += 1
     listSyncTaskSlug.value = ''
+    listSyncReason.value = ''
     sessionsSyncVersion.value += 1
     return
   }
 
   if (eventType === 'tasks.changed') {
     listSyncTaskSlug.value = taskSlug
+    listSyncReason.value = String(event.reason || '').trim()
     if (syncFlags.updatesTaskList) {
       listSyncVersion.value += 1
     }
@@ -117,6 +121,7 @@ function handleServerEvent(event = {}) {
 
   if (eventType === 'runs.changed') {
     listSyncTaskSlug.value = taskSlug
+    listSyncReason.value = ''
     const nextRunChange = {
       runId: String(event.runId || '').trim(),
       status: String(event.status || '').trim(),
@@ -143,6 +148,7 @@ function handleServerEvent(event = {}) {
   }
 
   if (eventType === 'sessions.changed') {
+    listSyncReason.value = ''
     if (syncFlags.updatesSessions) {
       sessionsSyncVersion.value += 1
     }
@@ -228,6 +234,7 @@ export function useWorkbenchRealtime() {
     readyVersion,
     listSyncVersion,
     listSyncTaskSlug,
+    listSyncReason,
     sessionsSyncVersion,
     getTaskRunSyncVersion,
     getTaskRunChange,

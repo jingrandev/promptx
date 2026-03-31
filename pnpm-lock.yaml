@@ -45,6 +45,24 @@ importers:
         specifier: 8.18.3
         version: 8.18.3
 
+  apps/runner:
+    dependencies:
+      '@fastify/cors':
+        specifier: ^11.2.0
+        version: 11.2.0
+      '@promptx/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
+      fastify:
+        specifier: ^5.8.2
+        version: 5.8.2
+      iconv-lite:
+        specifier: ^0.7.2
+        version: 0.7.2
+      sql.js:
+        specifier: ^1.13.0
+        version: 1.13.0
+
   apps/server:
     dependencies:
       '@fastify/cors':
@@ -101,6 +119,9 @@ importers:
       vue:
         specifier: ^3.5.22
         version: 3.5.30
+      vue-draggable-plus:
+        specifier: ^0.6.1
+        version: 0.6.1(@types/sortablejs@1.15.9)
       vue-router:
         specifier: ^4.5.1
         version: 4.6.4(vue@3.5.30)
@@ -675,6 +696,9 @@ packages:
 
   '@types/node@16.9.1':
     resolution: {integrity: sha512-QpLcX9ZSsq3YYUUnD3nFDY8H7wctAhQj/TFKL8Ya8v5fMm3CFXxo8zStsLAl780ltoYoo1WvKUVGBQK+1ifr7g==}
+
+  '@types/sortablejs@1.15.9':
+    resolution: {integrity: sha512-7HP+rZGE2p886PKV9c9OJzLBI6BBJu1O7lJGYnPyG3fS4/duUCcngkNCjsLwIMV+WMqANe3tt4irrXHSIe68OQ==}
 
   '@vitejs/plugin-vue@5.2.4':
     resolution: {integrity: sha512-7Yx/SXSOcQq5HiiV3orevHUFn+pmMB4cgbEkDYgnkUWb0WfeQ/wa2yFv6D5ICiCQOVpjA7vYDXrC7AGO8yjDHA==}
@@ -1573,6 +1597,15 @@ packages:
       terser:
         optional: true
 
+  vue-draggable-plus@0.6.1:
+    resolution: {integrity: sha512-FbtQ/fuoixiOfTZzG3yoPl4JAo9HJXRHmBQZFB9x2NYCh6pq0TomHf7g5MUmpaDYv+LU2n6BPq2YN9sBO+FbIg==}
+    peerDependencies:
+      '@types/sortablejs': ^1.15.0
+      '@vue/composition-api': '*'
+    peerDependenciesMeta:
+      '@vue/composition-api':
+        optional: true
+
   vue-router@4.6.4:
     resolution: {integrity: sha512-Hz9q5sa33Yhduglwz6g9skT8OBPii+4bFn88w6J+J4MfEo4KRRpmiNG/hHHkdbRFlLBOqxN8y8gf2Fb0MTUgVg==}
     peerDependencies:
@@ -2111,6 +2144,8 @@ snapshots:
   '@types/estree@1.0.8': {}
 
   '@types/node@16.9.1': {}
+
+  '@types/sortablejs@1.15.9': {}
 
   '@vitejs/plugin-vue@5.2.4(vite@5.4.21)(vue@3.5.30)':
     dependencies:
@@ -3041,6 +3076,10 @@ snapshots:
       rollup: 4.59.0
     optionalDependencies:
       fsevents: 2.3.3
+
+  vue-draggable-plus@0.6.1(@types/sortablejs@1.15.9):
+    dependencies:
+      '@types/sortablejs': 1.15.9
 
   vue-router@4.6.4(vue@3.5.30):
     dependencies:

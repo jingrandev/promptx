@@ -27,6 +27,13 @@ export function createTask(payload) {
   })
 }
 
+export function reorderTasks(slugs = []) {
+  return request('/api/tasks/reorder', {
+    method: 'POST',
+    body: JSON.stringify({ slugs }),
+  })
+}
+
 export function getTask(slug) {
   return request(`/api/tasks/${slug}`)
 }

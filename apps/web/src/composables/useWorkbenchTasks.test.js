@@ -8,6 +8,7 @@ import {
   isCurrentTaskSendingState,
   isTaskRunning,
   mergeTaskSummariesWithWorkspaceDiff,
+  reorderTaskSummaries,
   resolveTaskDisplayTitle,
   shouldRefreshWorkspaceDiffSummaries,
 } from './useWorkbenchTasks.js'
@@ -66,6 +67,26 @@ test('isActiveRunStatus matches queued through stopping only', () => {
   assert.equal(isActiveRunStatus('error'), false)
 })
 
+test('reorderTaskSummaries follows explicit slug order', () => {
+  const reordered = reorderTaskSummaries([
+    { slug: 'a' },
+    { slug: 'b' },
+    { slug: 'c' },
+  ], ['c', 'a', 'b'])
+
+  assert.deepEqual(reordered.map((item) => item.slug), ['c', 'a', 'b'])
+})
+
+test('reorderTaskSummaries preserves unknown trailing items', () => {
+  const reordered = reorderTaskSummaries([
+    { slug: 'a' },
+    { slug: 'b' },
+    { slug: 'c' },
+  ], ['b', 'a'])
+
+  assert.deepEqual(reordered.map((item) => item.slug), ['b', 'a', 'c'])
+})
+
 test('mergeTaskSummariesWithWorkspaceDiff preserves summary for same session', () => {
   const merged = mergeTaskSummariesWithWorkspaceDiff([
     {
@@ -93,6 +114,40 @@ test('mergeTaskSummariesWithWorkspaceDiff preserves summary for same session', (
     deletions: 2,
     statsComplete: true,
   })
+})
+
+test('mergeTaskSummariesWithWorkspaceDiff follows server task order', () => {
+  const merged = mergeTaskSummariesWithWorkspaceDiff([
+    {
+      slug: 'task-a',
+      codexSessionId: 'session-a',
+      workspaceDiffSummary: {
+        supported: true,
+        fileCount: 1,
+      },
+    },
+    {
+      slug: 'task-b',
+      codexSessionId: 'session-b',
+      workspaceDiffSummary: {
+        supported: true,
+        fileCount: 2,
+      },
+    },
+  ], [
+    {
+      slug: 'task-b',
+      codexSessionId: 'session-b',
+    },
+    {
+      slug: 'task-a',
+      codexSessionId: 'session-a',
+    },
+  ])
+
+  assert.deepEqual(merged.map((item) => item.slug), ['task-b', 'task-a'])
+  assert.equal(merged[0].workspaceDiffSummary?.fileCount, 2)
+  assert.equal(merged[1].workspaceDiffSummary?.fileCount, 1)
 })
 
 test('mergeTaskSummariesWithWorkspaceDiff clears summary when session changes', () => {

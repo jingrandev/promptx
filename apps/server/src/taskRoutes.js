@@ -1,6 +1,8 @@
 import { normalizeCodexRunEventsMode } from '../../../packages/shared/src/index.js'
 import { getApiErrorPayload } from './apiErrors.js'
 
+const MAX_TASK_REORDER_COUNT = 200
+
 function createEmptyWorkspaceDiffSummary() {
   return {
     supported: false,
@@ -120,6 +122,7 @@ function registerTaskRoutes(app, options = {}) {
     listTaskCodexRunsWithOptions,
     listTaskWorkspaceDiffSummaries,
     listTasks = () => [],
+    reorderTasks = () => ({ changed: false, items: [] }),
     purgeExpiredContent = () => {},
     removeAssetFiles = () => {},
     runDispatchService,
@@ -157,6 +160,48 @@ function registerTaskRoutes(app, options = {}) {
       reason: 'created',
     })
     return reply.code(201).send(decorateTask(task))
+  })
+
+  app.post('/api/tasks/reorder', async (request, reply) => {
+    purgeExpiredContent()
+    const rawSlugs = Array.isArray(request.body?.slugs) ? request.body.slugs : []
+    const normalizedSlugs = rawSlugs
+      .map((slug) => String(slug || '').trim())
+      .filter(Boolean)
+
+    if (!normalizedSlugs.length) {
+      return reply.code(400).send({
+        messageKey: 'errors.taskReorderFailed',
+        message: '任务排序数据无效。',
+      })
+    }
+
+    if (normalizedSlugs.length > MAX_TASK_REORDER_COUNT) {
+      return reply.code(400).send({
+        messageKey: 'errors.taskReorderFailed',
+        message: '一次最多只能排序 200 个任务。',
+      })
+    }
+
+    let result
+    try {
+      result = reorderTasks(normalizedSlugs)
+    } catch (error) {
+      return reply.code(400).send({
+        messageKey: 'errors.taskReorderFailed',
+        message: error.message || '任务排序失败。',
+      })
+    }
+
+    if (result?.changed) {
+      broadcastServerEvent('tasks.changed', {
+        reason: 'reordered',
+      })
+    }
+
+    return {
+      items: decorateTaskList(result?.items || listTasks()),
+    }
   })
 
   app.get('/api/tasks/:slug', async (request, reply) => {

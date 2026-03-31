@@ -8,6 +8,7 @@ import {
   importPdf,
   listTasks,
   listTaskWorkspaceDiffSummaries,
+  reorderTasks,
   resolveAssetUrl,
   updateTaskCodexSession,
   updateTask,
@@ -19,6 +20,7 @@ import { useWorkbenchRealtime } from './useWorkbenchRealtime.js'
 
 const ACTIVE_TASK_STORAGE_KEY = 'promptx:active-task-slug'
 const SERVER_SYNC_DELAY = 150
+const LOCAL_REORDER_SSE_SUPPRESS_MS = 1500
 
 function normalizeWorkspaceDiffSummary(summary = null) {
   if (!summary || typeof summary !== 'object') {
@@ -165,6 +167,40 @@ export function buildPromptPreview(prompt = '', max = 72) {
     .slice(0, max)
 }
 
+export function reorderTaskSummaries(items = [], orderedSlugs = []) {
+  const nextItems = Array.isArray(items) ? [...items] : []
+  const requestedOrder = Array.isArray(orderedSlugs)
+    ? orderedSlugs.map((slug) => String(slug || '').trim()).filter(Boolean)
+    : []
+
+  if (!requestedOrder.length) {
+    return nextItems
+  }
+
+  const itemBySlug = new Map(
+    nextItems
+      .map((item) => {
+        const slug = String(item?.slug || '').trim()
+        return slug ? [slug, item] : null
+      })
+      .filter(Boolean)
+  )
+
+  const orderedItems = requestedOrder
+    .map((slug) => itemBySlug.get(slug) || null)
+    .filter(Boolean)
+
+  const remainingItems = nextItems.filter((item) => {
+    const slug = String(item?.slug || '').trim()
+    return slug && !requestedOrder.includes(slug)
+  })
+
+  return [
+    ...orderedItems,
+    ...remainingItems,
+  ]
+}
+
 export function mergeTaskSummariesWithWorkspaceDiff(prevItems = [], nextItems = []) {
   const previousBySlug = new Map(
     (prevItems || [])
@@ -212,31 +248,7 @@ export function mergeTaskSummariesWithWorkspaceDiff(prevItems = [], nextItems = 
     }
   })
 
-  const nextBySlug = new Map(
-    normalizedNextItems
-      .map((item) => {
-        const slug = String(item?.slug || '').trim()
-        return slug ? [slug, item] : null
-      })
-      .filter(Boolean)
-  )
-
-  const orderedExistingItems = (prevItems || [])
-    .map((item) => {
-      const slug = String(item?.slug || '').trim()
-      return slug ? nextBySlug.get(slug) || null : null
-    })
-    .filter(Boolean)
-
-  const newItems = normalizedNextItems.filter((item) => {
-    const slug = String(item?.slug || '').trim()
-    return slug && !previousBySlug.has(slug)
-  })
-
-  return [
-    ...newItems,
-    ...orderedExistingItems,
-  ]
+  return normalizedNextItems
 }
 
 export function shouldRefreshWorkspaceDiffSummaries(prevItems = [], nextItems = []) {
@@ -349,6 +361,7 @@ function clearRequestedTaskSlug() {
 function toTaskSummary(taskRecord) {
   const summary = {
     slug: taskRecord.slug,
+    sortOrder: Number(taskRecord.sortOrder) || 0,
     title: String(taskRecord.title || ''),
     autoTitle: String(taskRecord.autoTitle || ''),
     lastPromptPreview: String(taskRecord.lastPromptPreview || ''),
@@ -423,6 +436,7 @@ export function useWorkbenchTasks(options = {}) {
   let serverSyncTimer = null
   let workspaceDiffSummaryRequestId = 0
   let pendingServerSyncTaskSlug = null
+  let suppressLocalReorderSseUntil = 0
   let hydratedTaskUpdatedAtMap = {}
 
   const currentTaskAutoTitle = computed(() => deriveAutoTaskTitle(draft.value.blocks))
@@ -892,6 +906,35 @@ function normalizeTodoItemsForSnapshot(items = []) {
       if (!silent) {
         loadingTasks.value = false
       }
+    }
+  }
+
+  async function reorderTaskList(orderedSlugs = []) {
+    const nextTasks = reorderTaskSummaries(tasks.value, orderedSlugs)
+    const currentOrder = tasks.value.map((task) => String(task?.slug || '').trim()).filter(Boolean)
+    const nextOrder = nextTasks.map((task) => String(task?.slug || '').trim()).filter(Boolean)
+
+    if (!nextOrder.length || nextOrder.join(',') === currentOrder.join(',')) {
+      return false
+    }
+
+    const previousTasks = tasks.value
+    tasks.value = nextTasks
+
+    try {
+      const payload = await reorderTasks(nextOrder)
+      suppressLocalReorderSseUntil = Date.now() + LOCAL_REORDER_SSE_SUPPRESS_MS
+      const mergedTasks = mergeTaskSummariesWithWorkspaceDiff(
+        previousTasks,
+        (payload.items || []).map(toTaskSummary)
+      )
+      tasks.value = mergedTasks
+      syncSendingTaskMapWithTasks(mergedTasks)
+      return true
+    } catch (err) {
+      tasks.value = previousTasks
+      error.value = err.message
+      return false
     }
   }
 
@@ -1622,6 +1665,12 @@ function normalizeTodoItemsForSnapshot(items = []) {
   watch(
     () => realtime.listSyncVersion.value,
     () => {
+      if (
+        realtime.listSyncReason.value === 'reordered'
+        && Date.now() < suppressLocalReorderSseUntil
+      ) {
+        return
+      }
       applyTaskRunningStateFromRealtime(realtime.listSyncTaskSlug.value)
       scheduleServerRefresh(realtime.listSyncTaskSlug.value)
     }
@@ -1660,6 +1709,7 @@ function normalizeTodoItemsForSnapshot(items = []) {
     currentTodoItems,
     removeTodoItem,
     removeCurrentTask,
+    reorderTaskList,
     removingTask,
     renderedTasks,
     refreshTaskList,

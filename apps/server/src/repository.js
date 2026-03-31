@@ -43,6 +43,7 @@ function toTask(row, blocks = [], options = {}) {
   return {
     id: Number(row.id),
     slug: row.slug,
+    sortOrder: Number(row.sort_order) || 0,
     title: row.title,
     autoTitle: row.auto_title || '',
     lastPromptPreview: row.last_prompt_preview || '',
@@ -274,6 +275,7 @@ function mapTaskSummary(row, firstText = '', blockCount = 0, codexRunCount = 0) 
 
   return {
     slug: row.slug,
+    sortOrder: Number(row.sort_order) || 0,
     title: row.title || '',
     autoTitle: row.auto_title || deriveTitleFromBlocks(textBlock) || '',
     lastPromptPreview: row.last_prompt_preview || '',
@@ -379,12 +381,12 @@ function parseTaskTodoItems(rawValue = '[]') {
 
 export function listTasks(limit = 30) {
   const rows = all(
-    `SELECT id, slug, title, auto_title, last_prompt_preview, todo_items_json, codex_session_id,
+    `SELECT id, slug, sort_order, title, auto_title, last_prompt_preview, todo_items_json, codex_session_id,
             automation_enabled, automation_cron, automation_timezone, automation_concurrency_policy, automation_last_triggered_at, automation_next_trigger_at,
             notification_enabled, notification_channel_type, notification_webhook_url, notification_secret, notification_trigger_on, notification_locale, notification_message_mode, notification_last_status, notification_last_error, notification_last_sent_at,
             visibility, expires_at, created_at, updated_at
      FROM tasks
-     ORDER BY created_at DESC, id DESC
+     ORDER BY sort_order ASC, created_at DESC, id DESC
      LIMIT ?`,
     [Math.max(1, Number(limit) || 30)]
   )
@@ -408,7 +410,7 @@ export function listTasks(limit = 30) {
 
 export function getTaskBySlug(slug) {
   const row = get(
-    `SELECT id, slug, title, auto_title, last_prompt_preview, todo_items_json, codex_session_id,
+    `SELECT id, slug, sort_order, title, auto_title, last_prompt_preview, todo_items_json, codex_session_id,
             automation_enabled, automation_cron, automation_timezone, automation_concurrency_policy, automation_last_triggered_at, automation_next_trigger_at,
             notification_enabled, notification_channel_type, notification_webhook_url, notification_secret, notification_trigger_on, notification_locale, notification_message_mode, notification_last_status, notification_last_error, notification_last_sent_at,
             visibility, expires_at, created_at, updated_at
@@ -440,19 +442,22 @@ export function createTask(input = {}) {
   const expiresAt = resolveExpiresAt(normalizeExpiry(input.expiry || 'none'))
   const slug = ensureSlug(title)
   const editToken = tokenId()
+  const topSortOrder = Number(get('SELECT MIN(sort_order) AS value FROM tasks')?.value)
+  const sortOrder = Number.isFinite(topSortOrder) ? topSortOrder - 1 : 0
 
   transaction(() => {
     run(
       `INSERT INTO tasks (
-        slug, edit_token, title, auto_title, last_prompt_preview, todo_items_json, codex_session_id,
+        slug, edit_token, sort_order, title, auto_title, last_prompt_preview, todo_items_json, codex_session_id,
         automation_enabled, automation_cron, automation_timezone, automation_concurrency_policy, automation_last_triggered_at, automation_next_trigger_at,
         notification_enabled, notification_channel_type, notification_webhook_url, notification_secret, notification_trigger_on, notification_locale, notification_message_mode, notification_last_status, notification_last_error, notification_last_sent_at,
         visibility, expires_at, created_at, updated_at
       )
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)` ,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)` ,
       [
         slug,
         editToken,
+        sortOrder,
         title,
         autoTitle,
         lastPromptPreview,
@@ -765,6 +770,53 @@ export function updateTaskCodexSession(slug, codexSessionId = '') {
   })
 
   return getTaskBySlug(slug)
+}
+
+export function reorderTasks(taskSlugs = []) {
+  const requestedSlugs = [...new Set(
+    (Array.isArray(taskSlugs) ? taskSlugs : [])
+      .map((slug) => String(slug || '').trim())
+      .filter(Boolean)
+  )]
+
+  if (!requestedSlugs.length) {
+    throw new Error('缺少任务排序数据。')
+  }
+
+  const currentRows = all(
+    `SELECT slug
+     FROM tasks
+     ORDER BY sort_order ASC, created_at DESC, id DESC`
+  )
+  const currentOrder = currentRows.map((row) => String(row.slug || '').trim()).filter(Boolean)
+  const existingSlugSet = new Set(currentOrder)
+  const nextOrderedSlugs = requestedSlugs.filter((slug) => existingSlugSet.has(slug))
+
+  if (!nextOrderedSlugs.length) {
+    throw new Error('没有可排序的任务。')
+  }
+
+  const remainingSlugs = currentOrder.filter((slug) => !nextOrderedSlugs.includes(slug))
+  const finalOrder = [...nextOrderedSlugs, ...remainingSlugs]
+  const changed = finalOrder.some((slug, index) => slug !== currentOrder[index])
+
+  if (!changed) {
+    return {
+      changed: false,
+      items: listTasks(Math.max(finalOrder.length, 1)),
+    }
+  }
+
+  transaction(() => {
+    finalOrder.forEach((slug, index) => {
+      run('UPDATE tasks SET sort_order = ? WHERE slug = ?', [index, slug])
+    })
+  })
+
+  return {
+    changed: true,
+    items: listTasks(Math.max(finalOrder.length, 1)),
+  }
 }
 
 export function clearTaskCodexSessionReferences(codexSessionId = '') {

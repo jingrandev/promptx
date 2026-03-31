@@ -1,5 +1,7 @@
 <script setup>
-import { Blocks, CircleAlert, Clock3, PencilLine, Plus, Settings2, Trash2 } from 'lucide-vue-next'
+import { Blocks, CircleAlert, Clock3, GripVertical, PencilLine, Plus, Settings2, Trash2 } from 'lucide-vue-next'
+import { ref, watch } from 'vue'
+import { VueDraggable } from 'vue-draggable-plus'
 import { formatDate, formatDateTime, useI18n } from '../composables/useI18n.js'
 
 const props = defineProps({
@@ -60,6 +62,7 @@ const props = defineProps({
 const emit = defineEmits([
   'open-settings',
   'create-task',
+  'reorder-task',
   'select-task',
   'title-click',
   'title-blur',
@@ -70,6 +73,22 @@ const emit = defineEmits([
 ])
 
 const { t } = useI18n()
+const localTasks = ref([])
+
+watch(
+  () => props.tasks,
+  (tasks) => {
+    localTasks.value = Array.isArray(tasks) ? [...tasks] : []
+  },
+  { immediate: true }
+)
+
+function shouldEnableDrag(task) {
+  return !props.mobile
+    && Boolean(task?.slug)
+    && task.slug !== props.editingTaskTitleSlug
+    && props.tasks.length > 1
+}
 
 function getTaskCardClass(task) {
   if (task.slug === props.currentTaskSlug) {
@@ -122,6 +141,21 @@ function getTaskWorkspaceBadgeClass(task) {
     ? 'theme-badge-strong'
     : 'theme-badge-muted'
 }
+
+function handleDragEnd(event) {
+  if (props.mobile) {
+    return
+  }
+
+  const oldIndex = Number(event?.oldIndex)
+  const newIndex = Number(event?.newIndex)
+  if (!Number.isInteger(oldIndex) || !Number.isInteger(newIndex) || oldIndex === newIndex) {
+    return
+  }
+
+  emit('reorder-task', localTasks.value.map((task) => String(task?.slug || '').trim()).filter(Boolean))
+}
+
 </script>
 
 <template>
@@ -161,9 +195,22 @@ function getTaskWorkspaceBadgeClass(task) {
         {{ t('workbench.loadingTasks') }}
       </div>
 
-      <div v-else class="space-y-2" :class="mobile ? 'space-y-1.5' : ''">
+      <VueDraggable
+        v-else
+        v-model="localTasks"
+        class="space-y-2"
+        :class="mobile ? 'space-y-1.5' : ''"
+        :animation="180"
+        :disabled="mobile || tasks.length <= 1"
+        handle=".task-drag-handle"
+        ghost-class="workbench-task-card--ghost"
+        chosen-class="workbench-task-card--chosen"
+        drag-class="workbench-task-card--dragging"
+        fallback-tolerance="6"
+        @end="handleDragEnd"
+      >
         <article
-          v-for="task in tasks"
+          v-for="task in localTasks"
           :key="task.slug"
           class="workbench-task-card group relative cursor-default rounded-sm border px-3 py-3 transition"
           :class="[getTaskCardClass(task), mobile ? 'workbench-task-card--mobile px-3 py-2.5' : '']"
@@ -174,7 +221,19 @@ function getTaskWorkspaceBadgeClass(task) {
             class="theme-selection-indicator absolute inset-y-2 left-0 w-1 rounded-full"
           />
           <div class="flex items-start justify-between gap-3">
-            <div class="min-w-0 h-5 flex-1 overflow-hidden">
+            <div class="flex min-w-0 flex-1 items-start gap-2 overflow-hidden">
+              <button
+                v-if="!mobile"
+                type="button"
+                class="task-drag-handle mt-0.5 inline-flex h-4 w-4 shrink-0 cursor-grab items-center justify-center rounded-sm opacity-45 transition hover:opacity-80 active:cursor-grabbing"
+                :title="t('workbench.dragToReorder')"
+                :aria-label="t('workbench.dragToReorder')"
+                tabindex="-1"
+                @click.stop
+              >
+                <GripVertical class="h-3.5 w-3.5" />
+              </button>
+              <div class="min-w-0 h-5 flex-1 overflow-hidden">
               <input
                 v-if="task.slug === currentTaskSlug && editingTaskTitleSlug === task.slug"
                 :value="draftTitle"
@@ -203,6 +262,7 @@ function getTaskWorkspaceBadgeClass(task) {
                 />
                 <span class="min-w-0 truncate">{{ task.displayTitle }}</span>
               </button>
+              </div>
             </div>
             <div class="flex shrink-0 items-center gap-1.5 text-[10px] uppercase tracking-[0.18em] opacity-80">
               <span
@@ -233,7 +293,7 @@ function getTaskWorkspaceBadgeClass(task) {
             </div>
           </div>
         </article>
-      </div>
+      </VueDraggable>
     </div>
 
     <div class="theme-divider border-t px-3 py-3">
@@ -266,3 +326,20 @@ function getTaskWorkspaceBadgeClass(task) {
     </div>
   </aside>
 </template>
+
+<style scoped>
+.workbench-task-card--ghost {
+  opacity: 0.38;
+}
+
+.workbench-task-card--chosen {
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--theme-accent) 28%, transparent 72%),
+    0 10px 28px color-mix(in srgb, var(--theme-accent) 12%, transparent 88%);
+}
+
+.workbench-task-card--dragging {
+  opacity: 0.96;
+  transform: rotate(1deg);
+}
+</style>

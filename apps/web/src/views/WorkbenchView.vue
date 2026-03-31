@@ -81,6 +81,7 @@ const {
   currentTodoItems,
   removeTodoItem,
   removeCurrentTask,
+  reorderTaskList,
   removingTask,
   renderedTasks,
   saveTask,
@@ -370,6 +371,10 @@ async function handleTaskSelect(taskSlug) {
   }
 }
 
+async function handleTaskReorder(slugs = []) {
+  await reorderTaskList(slugs)
+}
+
 async function handleAddTodo() {
   await flushCurrentEditorInput()
   addCurrentDraftToTodo()
@@ -517,6 +522,7 @@ const taskListPanelListeners = {
   'edit-task': openEditTaskDialog,
   'delete-task': openDeleteDialog,
   'open-settings': openSettingsDialog,
+  'reorder-task': handleTaskReorder,
   'select-task': handleTaskSelect,
   'title-blur': handleTaskTitleBlur,
   'title-click': handleTaskTitleClick,

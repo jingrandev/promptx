@@ -167,6 +167,7 @@ function migrateToV1() {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       slug TEXT NOT NULL UNIQUE,
       edit_token TEXT NOT NULL,
+      sort_order INTEGER NOT NULL DEFAULT 0,
       title TEXT NOT NULL DEFAULT '',
       auto_title TEXT NOT NULL DEFAULT '',
       last_prompt_preview TEXT NOT NULL DEFAULT '',
@@ -205,6 +206,7 @@ function migrateToV1() {
       FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
     );
 
+    CREATE INDEX IF NOT EXISTS idx_tasks_sort_order ON tasks(sort_order ASC, created_at DESC, id DESC);
     CREATE INDEX IF NOT EXISTS idx_tasks_created_at ON tasks(created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_tasks_visibility ON tasks(visibility, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_blocks_task_sort ON blocks(task_id, sort_order ASC);
@@ -325,6 +327,7 @@ function migrateToV1() {
 function applyAdditiveSchemaPatches() {
   const alterStatements = [
     `ALTER TABLE tasks ADD COLUMN auto_title TEXT NOT NULL DEFAULT ''`,
+    `ALTER TABLE tasks ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0`,
     `ALTER TABLE tasks ADD COLUMN last_prompt_preview TEXT NOT NULL DEFAULT ''`,
     `ALTER TABLE tasks ADD COLUMN todo_items_json TEXT NOT NULL DEFAULT '[]'`,
     `ALTER TABLE tasks ADD COLUMN codex_session_id TEXT NOT NULL DEFAULT ''`,
@@ -369,11 +372,37 @@ function applyAdditiveSchemaPatches() {
     }
   })
 
+  db.exec('CREATE INDEX IF NOT EXISTS idx_tasks_sort_order ON tasks(sort_order ASC, created_at DESC, id DESC)')
   db.exec('CREATE INDEX IF NOT EXISTS idx_tasks_codex_session_id ON tasks(codex_session_id)')
   db.exec(`
     DELETE FROM blocks
     WHERE task_id NOT IN (SELECT id FROM tasks);
   `)
+
+  normalizeTaskSortOrder()
+}
+
+function normalizeTaskSortOrder() {
+  const rows = all(
+    `SELECT id, sort_order, created_at
+     FROM tasks
+     ORDER BY sort_order ASC, created_at DESC, id DESC`
+  )
+
+  if (rows.length < 2) {
+    return
+  }
+
+  const needsNormalization = rows.some((row, index) => Number(row.sort_order) !== index)
+  if (!needsNormalization) {
+    return
+  }
+
+  transaction(() => {
+    rows.forEach((row, index) => {
+      run('UPDATE tasks SET sort_order = ? WHERE id = ?', [index, Number(row.id)])
+    })
+  })
 }
 
 function ensureSchema() {
