@@ -74,6 +74,98 @@ test('formatCodexEvent formats command completion details', () => {
   assert.match(event.detail, /pnpm build/)
 })
 
+test('formatCodexEvent parses Claude read results into structured detail blocks', () => {
+  const event = formatCodexEvent({
+    type: 'item.completed',
+    item: {
+      type: 'command_execution',
+      status: 'completed',
+      command: 'Read: /tmp/project/src',
+      aggregated_output: [
+        '<path>/tmp/project/src</path>',
+        '<type>directory</type>',
+        '<entries>',
+        'base.js',
+        'hooks/',
+        '</entries>',
+      ].join('\n'),
+    },
+  }, 'Claude Code', 'claude-code')
+
+  assert.equal(event.kind, 'command')
+  assert.equal(event.detailBlocks?.[0]?.type, 'meta')
+  assert.equal(event.detailBlocks?.[0]?.items?.[0]?.value, 'Read')
+  assert.equal(event.detailBlocks?.[1]?.type, 'directory_list')
+  assert.deepEqual(event.detailBlocks?.[1]?.entries, ['base.js', 'hooks/'])
+})
+
+test('formatCodexEvent parses OpenCode grep output into code snippets', () => {
+  const event = formatCodexEvent({
+    type: 'item.completed',
+    item: {
+      type: 'command_execution',
+      status: 'completed',
+      command: 'grep: /tmp/project/file.js',
+      aggregated_output: [
+        '473:function startFocusFollow(index, options = {}) {',
+        '535:function placeCursor(index, position = null, options = {}) {',
+      ].join('\n'),
+    },
+  }, 'OpenCode', 'opencode')
+
+  assert.equal(event.detailBlocks?.[0]?.type, 'meta')
+  assert.equal(event.detailBlocks?.[1]?.type, 'code_snippet')
+  assert.equal(event.detailBlocks?.[1]?.lines?.[0]?.number, '473')
+})
+
+test('formatCodexEvent parses OpenCode todowrite output into checklist', () => {
+  const event = formatCodexEvent({
+    type: 'item.completed',
+    item: {
+      type: 'command_execution',
+      status: 'completed',
+      command: 'todowrite: {"todos":[{"content":"任务一","status":"completed"},{"content":"任务二","status":"in_progress"},{"content":"任务三","status":"pending"}]}',
+      aggregated_output: [
+        '[',
+        '  { "content": "任务一", "status": "completed" },',
+        '  { "content": "任务二", "status": "in_progress" },',
+        '  { "content": "任务三", "status": "pending" }',
+        ']',
+      ].join('\n'),
+    },
+  }, 'OpenCode', 'opencode')
+
+  assert.equal(event.kind, 'todo')
+  assert.equal(event.title, '更新待办列表')
+  assert.equal(event.groupType, 'todo')
+  assert.equal(event.detailBlocks?.[0]?.type, 'meta')
+  assert.equal(event.detailBlocks?.[1]?.type, 'checklist')
+  assert.deepEqual(event.detailBlocks?.[1]?.items, [
+    { completed: true, status: 'completed', text: '任务一' },
+    { completed: false, status: 'in_progress', text: '任务二' },
+    { completed: false, status: 'pending', text: '任务三' },
+  ])
+})
+
+test('formatCodexEvent parses Claude TodoWrite input into checklist before tool result returns', () => {
+  const event = formatCodexEvent({
+    type: 'item.started',
+    item: {
+      type: 'command_execution',
+      status: 'in_progress',
+      command: 'TodoWrite: {"todos":[{"content":"梳理问题","status":"completed"},{"content":"修复展示","status":"in_progress"}]}',
+    },
+  }, 'Claude Code', 'claude-code')
+
+  assert.equal(event.kind, 'todo')
+  assert.equal(event.title, '更新待办列表')
+  assert.equal(event.detailBlocks?.[1]?.type, 'checklist')
+  assert.deepEqual(event.detailBlocks?.[1]?.items, [
+    { completed: true, status: 'completed', text: '梳理问题' },
+    { completed: false, status: 'in_progress', text: '修复展示' },
+  ])
+})
+
 test('formatCodexEvent formats reasoning steps', () => {
   const event = formatCodexEvent({
     type: 'item.started',
@@ -83,9 +175,20 @@ test('formatCodexEvent formats reasoning steps', () => {
     },
   }, 'Claude Code', 'claude-code')
 
-  assert.equal(event.kind, 'info')
-  assert.equal(event.title, '正在思考')
+  assert.equal(event.kind, 'reasoning')
+  assert.equal(event.title, '思考过程')
+  assert.equal(event.groupType, 'reasoning')
   assert.match(event.detail, /目录结构/)
+})
+
+test('formatCodexEvent ignores empty Claude system heartbeat events', () => {
+  const event = formatCodexEvent({
+    type: 'claude.system',
+    detail: '',
+  }, 'Claude Code', 'claude-code')
+
+  assert.equal(event.title, '')
+  assert.equal(event.detail, '')
 })
 
 test('getProcessStatus reflects stopped run', () => {
@@ -269,7 +372,7 @@ test('createTurnFromRun restores wrapped event payloads from persisted runs', ()
     mergedSessions.push(session.id)
   })
 
-  assert.equal(turn.events.length, 2)
+  assert.equal(turn.events.length, 1)
   assert.deepEqual(mergedSessions, ['session-1'])
   assert.equal(turn.responseMessage, 'done')
   assert.equal(turn.lastEventSeq, 2)
@@ -347,7 +450,7 @@ test('applyRunEventsPayloadToTurns always writes back to the latest turn object 
   assert.equal(appliedTurn, latestTurn)
   assert.equal(latestTurn.eventsLoaded, true)
   assert.equal(latestTurn.eventsLoading, false)
-  assert.equal(latestTurn.events.length, 2)
+  assert.equal(latestTurn.events.length, 1)
   assert.equal(latestTurn.responseMessage, '最终结果')
   assert.equal(staleTurn.events.length, 0)
 })
@@ -414,6 +517,35 @@ test('applyRunEventToTurn appends incremental codex events once and updates resp
   assert.equal(turn.responseMessage, 'incremental reply')
   assert.equal(turn.events.length, 1)
   assert.equal(turn.lastEventSeq, 3)
+})
+
+test('applyRunEventToTurn skips empty Claude system heartbeat events', () => {
+  const turn = createTurnFromRun({
+    id: 'run-heartbeat',
+    engine: 'claude-code',
+    status: 'running',
+    events: [],
+    eventsIncluded: true,
+  }, () => 1, (() => {
+    let value = 0
+    return () => ++value
+  })(), () => {})
+
+  applyRunEventToTurn(turn, {
+    seq: 1,
+    payload: {
+      type: 'agent_event',
+      event: {
+        type: 'claude.system',
+        detail: '',
+      },
+    },
+  }, (() => {
+    let value = 0
+    return () => ++value
+  })(), () => {})
+
+  assert.equal(turn.events.length, 0)
 })
 
 test('applyRunEventToTurn 兼容旧的 codex 包络事件类型', () => {

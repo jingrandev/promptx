@@ -168,6 +168,29 @@ function collectTextParts(value, parts = []) {
   return parts
 }
 
+function stringifyClaudeToolResultContent(value) {
+  const parts = []
+  collectTextParts(value, parts)
+  if (parts.length) {
+    return parts.join('\n').trim()
+  }
+
+  if (typeof value === 'string') {
+    return value.trim()
+  }
+
+  if (value == null) {
+    return ''
+  }
+
+  try {
+    const compact = JSON.stringify(value)
+    return compact.length <= 12000 ? compact : `${compact.slice(0, 11997)}...`
+  } catch {
+    return String(value || '').trim()
+  }
+}
+
 export function extractClaudeAssistantText(event = {}) {
   const parts = []
   if (event?.message?.content) {
@@ -214,9 +237,19 @@ function getClaudeMessageContentBlocks(event = {}) {
   return Array.isArray(content) ? content : []
 }
 
-function stringifyClaudeToolInput(input = {}) {
+function stringifyClaudeToolInput(input = {}, toolName = '') {
   if (!input || typeof input !== 'object') {
     return ''
+  }
+
+  const normalizedToolName = String(toolName || '').trim().toLowerCase()
+  if (normalizedToolName === 'todowrite') {
+    try {
+      const serialized = JSON.stringify(input)
+      return serialized.length <= 12000 ? serialized : `${serialized.slice(0, 11997)}...`
+    } catch {
+      // fall through
+    }
   }
 
   const command = String(input.command || '').trim()
@@ -242,7 +275,7 @@ function stringifyClaudeToolInput(input = {}) {
 
 function buildClaudeToolCommand(name = '', input = {}) {
   const toolName = String(name || 'Claude Code tool').trim() || 'Claude Code tool'
-  const inputSummary = stringifyClaudeToolInput(input)
+  const inputSummary = stringifyClaudeToolInput(input, toolName)
   return inputSummary ? `${toolName}: ${inputSummary}` : toolName
 }
 
@@ -271,7 +304,7 @@ function createClaudeToolUseEvent(block = {}, state = createClaudeNormalizationS
 function createClaudeToolResultEvent(block = {}, state = createClaudeNormalizationState()) {
   const toolUseId = String(block?.tool_use_id || block?.toolUseId || '').trim()
   const remembered = toolUseId ? state.toolUses.get(toolUseId) : null
-  const output = String(block?.content || block?.result || '').trim()
+  const output = stringifyClaudeToolResultContent(block?.content ?? block?.result)
   const isError = Boolean(block?.is_error)
 
   if (toolUseId) {
@@ -289,12 +322,49 @@ function createClaudeToolResultEvent(block = {}, state = createClaudeNormalizati
   }
 }
 
+function buildClaudeApiRetryReason(event = {}) {
+  const status = Number(event?.error_status) || 0
+  const code = String(event?.error || '').trim()
+  const parts = []
+  if (status > 0) {
+    parts.push(`HTTP ${status}`)
+  }
+  if (code) {
+    parts.push(code)
+  }
+  return parts.join(' ').trim()
+}
+
+function isClaudeFatalAuthRetry(event = {}) {
+  const status = Number(event?.error_status) || 0
+  const code = String(event?.error || '').trim().toLowerCase()
+  return status === 401 || code === 'authentication_failed'
+}
+
+function formatClaudeFatalAuthMessage(event = {}) {
+  const reason = buildClaudeApiRetryReason(event)
+  return reason
+    ? `Claude Code 认证失败（${reason}）。请重新登录 Claude Code，或检查当前环境中的认证令牌配置。`
+    : 'Claude Code 认证失败。请重新登录 Claude Code，或检查当前环境中的认证令牌配置。'
+}
+
 export function normalizeClaudeEvents(event = {}, state = createClaudeNormalizationState()) {
   const eventType = String(event?.type || '').trim().toLowerCase()
   const normalizedEvents = []
 
   if (eventType === 'system' && String(event?.subtype || '').trim().toLowerCase() === 'init') {
     return [createThreadStartedEvent(extractClaudeSessionId(event))]
+  }
+
+  if (eventType === 'system' && String(event?.subtype || '').trim().toLowerCase() === 'api_retry') {
+    if (isClaudeFatalAuthRetry(event)) {
+      return [createErrorEvent(formatClaudeFatalAuthMessage(event))]
+    }
+
+    const attempt = Math.max(1, Number(event?.attempt) || 1)
+    const total = Math.max(attempt, Number(event?.max_retries) || attempt)
+    const reason = buildClaudeApiRetryReason(event) || 'request failed'
+    return [createErrorEvent(`Reconnecting... ${attempt}/${total} (${reason})`)]
   }
 
   if (eventType === 'assistant') {
@@ -435,6 +505,8 @@ export function streamPromptToClaudeCodeSession(sessionInput, prompt, callbacks 
   let lastStderrLine = ''
   let finalMessage = ''
   let finalSessionId = String(session.engineSessionId || session.engineThreadId || session.codexThreadId || '').trim()
+  let fatalClaudeErrorMessage = ''
+  let fatalClaudeErrorTriggered = false
   const normalizationState = createClaudeNormalizationState()
 
   const rememberSessionId = (sessionId) => {
@@ -464,6 +536,12 @@ export function streamPromptToClaudeCodeSession(sessionInput, prompt, callbacks 
     normalizedEvents.forEach((normalizedEvent) => {
       onEvent(createAgentEventEnvelopeEvent(normalizedEvent))
     })
+
+    if (!fatalClaudeErrorTriggered && isClaudeFatalAuthRetry(event)) {
+      fatalClaudeErrorTriggered = true
+      fatalClaudeErrorMessage = formatClaudeFatalAuthMessage(event)
+      forceStopChildProcess(child)
+    }
 
     if (String(event?.type || '').trim().toLowerCase() === 'result') {
       finalMessage = extractClaudeResultText(event) || finalMessage
@@ -500,7 +578,7 @@ export function streamPromptToClaudeCodeSession(sessionInput, prompt, callbacks 
       })
 
       if (code !== 0) {
-        const detail = lastStderrLine || 'Claude Code 执行失败。'
+        const detail = fatalClaudeErrorMessage || lastStderrLine || 'Claude Code 执行失败。'
         reject(new Error(detail))
         return
       }

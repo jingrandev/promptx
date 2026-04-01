@@ -76,6 +76,40 @@ test('normalizeClaudeEvents maps system init to thread start', () => {
   )
 })
 
+test('normalizeClaudeEvents maps fatal auth api_retry to error event', () => {
+  assert.deepEqual(
+    normalizeClaudeEvents({
+      type: 'system',
+      subtype: 'api_retry',
+      attempt: 1,
+      max_retries: 10,
+      error_status: 401,
+      error: 'authentication_failed',
+    }),
+    [{
+      type: 'error',
+      message: 'Claude Code 认证失败（HTTP 401 authentication_failed）。请重新登录 Claude Code，或检查当前环境中的认证令牌配置。',
+    }]
+  )
+})
+
+test('normalizeClaudeEvents maps transient api_retry to reconnecting error event', () => {
+  assert.deepEqual(
+    normalizeClaudeEvents({
+      type: 'system',
+      subtype: 'api_retry',
+      attempt: 2,
+      max_retries: 10,
+      error_status: 503,
+      error: 'overloaded',
+    }),
+    [{
+      type: 'error',
+      message: 'Reconnecting... 2/10 (HTTP 503 overloaded)',
+    }]
+  )
+})
+
 test('normalizeClaudeEvents maps thinking, tool use and text blocks', () => {
   const state = createClaudeNormalizationState()
 
@@ -148,4 +182,73 @@ test('normalizeClaudeEvents maps tool results back to remembered tool call', () 
       },
     }]
   )
+})
+
+test('normalizeClaudeEvents stringifies structured tool results', () => {
+  const state = createClaudeNormalizationState()
+  normalizeClaudeEvents({
+    type: 'assistant',
+    message: {
+      content: [
+        { type: 'tool_use', id: 'tool-3', name: 'Read', input: { file_path: '/tmp/demo.txt' } },
+      ],
+    },
+  }, state)
+
+  assert.deepEqual(
+    normalizeClaudeEvents({
+      type: 'user',
+      message: {
+        content: [
+          {
+            type: 'tool_result',
+            tool_use_id: 'tool-3',
+            content: [
+              { type: 'text', text: '<path>/tmp/demo.txt</path>' },
+              { type: 'text', text: '<type>file</type>' },
+            ],
+          },
+        ],
+      },
+    }, state),
+    [{
+      type: 'item.completed',
+      item: {
+        type: 'command_execution',
+        command: 'Read: /tmp/demo.txt',
+        status: 'completed',
+        exit_code: 0,
+        aggregated_output: '<path>/tmp/demo.txt</path>\n<type>file</type>',
+      },
+    }]
+  )
+})
+
+test('normalizeClaudeEvents keeps full TodoWrite input for downstream todo parsing', () => {
+  const state = createClaudeNormalizationState()
+
+  const events = normalizeClaudeEvents({
+    type: 'assistant',
+    message: {
+      content: [
+        {
+          type: 'tool_use',
+          id: 'tool-todo-1',
+          name: 'TodoWrite',
+          input: {
+            todos: [
+              { content: '定位 Codex CLI 相关源码', activeForm: '正在定位 Codex CLI 相关源码', status: 'in_progress' },
+              { content: '阅读核心模块与数据流', activeForm: '正在阅读核心模块与数据流', status: 'pending' },
+              { content: '整理架构与关键设计', activeForm: '正在整理架构与关键设计', status: 'pending' },
+            ],
+          },
+        },
+      ],
+    },
+  }, state)
+
+  assert.equal(events[0]?.type, 'item.started')
+  assert.match(events[0]?.item?.command || '', /TodoWrite: \{"todos":\[/)
+  assert.doesNotMatch(events[0]?.item?.command || '', /\.\.\.$/)
+  assert.match(events[0]?.item?.command || '', /"activeForm":"正在阅读核心模块与数据流"/)
 })

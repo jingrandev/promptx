@@ -15,10 +15,12 @@ import {
 } from 'lucide-vue-next'
 import CodexSessionSelect from './CodexSessionSelect.vue'
 import ImagePreviewOverlay from './ImagePreviewOverlay.vue'
+import ProcessDetailRenderer from './ProcessDetailRenderer.vue'
 import { useI18n } from '../composables/useI18n.js'
 import { useCodexSessionPanel } from '../composables/useCodexSessionPanel.js'
 import { useCodexTranscriptCollapse } from '../composables/useCodexTranscriptCollapse.js'
 import { renderCodexMarkdown } from '../lib/codexMarkdown.js'
+import { aggregateProcessEvents } from '../lib/processEventGrouping.js'
 
 const CodexSessionManagerDialog = defineAsyncComponent(() => import('./CodexSessionManagerDialog.vue'))
 
@@ -139,12 +141,18 @@ function shouldHideSystemEvent(item = {}) {
     /^Codex 会话已创建$/,
     /^Claude Code 会话已创建$/,
     /^OpenCode 会话已创建$/,
+    /^事件: claude\.system$/,
     /^线程 ID:/,
     /^Thread ID:/,
     /^Connected project:/,
     /^Working directory:/,
     /^Project session updated$/,
     / session created$/,
+    /^Event: claude\.system$/,
+    / 已返回结果$/,
+    / returned a result$/,
+    /^本轮执行结束$/,
+    /^Run finished$/,
   ].some((pattern) => pattern.test(title))
 }
 
@@ -224,7 +232,7 @@ const promptPreviewImages = computed(() => (
 function getVisibleTurnEvents(turn) {
   const events = Array.isArray(turn?.events) ? turn.events : []
   const filtered = events.filter((item) => !shouldHideSystemEvent(item))
-  return filtered.length ? filtered : events
+  return aggregateProcessEvents(filtered)
 }
 
 function getTurnVisibleEventCount(turn) {
@@ -232,11 +240,15 @@ function getTurnVisibleEventCount(turn) {
     return getTurnEventCount(turn)
   }
 
-  return getTurnEventCount(turn, getVisibleTurnEvents(turn))
+  return getVisibleTurnEvents(turn).length
 }
 
 function shouldShowEventToggle(turn) {
-  return hasTurnEventHistory(turn)
+  if (!turn?.eventsLoaded) {
+    return hasTurnEventHistory(turn)
+  }
+
+  return getTurnVisibleEventCount(turn) > 0
 }
 
 function shouldShowEventLoading(turn) {
@@ -248,7 +260,7 @@ function shouldShowLoadedEvents(turn) {
 }
 
 function shouldShowCollapsedEventHint(turn) {
-  return hasTurnEventHistory(turn) && isTurnEventsCollapsed(turn)
+  return Boolean(turn?.eventsLoaded) && getTurnVisibleEventCount(turn) > 0 && isTurnEventsCollapsed(turn)
 }
 
 function shouldShowDeferredEventHint(turn) {
@@ -467,13 +479,20 @@ defineExpose({
                   class="transcript-event-card rounded-sm px-3 py-2"
                   :class="{
                     'bg-[var(--theme-appPanelStrong)]': item.kind === 'info' || item.kind === 'command',
+                    'theme-status-neutral': item.kind === 'reasoning',
                     'theme-status-warning': item.kind === 'todo',
                     'theme-status-success': item.kind === 'result',
                     'theme-status-danger': item.kind === 'error',
                   }"
                 >
                   <div class="text-sm font-medium leading-6">{{ item.title }}</div>
-                  <pre v-if="item.detail" class="mt-1 whitespace-pre-wrap break-all font-mono text-[11px] leading-5 opacity-85">{{ item.detail }}</pre>
+                  <ProcessDetailRenderer
+                    v-if="item.detail || (Array.isArray(item.detailBlocks) && item.detailBlocks.length)"
+                    :detail="item.detail"
+                    :blocks="item.detailBlocks"
+                    :kind="item.kind"
+                    class="mt-2"
+                  />
                 </div>
               </div>
               <div

@@ -7,6 +7,7 @@ import {
 import { getCurrentLocale } from './useI18n.js'
 import { resolveAssetUrl } from '../lib/api.js'
 import { getAgentEngineLabel, normalizeAgentEngine } from '../lib/agentEngines.js'
+import { parseProcessDetailTextBlocks } from '../lib/processDetailBlocks.js'
 
 const ACTIVE_TURN_STATUSES = new Set(['queued', 'starting', 'running', 'stopping'])
 
@@ -44,15 +45,24 @@ export function sortSessions(items = [], currentSessionId = '') {
   })
 }
 
-function formatCommandOutput(output = '', limit = 500) {
-  const text = String(output || '').trim()
-  if (!text) {
+function formatCommandOutput(output = '', maxLines = 24, maxChars = 2400) {
+  const normalized = String(output || '').replace(/\r\n/g, '\n').trim()
+  if (!normalized) {
     return ''
   }
-  if (text.length <= limit) {
-    return text
+
+  const lines = normalized.split('\n')
+  let nextText = lines.slice(0, maxLines).join('\n')
+
+  if (nextText.length > maxChars) {
+    nextText = `${nextText.slice(0, maxChars).trimEnd()}...`
   }
-  return `${text.slice(0, limit)}...`
+
+  if (lines.length > maxLines) {
+    return `${nextText}\n...`
+  }
+
+  return nextText
 }
 
 function formatTodoItems(items = []) {
@@ -62,7 +72,13 @@ function formatTodoItems(items = []) {
   }
 
   return list
-    .map((item) => `${item.completed ? '[x]' : '[ ]'} ${item.text || text('未命名任务', 'Untitled Task')}`)
+    .map((item) => {
+      const status = String(item?.status || '').trim().toLowerCase()
+      const marker = item.completed
+        ? '[x]'
+        : (status === 'in_progress' ? '[-]' : '[ ]')
+      return `${marker} ${item.text || text('未命名任务', 'Untitled Task')}`
+    })
     .join('\n')
 }
 
@@ -114,6 +130,285 @@ function formatMultilineList(prefix = '', items = []) {
 
   const body = list.map((item) => `- ${item}`).join('\n')
   return prefix ? `${prefix}\n${body}` : body
+}
+
+function createMetaBlock(items = []) {
+  const normalizedItems = items
+    .map((item) => ({
+      label: String(item?.label || '').trim(),
+      value: String(item?.value || '').trim(),
+    }))
+    .filter((item) => item.label && item.value)
+
+  if (!normalizedItems.length) {
+    return null
+  }
+
+  return {
+    type: 'meta',
+    items: normalizedItems,
+  }
+}
+
+function normalizeTodoStatus(value = '') {
+  const normalized = String(value || '').trim().toLowerCase()
+  if (['done', 'completed', 'complete', 'checked'].includes(normalized)) {
+    return 'completed'
+  }
+  if (['in_progress', 'in-progress', 'active', 'doing', 'running'].includes(normalized)) {
+    return 'in_progress'
+  }
+  return 'pending'
+}
+
+function normalizeTodoText(entry = {}) {
+  const candidates = [
+    entry?.text,
+    entry?.content,
+    entry?.title,
+    entry?.label,
+    entry?.activeForm,
+  ]
+
+  return candidates
+    .map((value) => String(value || '').trim())
+    .find(Boolean) || text('未命名任务', 'Untitled Task')
+}
+
+function mapTodoEntries(entries = []) {
+  return (Array.isArray(entries) ? entries : [])
+    .map((entry) => {
+      if (!entry || typeof entry !== 'object') {
+        return null
+      }
+
+      const status = normalizeTodoStatus(entry.status ?? (entry.completed ? 'completed' : 'pending'))
+      return {
+        completed: status === 'completed',
+        status,
+        text: normalizeTodoText(entry),
+      }
+    })
+    .filter(Boolean)
+}
+
+function parseTodoEntriesFromJson(value) {
+  const normalized = String(value || '').trim()
+  if (!normalized) {
+    return []
+  }
+
+  try {
+    const parsed = JSON.parse(normalized)
+    if (Array.isArray(parsed)) {
+      return mapTodoEntries(parsed)
+    }
+
+    if (parsed && typeof parsed === 'object') {
+      if (Array.isArray(parsed.todos)) {
+        return mapTodoEntries(parsed.todos)
+      }
+
+      if (Array.isArray(parsed.items)) {
+        return mapTodoEntries(parsed.items)
+      }
+    }
+  } catch {
+    return []
+  }
+
+  return []
+}
+
+function buildChecklistBlock(items = []) {
+  const list = Array.isArray(items) ? items.filter(Boolean) : []
+  if (!list.length) {
+    return null
+  }
+
+  return {
+    type: 'checklist',
+    items: list,
+    totalCount: list.length,
+    hiddenCount: 0,
+  }
+}
+
+function parseToolCommand(command = '') {
+  const raw = String(command || '').trim()
+  const separatorIndex = raw.indexOf(':')
+  const hasNamedPrefix = separatorIndex > 0 && separatorIndex <= 24
+  const toolName = hasNamedPrefix ? raw.slice(0, separatorIndex).trim() : ''
+  const subject = hasNamedPrefix ? raw.slice(separatorIndex + 1).trim() : raw
+  const normalizedTool = toolName.toLowerCase()
+
+  const aliasGroups = {
+    shell: ['bash', 'shell', 'sh', 'terminal', 'cmd', 'powershell'],
+    read: ['read', 'open', 'view', 'cat'],
+    grep: ['grep', 'rg', 'search', 'find'],
+    list: ['glob', 'ls', 'dir', 'tree', 'list'],
+    web: ['websearch', 'web_search', 'webfetch', 'fetch', 'browse', 'open_page'],
+    todo: ['todowrite', 'todo', 'tasklist', 'tasks'],
+    edit: ['edit', 'multiedit', 'write', 'patch', 'apply_patch', 'replace', 'create'],
+  }
+
+  const category = Object.entries(aliasGroups).find(([, aliases]) => aliases.includes(normalizedTool))?.[0] || 'generic'
+
+  return {
+    raw,
+    toolName,
+    normalizedTool,
+    subject,
+    category,
+  }
+}
+
+function extractTodoEntriesFromCommandItem(item = {}, parsedCommand = null) {
+  const parsed = parsedCommand || parseToolCommand(item.command)
+  if (parsed.category !== 'todo') {
+    return []
+  }
+
+  const fromOutput = parseTodoEntriesFromJson(item.aggregated_output)
+  if (fromOutput.length) {
+    return fromOutput
+  }
+
+  return parseTodoEntriesFromJson(parsed.subject)
+}
+
+function buildDetailBlocksFromText(detail = '', options = {}) {
+  return parseProcessDetailTextBlocks(detail, options)
+}
+
+function buildWebSearchDetailBlocks(item = {}) {
+  const action = item.action || {}
+  const query = String(item.query || action.query || '').trim()
+  const queries = Array.isArray(action.queries)
+    ? action.queries.map((entry) => String(entry || '').trim()).filter(Boolean)
+    : []
+  const url = String(action.url || '').trim()
+  const blocks = []
+  const metaBlock = createMetaBlock([
+    query ? { label: text('关键词', 'Query'), value: query } : null,
+    url ? { label: 'URL', value: url } : null,
+  ])
+
+  if (metaBlock) {
+    blocks.push(metaBlock)
+  }
+
+  if (queries.length > 1) {
+    blocks.push({
+      type: 'bullet_list',
+      items: queries,
+      totalCount: queries.length,
+      hiddenCount: 0,
+    })
+  }
+
+  return blocks
+}
+
+function buildCollabToolDetailBlocks(item = {}) {
+  const tool = String(item.tool || '').trim()
+  const agentCount = Array.isArray(item.receiver_thread_ids) ? item.receiver_thread_ids.filter(Boolean).length : 0
+  const prompt = String(item.prompt || '').trim()
+  const blocks = []
+  const metaItems = [
+    tool ? { label: text('工具', 'Tool'), value: tool } : null,
+    agentCount ? { label: text('子代理', 'Sub-agent'), value: String(agentCount) } : null,
+  ]
+  const metaBlock = createMetaBlock(metaItems)
+
+  if (metaBlock) {
+    blocks.push(metaBlock)
+  }
+
+  if (prompt) {
+    blocks.push(...buildDetailBlocksFromText(prompt, { preferMarkdown: true }))
+  }
+
+  return blocks
+}
+
+function buildFileChangeDetailBlocks(item = {}) {
+  const changes = Array.isArray(item.changes) ? item.changes : []
+  if (!changes.length) {
+    return []
+  }
+
+  return [{
+    type: 'file_changes',
+    items: changes.map((change) => ({
+      kind: String(change?.kind || '').trim(),
+      path: String(change?.path || '').trim(),
+    })),
+    totalCount: changes.length,
+    hiddenCount: 0,
+  }]
+}
+
+function buildCommandDetailBlocks(item = {}, includeOutput = false, engine = 'codex') {
+  const blocks = []
+  const parsed = parseToolCommand(item.command)
+  const todoEntries = extractTodoEntriesFromCommandItem(item, parsed)
+  const todoChecklistBlock = buildChecklistBlock(todoEntries)
+  const metaBlock = createMetaBlock([
+    parsed.toolName ? { label: text('工具', 'Tool'), value: parsed.toolName } : null,
+    todoChecklistBlock
+      ? null
+      : (
+          parsed.subject
+            ? { label: parsed.category === 'shell' ? text('命令', 'Command') : text('目标', 'Target'), value: parsed.subject }
+            : (item.command ? { label: text('命令', 'Command'), value: item.command } : null)
+        ),
+    engine && engine !== 'codex' ? { label: text('引擎', 'Engine'), value: getAgentEngineLabel(engine) } : null,
+    typeof item.exit_code === 'number' ? { label: text('退出码', 'Exit code'), value: String(item.exit_code) } : null,
+  ])
+
+  if (metaBlock) {
+    blocks.push(metaBlock)
+  }
+
+  if (todoChecklistBlock) {
+    blocks.push(todoChecklistBlock)
+  }
+
+  if (includeOutput) {
+    if (todoChecklistBlock) {
+      return blocks
+    }
+
+    const output = formatCommandOutput(item.aggregated_output)
+    if (output) {
+      blocks.push(...buildDetailBlocksFromText(output, {
+        preferMarkdown: parsed.category === 'web' || parsed.category === 'edit',
+      }))
+    }
+  }
+
+  return blocks
+}
+
+function buildCommandGroupingMeta(item = {}) {
+  const parsed = parseToolCommand(item.command)
+  return {
+    groupType: ['read', 'grep', 'list', 'web', 'todo'].includes(parsed.category) ? parsed.category : '',
+    groupTarget: parsed.subject || item.command || '',
+    toolName: parsed.toolName || '',
+  }
+}
+
+function buildTodoDetailBlocks(item = {}) {
+  const list = Array.isArray(item.items)
+    ? mapTodoEntries(item.items)
+    : []
+  if (!list.length) {
+    return []
+  }
+
+  return [buildChecklistBlock(list)]
 }
 
 function createTurnSummaryState() {
@@ -354,6 +649,15 @@ function syncTurnSummaryFromCodexEvent(turn, event = {}) {
     }
 
     if (item.type === AGENT_RUN_ITEM_TYPES.COMMAND_EXECUTION) {
+      const commandMeta = buildCommandGroupingMeta(item)
+      if (commandMeta.groupType === 'todo') {
+        const todoDetail = formatTodoItems(extractTodoEntriesFromCommandItem(item))
+        summary.currentActivity = text('正在更新待办列表', 'Updating todo list')
+        summary.latestActivity = text('正在更新待办列表', 'Updating todo list')
+        summary.latestDetail = summarizeText(todoDetail, 120)
+        return
+      }
+
       summary.currentActivity = text('正在执行命令', 'Running command')
       summary.latestActivity = text('开始执行命令', 'Command started')
       summary.latestDetail = summarizeText(item.command, 120)
@@ -409,6 +713,14 @@ function syncTurnSummaryFromCodexEvent(turn, event = {}) {
   }
 
   if (item.type === AGENT_RUN_ITEM_TYPES.COMMAND_EXECUTION) {
+    const commandMeta = buildCommandGroupingMeta(item)
+    if (commandMeta.groupType === 'todo') {
+      summary.currentActivity = ''
+      summary.latestActivity = text('待办列表已更新', 'Todo list updated')
+      summary.latestDetail = summarizeText(formatTodoItems(extractTodoEntriesFromCommandItem(item)), 120)
+      return
+    }
+
     summary.commandCount += 1
     summary.currentActivity = ''
     summary.latestActivity = text('命令执行完成', 'Command completed')
@@ -601,12 +913,17 @@ const CODEX_ISSUE_PATTERNS = [
       /insufficient permissions?/i,
       /forbidden/i,
       /unauthorized/i,
+      /authentication_failed/i,
+      /invalid token/i,
+      /invalid api key/i,
+      /\b401\b/,
       /access denied/i,
       /not allowed/i,
       /权限不足/,
       /没有权限/,
       /无权/,
       /拒绝访问/,
+      /无效的令牌/,
     ],
   },
   {
@@ -784,9 +1101,11 @@ export function formatCodexEvent(event = {}, agentLabel = 'Codex', engine = 'cod
   }
 
   if (eventType === AGENT_RUN_EVENT_TYPES.THREAD_STARTED) {
+    const detail = event.thread_id ? text(`线程 ID: ${event.thread_id}`, `Thread ID: ${event.thread_id}`) : ''
     return {
       title: text(`${agentLabel} 会话已创建`, `${agentLabel} session created`),
-      detail: event.thread_id ? text(`线程 ID: ${event.thread_id}`, `Thread ID: ${event.thread_id}`) : '',
+      detail,
+      detailBlocks: detail ? [createMetaBlock([{ label: 'ID', value: event.thread_id }])] : [],
     }
   }
 
@@ -805,6 +1124,21 @@ export function formatCodexEvent(event = {}, agentLabel = 'Codex', engine = 'cod
     return {
       title: text(`${agentLabel} 执行完成`, `${agentLabel} completed`),
       detail: usage,
+      detailBlocks: event.usage ? [createMetaBlock([
+        { label: text('输入', 'Input'), value: formatCount(event.usage.input_tokens) },
+        event.usage.cached_input_tokens ? { label: text('缓存', 'Cached'), value: formatCount(event.usage.cached_input_tokens) } : null,
+        { label: text('输出', 'Output'), value: formatCount(event.usage.output_tokens) },
+      ])] : [],
+    }
+  }
+
+  if (eventType === 'claude.system') {
+    const detail = String(event.detail || '').trim()
+    if (!detail) {
+      return {
+        title: '',
+        detail: '',
+      }
     }
   }
 
@@ -816,6 +1150,7 @@ export function formatCodexEvent(event = {}, agentLabel = 'Codex', engine = 'cod
         kind: 'info',
         title: text(`网络异常，正在重试 (${retrying.attempt}/${retrying.total})`, `Network error, retrying (${retrying.attempt}/${retrying.total})`),
         detail: formatCodexIssueMessage(retrying.reason || retrying.rawMessage, engine),
+        detailBlocks: buildDetailBlocksFromText(formatCodexIssueMessage(retrying.reason || retrying.rawMessage, engine), { preferMarkdown: true }),
       }
     }
 
@@ -824,35 +1159,66 @@ export function formatCodexEvent(event = {}, agentLabel = 'Codex', engine = 'cod
       kind: 'error',
       title: issue?.title || (eventType === AGENT_RUN_EVENT_TYPES.TURN_FAILED ? text('本轮运行失败', 'This run failed') : text(`${agentLabel} 返回错误`, `${agentLabel} returned an error`)),
       detail: formatCodexIssueMessage(rawMessage, engine),
+      detailBlocks: buildDetailBlocksFromText(formatCodexIssueMessage(rawMessage, engine), { preferMarkdown: true }),
     }
   }
 
   if (eventType === AGENT_RUN_EVENT_TYPES.ITEM_STARTED) {
     if (item.type === AGENT_RUN_ITEM_TYPES.REASONING) {
       return {
-        kind: 'info',
-        title: text('正在思考', 'Thinking'),
+        kind: 'reasoning',
+        title: text('思考过程', 'Thinking'),
         detail: item.text || '',
+        detailBlocks: buildDetailBlocksFromText(item.text || '', { preferMarkdown: true }),
+        groupType: 'reasoning',
+        phase: 'updated',
       }
     }
 
     if (item.type === AGENT_RUN_ITEM_TYPES.WEB_SEARCH) {
-      return formatWebSearchEvent(item, 'started')
+      return {
+        ...formatWebSearchEvent(item, 'started'),
+        detailBlocks: buildWebSearchDetailBlocks(item),
+        groupType: 'web',
+        groupTarget: String(item.query || item.action?.query || item.action?.url || '').trim(),
+        phase: 'started',
+      }
     }
 
     if (item.type === AGENT_RUN_ITEM_TYPES.COLLAB_TOOL_CALL) {
-      return formatCollabToolEvent(item, 'started')
+      return {
+        ...formatCollabToolEvent(item, 'started'),
+        detailBlocks: buildCollabToolDetailBlocks(item),
+      }
     }
 
     if (item.type === AGENT_RUN_ITEM_TYPES.FILE_CHANGE) {
-      return formatFileChangeEvent(item, 'started')
+      return {
+        ...formatFileChangeEvent(item, 'started'),
+        detailBlocks: buildFileChangeDetailBlocks(item),
+      }
     }
 
     if (item.type === AGENT_RUN_ITEM_TYPES.COMMAND_EXECUTION) {
+      const commandMeta = buildCommandGroupingMeta(item)
+      if (commandMeta.groupType === 'todo') {
+        return {
+          kind: 'todo',
+          title: text('更新待办列表', 'Update todo list'),
+          detail: formatTodoItems(extractTodoEntriesFromCommandItem(item)),
+          detailBlocks: buildCommandDetailBlocks(item, false, engine),
+          groupType: 'todo',
+          phase: 'started',
+        }
+      }
+
       return {
         kind: 'command',
         title: text('开始执行命令', 'Command started'),
         detail: item.command || '',
+        detailBlocks: buildCommandDetailBlocks(item, false, engine),
+        ...buildCommandGroupingMeta(item),
+        phase: 'started',
       }
     }
 
@@ -861,6 +1227,9 @@ export function formatCodexEvent(event = {}, agentLabel = 'Codex', engine = 'cod
         kind: 'todo',
         title: text('更新待办列表', 'Update todo list'),
         detail: formatTodoItems(item.items),
+        detailBlocks: buildTodoDetailBlocks(item),
+        groupType: 'todo',
+        phase: 'started',
       }
     }
 
@@ -875,6 +1244,9 @@ export function formatCodexEvent(event = {}, agentLabel = 'Codex', engine = 'cod
       kind: 'todo',
       title: text('更新待办列表', 'Update todo list'),
       detail: formatTodoItems(item.items),
+      detailBlocks: buildTodoDetailBlocks(item),
+      groupType: 'todo',
+      phase: 'updated',
     }
   }
 
@@ -888,18 +1260,45 @@ export function formatCodexEvent(event = {}, agentLabel = 'Codex', engine = 'cod
     }
 
     if (item.type === AGENT_RUN_ITEM_TYPES.WEB_SEARCH) {
-      return formatWebSearchEvent(item, 'completed')
+      return {
+        ...formatWebSearchEvent(item, 'completed'),
+        detailBlocks: buildWebSearchDetailBlocks(item),
+        groupType: 'web',
+        groupTarget: String(item.query || item.action?.query || item.action?.url || '').trim(),
+        phase: 'completed',
+      }
     }
 
     if (item.type === AGENT_RUN_ITEM_TYPES.COLLAB_TOOL_CALL) {
-      return formatCollabToolEvent(item, 'completed')
+      return {
+        ...formatCollabToolEvent(item, 'completed'),
+        detailBlocks: buildCollabToolDetailBlocks(item),
+      }
     }
 
     if (item.type === AGENT_RUN_ITEM_TYPES.FILE_CHANGE) {
-      return formatFileChangeEvent(item, 'completed')
+      return {
+        ...formatFileChangeEvent(item, 'completed'),
+        detailBlocks: buildFileChangeDetailBlocks(item),
+      }
     }
 
     if (item.type === AGENT_RUN_ITEM_TYPES.COMMAND_EXECUTION) {
+      const commandMeta = buildCommandGroupingMeta(item)
+      if (commandMeta.groupType === 'todo') {
+        const success = item.exit_code === 0 || item.status === 'completed'
+        return {
+          kind: success ? 'todo' : 'error',
+          title: success
+            ? text('更新待办列表', 'Update todo list')
+            : text('更新待办列表失败', 'Todo list update failed'),
+          detail: formatTodoItems(extractTodoEntriesFromCommandItem(item)),
+          detailBlocks: buildCommandDetailBlocks(item, true, engine),
+          groupType: 'todo',
+          phase: 'completed',
+        }
+      }
+
       const success = item.exit_code === 0 || item.status === 'completed'
       return {
         kind: success ? 'command' : 'error',
@@ -907,6 +1306,9 @@ export function formatCodexEvent(event = {}, agentLabel = 'Codex', engine = 'cod
           ? text('命令执行完成', 'Command completed')
           : text(`命令执行失败(exit ${item.exit_code ?? '?'})`, `Command failed (exit ${item.exit_code ?? '?'})`),
         detail: [item.command, formatCommandOutput(item.aggregated_output)].filter(Boolean).join('\n\n'),
+        detailBlocks: buildCommandDetailBlocks(item, true, engine),
+        ...buildCommandGroupingMeta(item),
+        phase: 'completed',
       }
     }
 
@@ -915,6 +1317,9 @@ export function formatCodexEvent(event = {}, agentLabel = 'Codex', engine = 'cod
         kind: 'todo',
         title: text('更新待办列表', 'Update todo list'),
         detail: formatTodoItems(item.items),
+        detailBlocks: buildTodoDetailBlocks(item),
+        groupType: 'todo',
+        phase: 'completed',
       }
     }
 
@@ -974,6 +1379,9 @@ function normalizeLogEntry(entry = {}, nextLogId) {
 
   const title = String(entry.title || '').trim()
   const detail = String(entry.detail || '').trim()
+  const detailBlocks = Array.isArray(entry.detailBlocks) && entry.detailBlocks.length
+    ? entry.detailBlocks.filter(Boolean)
+    : (detail ? buildDetailBlocksFromText(detail, { preferMarkdown: entry.kind === 'error' }) : [])
   if (!title && !detail) {
     return null
   }
@@ -983,6 +1391,11 @@ function normalizeLogEntry(entry = {}, nextLogId) {
     kind: entry.kind || 'info',
     title: title || detail,
     detail: title ? detail : '',
+    detailBlocks,
+    groupType: String(entry.groupType || '').trim(),
+    groupTarget: String(entry.groupTarget || '').trim(),
+    toolName: String(entry.toolName || '').trim(),
+    phase: String(entry.phase || '').trim(),
   }
 }
 
@@ -1054,20 +1467,12 @@ export function applyRunPayloadToTurn(turn, payload = {}, nextLogId, mergeSessio
   if (envelopeType === AGENT_RUN_ENVELOPE_EVENT_TYPES.SESSION) {
     mergeSession(payload.session)
     turn.engine = getTurnAgentEngine(payload.session || turn)
-    appendTurnEvent(turn, {
-      title: text(`已连接项目：${payload.session?.title || '未命名项目'}`, `Connected project: ${payload.session?.title || 'Untitled Project'}`),
-      detail: payload.session?.cwd ? text(`工作目录：${payload.session.cwd}`, `Working directory: ${payload.session.cwd}`) : '',
-    }, nextLogId)
     return
   }
 
   if (envelopeType === AGENT_RUN_ENVELOPE_EVENT_TYPES.SESSION_UPDATED) {
     mergeSession(payload.session)
     turn.engine = getTurnAgentEngine(payload.session || turn)
-    appendTurnEvent(turn, {
-      title: text('项目会话已更新', 'Project session updated'),
-      detail: payload.session?.started ? text('后续请求会继续复用当前项目的执行引擎会话。', 'Subsequent requests will continue reusing the current engine session for this project.') : '',
-    }, nextLogId)
     return
   }
 
@@ -1104,6 +1509,9 @@ export function applyRunPayloadToTurn(turn, payload = {}, nextLogId, mergeSessio
 
   if (envelopeType === AGENT_RUN_ENVELOPE_EVENT_TYPES.AGENT_EVENT) {
     syncTurnSummaryFromCodexEvent(turn, payload.event)
+    if (payload.event?.type === AGENT_RUN_EVENT_TYPES.THREAD_STARTED) {
+      return
+    }
     const formattedEvent = formatCodexEvent(payload.event, getTurnAgentLabel(turn), turn.engine)
     if (String(formattedEvent.title || '').startsWith(text('网络异常，正在重试', 'Network error, retrying'))) {
       upsertRetryingEvent(turn, formattedEvent, nextLogId)

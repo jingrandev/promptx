@@ -289,12 +289,49 @@ function createClaudeToolResultEvent(block = {}, state = createClaudeNormalizati
   }
 }
 
+function buildClaudeApiRetryReason(event = {}) {
+  const status = Number(event?.error_status) || 0
+  const code = String(event?.error || '').trim()
+  const parts = []
+  if (status > 0) {
+    parts.push(`HTTP ${status}`)
+  }
+  if (code) {
+    parts.push(code)
+  }
+  return parts.join(' ').trim()
+}
+
+function isClaudeFatalAuthRetry(event = {}) {
+  const status = Number(event?.error_status) || 0
+  const code = String(event?.error || '').trim().toLowerCase()
+  return status === 401 || code === 'authentication_failed'
+}
+
+function formatClaudeFatalAuthMessage(event = {}) {
+  const reason = buildClaudeApiRetryReason(event)
+  return reason
+    ? `Claude Code 认证失败（${reason}）。请重新登录 Claude Code，或检查当前环境中的认证令牌配置。`
+    : 'Claude Code 认证失败。请重新登录 Claude Code，或检查当前环境中的认证令牌配置。'
+}
+
 export function normalizeClaudeEvents(event = {}, state = createClaudeNormalizationState()) {
   const eventType = String(event?.type || '').trim().toLowerCase()
   const normalizedEvents = []
 
   if (eventType === 'system' && String(event?.subtype || '').trim().toLowerCase() === 'init') {
     return [createThreadStartedEvent(extractClaudeSessionId(event))]
+  }
+
+  if (eventType === 'system' && String(event?.subtype || '').trim().toLowerCase() === 'api_retry') {
+    if (isClaudeFatalAuthRetry(event)) {
+      return [createErrorEvent(formatClaudeFatalAuthMessage(event))]
+    }
+
+    const attempt = Math.max(1, Number(event?.attempt) || 1)
+    const total = Math.max(attempt, Number(event?.max_retries) || attempt)
+    const reason = buildClaudeApiRetryReason(event) || 'request failed'
+    return [createErrorEvent(`Reconnecting... ${attempt}/${total} (${reason})`)]
   }
 
   if (eventType === 'assistant') {
@@ -435,6 +472,8 @@ export function streamPromptToClaudeCodeSession(sessionInput, prompt, callbacks 
   let lastStderrLine = ''
   let finalMessage = ''
   let finalSessionId = String(session.engineSessionId || session.engineThreadId || session.codexThreadId || '').trim()
+  let fatalClaudeErrorMessage = ''
+  let fatalClaudeErrorTriggered = false
   const normalizationState = createClaudeNormalizationState()
 
   const rememberSessionId = (sessionId) => {
@@ -464,6 +503,12 @@ export function streamPromptToClaudeCodeSession(sessionInput, prompt, callbacks 
     normalizedEvents.forEach((normalizedEvent) => {
       onEvent(createAgentEventEnvelopeEvent(normalizedEvent))
     })
+
+    if (!fatalClaudeErrorTriggered && isClaudeFatalAuthRetry(event)) {
+      fatalClaudeErrorTriggered = true
+      fatalClaudeErrorMessage = formatClaudeFatalAuthMessage(event)
+      forceStopChildProcess(child)
+    }
 
     if (String(event?.type || '').trim().toLowerCase() === 'result') {
       finalMessage = extractClaudeResultText(event) || finalMessage
@@ -500,7 +545,7 @@ export function streamPromptToClaudeCodeSession(sessionInput, prompt, callbacks 
       })
 
       if (code !== 0) {
-        const detail = lastStderrLine || 'Claude Code 执行失败。'
+        const detail = fatalClaudeErrorMessage || lastStderrLine || 'Claude Code 执行失败。'
         reject(new Error(detail))
         return
       }
