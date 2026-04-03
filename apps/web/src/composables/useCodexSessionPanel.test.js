@@ -99,7 +99,7 @@ test('formatCodexEvent parses Claude read results into structured detail blocks'
   assert.deepEqual(event.detailBlocks?.[1]?.entries, ['base.js', 'hooks/'])
 })
 
-test('formatCodexEvent parses OpenCode grep output into code snippets', () => {
+test('formatCodexEvent keeps OpenCode grep output as text', () => {
   const event = formatCodexEvent({
     type: 'item.completed',
     item: {
@@ -114,11 +114,11 @@ test('formatCodexEvent parses OpenCode grep output into code snippets', () => {
   }, 'OpenCode', 'opencode')
 
   assert.equal(event.detailBlocks?.[0]?.type, 'meta')
-  assert.equal(event.detailBlocks?.[1]?.type, 'code_snippet')
-  assert.equal(event.detailBlocks?.[1]?.lines?.[0]?.number, '473')
+  assert.equal(event.detailBlocks?.[1]?.type, 'text')
+  assert.match(event.detailBlocks?.[1]?.text || '', /473:function startFocusFollow/)
 })
 
-test('formatCodexEvent parses ripgrep-style output into grouped search results', () => {
+test('formatCodexEvent keeps ripgrep-style output as text', () => {
   const event = formatCodexEvent({
     type: 'item.completed',
     item: {
@@ -134,13 +134,11 @@ test('formatCodexEvent parses ripgrep-style output into grouped search results',
   }, 'Claude Code', 'claude-code')
 
   assert.equal(event.detailBlocks?.[0]?.type, 'meta')
-  assert.equal(event.detailBlocks?.[1]?.type, 'search_results')
-  assert.equal(event.detailBlocks?.[1]?.fileCount, 2)
-  assert.equal(event.detailBlocks?.[1]?.files?.[0]?.path, 'apps/web/src/lib/i18n.js')
-  assert.equal(event.detailBlocks?.[1]?.files?.[0]?.matches?.[0]?.number, '126')
+  assert.equal(event.detailBlocks?.[1]?.type, 'text')
+  assert.match(event.detailBlocks?.[1]?.text || '', /apps\/web\/src\/lib\/i18n\.js:126:/)
 })
 
-test('formatCodexEvent strips ansi sequences from command output and parses build failure blocks', () => {
+test('formatCodexEvent strips ansi sequences from command output and keeps build failure as text', () => {
   const event = formatCodexEvent({
     type: 'item.completed',
     item: {
@@ -163,9 +161,8 @@ test('formatCodexEvent strips ansi sequences from command output and parses buil
   assert.equal(event.kind, 'error')
   assert.match(event.detail, /vite build/)
   assert.doesNotMatch(event.detail, /\u001b\[/)
-  assert.equal(event.detailBlocks?.[1]?.type, 'build_error')
-  assert.equal(event.detailBlocks?.[1]?.errorCode, 'MISSING_EXPORT')
-  assert.equal(event.detailBlocks?.[1]?.location?.line, '13')
+  assert.equal(event.detailBlocks?.[1]?.type, 'text')
+  assert.match(event.detailBlocks?.[1]?.text || '', /\[MISSING_EXPORT\] Error:/)
 })
 
 test('formatCodexIssueMessage strips ansi sequences from stderr text', () => {
@@ -188,7 +185,7 @@ test('formatCodexEvent treats raw shell commands as command meta', () => {
   ])
 })
 
-test('formatCodexEvent parses git status output as code text', () => {
+test('formatCodexEvent keeps git status output as text', () => {
   const event = formatCodexEvent({
     type: 'item.completed',
     item: {
@@ -202,11 +199,11 @@ test('formatCodexEvent parses git status output as code text', () => {
     },
   }, 'Codex', 'codex')
 
-  assert.equal(event.detailBlocks?.[1]?.type, 'code_text')
+  assert.equal(event.detailBlocks?.[1]?.type, 'text')
   assert.match(event.detailBlocks?.[1]?.text, /ProcessDetailRenderer/)
 })
 
-test('formatCodexEvent parses workspace build logs as code text', () => {
+test('formatCodexEvent keeps workspace build logs as text', () => {
   const event = formatCodexEvent({
     type: 'item.completed',
     item: {
@@ -225,11 +222,11 @@ test('formatCodexEvent parses workspace build logs as code text', () => {
     },
   }, 'Codex', 'codex')
 
-  assert.equal(event.detailBlocks?.[1]?.type, 'code_text')
-  assert.match(event.detailBlocks?.[1]?.text, /workspace projects/)
+  assert.equal(event.detailBlocks?.[1]?.type, 'text')
+  assert.match(event.detailBlocks?.[1]?.text, /pnpm -r build/)
 })
 
-test('formatCodexEvent parses git diff output as code text instead of markdown', () => {
+test('formatCodexEvent keeps git diff output as text instead of markdown', () => {
   const event = formatCodexEvent({
     type: 'item.completed',
     item: {
@@ -248,11 +245,11 @@ test('formatCodexEvent parses git diff output as code text instead of markdown',
     },
   }, 'OpenCode', 'opencode')
 
-  assert.equal(event.detailBlocks?.[1]?.type, 'code_text')
+  assert.equal(event.detailBlocks?.[1]?.type, 'text')
   assert.doesNotMatch(event.detailBlocks?.[1]?.text || '', /^```/)
 })
 
-test('formatCodexEvent splits mixed description and terminal output into separate blocks', () => {
+test('formatCodexEvent keeps mixed description and terminal output in one text block', () => {
   const event = formatCodexEvent({
     type: 'item.completed',
     item: {
@@ -270,7 +267,8 @@ test('formatCodexEvent splits mixed description and terminal output into separat
   }, 'Codex', 'codex')
 
   assert.equal(event.detailBlocks?.[1]?.type, 'text')
-  assert.equal(event.detailBlocks?.[2]?.type, 'code_text')
+  assert.equal(event.detailBlocks?.[2], undefined)
+  assert.match(event.detailBlocks?.[1]?.text || '', /apps\/web build: transforming\.\.\./)
 })
 
 test('formatCodexEvent parses OpenCode todowrite output into checklist', () => {
@@ -481,7 +479,7 @@ test('formatCodexEvent derives sub-agent count from agents_states and exposes su
   assert.equal(event.detailBlocks?.[1]?.items?.[0]?.messageBlocks?.[0]?.type, 'text')
 })
 
-test('formatCodexEvent parses sub-agent result details into structured blocks', () => {
+test('formatCodexEvent keeps sub-agent result details as text', () => {
   const event = formatCodexEvent({
     type: 'item.completed',
     item: {
@@ -501,7 +499,7 @@ test('formatCodexEvent parses sub-agent result details into structured blocks', 
     },
   }, 'OpenCode', 'opencode')
 
-  assert.equal(event.detailBlocks?.[1]?.items?.[0]?.messageBlocks?.[0]?.type, 'search_results')
+  assert.equal(event.detailBlocks?.[1]?.items?.[0]?.messageBlocks?.[0]?.type, 'text')
 })
 
 test('formatCodexEvent formats file changes as concrete file updates', () => {
