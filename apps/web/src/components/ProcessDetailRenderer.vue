@@ -1,4 +1,8 @@
 <script setup>
+defineOptions({
+  name: 'ProcessDetailRenderer',
+})
+
 import { computed, ref, watch } from 'vue'
 import { Check } from 'lucide-vue-next'
 import { renderCodexMarkdown } from '../lib/codexMarkdown.js'
@@ -13,6 +17,7 @@ const CODE_LINES_PREVIEW_LIMIT = 10
 const BUILD_ERROR_PREVIEW_LIMIT = 6
 const SEARCH_FILE_PREVIEW_LIMIT = 2
 const SEARCH_MATCH_PREVIEW_LIMIT = 3
+const SUB_AGENT_MESSAGE_PREVIEW_LINES = 6
 
 const props = defineProps({
   blocks: {
@@ -31,6 +36,7 @@ const props = defineProps({
 
 const { t } = useI18n()
 const expandedBlockKeys = ref(new Set())
+const expandedSubAgentMessageKeys = ref(new Set())
 
 const normalizedBlocks = computed(() => {
   const blocks = Array.isArray(props.blocks) ? props.blocks.filter(Boolean) : []
@@ -57,6 +63,23 @@ watch(blockKeyEntries, (nextEntries, previousEntries = []) => {
   if (nextExpanded.size !== expandedBlockKeys.value.size) {
     expandedBlockKeys.value = nextExpanded
   }
+}, { immediate: true })
+
+watch(normalizedBlocks, (nextBlocks = []) => {
+  const availableKeys = new Set()
+  nextBlocks.forEach((block, blockIndex) => {
+    if (block?.type !== 'sub_agent_list') {
+      return
+    }
+
+    ;(Array.isArray(block.items) ? block.items : []).forEach((item, itemIndex) => {
+      availableKeys.add(getSubAgentMessageKey(blockIndex, item, itemIndex))
+    })
+  })
+
+  expandedSubAgentMessageKeys.value = new Set(
+    [...expandedSubAgentMessageKeys.value].filter((key) => availableKeys.has(key))
+  )
 }, { immediate: true })
 
 function renderMarkdown(text = '') {
@@ -277,6 +300,105 @@ function getSearchHiddenFileCount(block = {}, blockIndex = 0) {
 function getSearchHiddenMatchCount(file = {}, block = {}, blockIndex = 0) {
   const visibleMatches = Array.isArray(file?.matches) ? file.matches.length : 0
   return Math.max(0, (file?.totalCount || visibleMatches) - visibleMatches)
+}
+
+function formatSubAgentStatus(status = '') {
+  const normalized = String(status || '').trim().toLowerCase()
+  if (normalized === 'completed') {
+    return t('processDetail.subAgentCompleted')
+  }
+  if (normalized === 'failed') {
+    return t('processDetail.subAgentFailed')
+  }
+  if (normalized === 'running') {
+    return t('processDetail.subAgentRunning')
+  }
+  if (normalized === 'pending_init') {
+    return t('processDetail.subAgentPending')
+  }
+  return t('processDetail.subAgentUnknown')
+}
+
+function getSubAgentStatusClass(status = '') {
+  const normalized = String(status || '').trim().toLowerCase()
+  if (normalized === 'completed') {
+    return 'theme-status-success'
+  }
+  if (normalized === 'failed') {
+    return 'theme-status-danger'
+  }
+  if (normalized === 'running') {
+    return 'theme-status-info'
+  }
+  return 'theme-status-neutral'
+}
+
+function getSubAgentMessageKey(blockIndex = 0, item = {}, itemIndex = 0) {
+  return `${getBlockKey(blockIndex)}:sub-agent:${String(item?.id || item?.target || item?.title || itemIndex)}`
+}
+
+function getSubAgentMessageLines(item = {}) {
+  return String(item?.message || '').split('\n')
+}
+
+function isSubAgentMessageExpanded(blockIndex = 0, item = {}, itemIndex = 0) {
+  return expandedSubAgentMessageKeys.value.has(getSubAgentMessageKey(blockIndex, item, itemIndex))
+}
+
+function toggleSubAgentMessage(blockIndex = 0, item = {}, itemIndex = 0) {
+  const key = getSubAgentMessageKey(blockIndex, item, itemIndex)
+  const next = new Set(expandedSubAgentMessageKeys.value)
+  if (next.has(key)) {
+    next.delete(key)
+  } else {
+    next.add(key)
+  }
+  expandedSubAgentMessageKeys.value = next
+}
+
+function isSubAgentMessageCollapsible(item = {}) {
+  const lines = getSubAgentMessageLines(item)
+  return lines.length > SUB_AGENT_MESSAGE_PREVIEW_LINES
+}
+
+function getVisibleSubAgentMessage(item = {}, blockIndex = 0, itemIndex = 0) {
+  const message = String(item?.message || '')
+  const lines = getSubAgentMessageLines(item)
+  if (!message || isSubAgentMessageExpanded(blockIndex, item, itemIndex) || lines.length <= SUB_AGENT_MESSAGE_PREVIEW_LINES) {
+    return message
+  }
+
+  return `${lines.slice(0, SUB_AGENT_MESSAGE_PREVIEW_LINES).join('\n')}\n...`
+}
+
+function getSubAgentMessageHiddenLineCount(item = {}, blockIndex = 0, itemIndex = 0) {
+  const lines = getSubAgentMessageLines(item)
+  if (isSubAgentMessageExpanded(blockIndex, item, itemIndex)) {
+    return 0
+  }
+  return Math.max(0, lines.length - SUB_AGENT_MESSAGE_PREVIEW_LINES)
+}
+
+function getSubAgentMessageBlocks(item = {}) {
+  return Array.isArray(item?.messageBlocks) ? item.messageBlocks.filter(Boolean) : []
+}
+
+function hasStructuredSubAgentMessage(item = {}) {
+  const blocks = getSubAgentMessageBlocks(item)
+  return blocks.some((block) => !['text', 'markdown'].includes(String(block?.type || '').trim()))
+}
+
+function shouldRenderSubAgentMessageBlocks(item = {}, blockIndex = 0, itemIndex = 0) {
+  if (!String(item?.message || '').trim()) {
+    return false
+  }
+
+  const expanded = isSubAgentMessageExpanded(blockIndex, item, itemIndex)
+  if (expanded) {
+    return getSubAgentMessageBlocks(item).length > 0
+  }
+
+  return hasStructuredSubAgentMessage(item) && !isSubAgentMessageCollapsible(item)
 }
 </script>
 
@@ -500,6 +622,63 @@ function getSearchHiddenMatchCount(file = {}, block = {}, blockIndex = 0) {
           >
             <span class="process-detail-filechange__kind">{{ formatChangeKind(item.kind) }}</span>
             <span class="process-detail-filechange__path process-detail-mobile-code-scroll">{{ item.path }}</span>
+          </div>
+        </div>
+      </div>
+
+      <div v-else-if="block.type === 'sub_agent_list'" class="process-detail-panel">
+        <div class="space-y-2">
+          <div
+            v-for="(item, itemIndex) in block.items || []"
+            :key="`${blockIndex}-sub-agent-${itemIndex}`"
+            class="rounded-sm border border-dashed border-[var(--theme-borderSubtle)] px-3 py-2"
+          >
+            <div class="flex flex-wrap items-start justify-between gap-2">
+              <div class="min-w-0 space-y-1">
+                <div class="font-medium text-[var(--theme-textPrimary)]">
+                  {{ item.title || item.target || item.id }}
+                </div>
+                <div class="theme-muted-text flex flex-wrap items-center gap-2 text-[11px]">
+                  <span v-if="item.role" class="rounded-sm border border-dashed px-1.5 py-0.5">{{ item.role }}</span>
+                  <span v-if="item.target" class="font-mono">{{ item.target }}</span>
+                  <span v-if="item.model" class="font-mono">{{ item.model }}</span>
+                  <span v-if="item.id && item.id !== item.target" class="font-mono opacity-80">{{ item.id }}</span>
+                </div>
+              </div>
+              <span
+                class="inline-flex items-center rounded-sm border border-dashed px-2 py-0.5 text-[10px]"
+                :class="getSubAgentStatusClass(item.status)"
+              >
+                {{ formatSubAgentStatus(item.status) }}
+              </span>
+            </div>
+            <div v-if="item.message" class="mt-2 space-y-1.5">
+              <ProcessDetailRenderer
+                v-if="shouldRenderSubAgentMessageBlocks(item, blockIndex, itemIndex)"
+                :blocks="getSubAgentMessageBlocks(item)"
+                kind="sub-agent-message"
+              />
+              <pre
+                v-else
+                class="theme-muted-text whitespace-pre-wrap break-words text-xs leading-5"
+              >{{ getVisibleSubAgentMessage(item, blockIndex, itemIndex) }}</pre>
+              <div
+                v-if="getSubAgentMessageHiddenLineCount(item, blockIndex, itemIndex) || isSubAgentMessageCollapsible(item)"
+                class="process-detail-footnote process-detail-footnote--compact"
+              >
+                <span v-if="getSubAgentMessageHiddenLineCount(item, blockIndex, itemIndex)">
+                  {{ formatHiddenLines(getSubAgentMessageHiddenLineCount(item, blockIndex, itemIndex)) }}
+                </span>
+                <button
+                  v-if="isSubAgentMessageCollapsible(item)"
+                  type="button"
+                  class="process-detail-footnote__toggle"
+                  @click="toggleSubAgentMessage(blockIndex, item, itemIndex)"
+                >
+                  {{ isSubAgentMessageExpanded(blockIndex, item, itemIndex) ? t('common.collapse') : t('common.expand') }}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </div>

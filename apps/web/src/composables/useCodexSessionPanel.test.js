@@ -439,6 +439,71 @@ test('formatCodexEvent formats collab tool calls with agent counts', () => {
   assert.match(event.detail, /分析 taskPointManage 页面打印接入点/)
 })
 
+test('formatCodexEvent derives sub-agent count from agents_states and exposes sub-agent detail blocks', () => {
+  const longMessage = [
+    '发现 2 个导出函数',
+    'checkTaskPointPrint',
+    'syncTaskPointReceipt',
+    '调用链从 WorkbenchView -> TaskToolbar -> PrintDialog',
+    '需要补一个权限短路判断',
+    '现有实现没有兜底 toast',
+    '建议把打印参数收口到 shared 层',
+  ].join('\n')
+
+  const event = formatCodexEvent({
+    type: 'item.completed',
+    item: {
+      type: 'collab_tool_call',
+      tool: 'wait',
+      receiver_thread_ids: [],
+      prompt: '等待子代理返回',
+      agents_states: {
+        'agent-1': {
+          status: 'completed',
+          title: '分析 a.js',
+          role: 'explore',
+          target: 'a.js',
+          message: longMessage,
+          model: 'opencode/minimax-m2.5-free',
+        },
+      },
+    },
+  }, 'OpenCode', 'opencode')
+
+  assert.equal(event.title, '子代理结果已汇总')
+  assert.equal(event.detailBlocks?.[0]?.type, 'meta')
+  assert.equal(event.detailBlocks?.[0]?.items?.[1]?.value, '1')
+  assert.equal(event.detailBlocks?.[1]?.type, 'sub_agent_list')
+  assert.equal(event.detailBlocks?.[1]?.items?.[0]?.title, '分析 a.js')
+  assert.equal(event.detailBlocks?.[1]?.items?.[0]?.status, 'completed')
+  assert.equal(event.detailBlocks?.[1]?.items?.[0]?.target, 'a.js')
+  assert.equal(event.detailBlocks?.[1]?.items?.[0]?.message, longMessage)
+  assert.equal(event.detailBlocks?.[1]?.items?.[0]?.messageBlocks?.[0]?.type, 'text')
+})
+
+test('formatCodexEvent parses sub-agent result details into structured blocks', () => {
+  const event = formatCodexEvent({
+    type: 'item.completed',
+    item: {
+      type: 'collab_tool_call',
+      tool: 'wait',
+      agents_states: {
+        'agent-1': {
+          status: 'completed',
+          title: '搜索 relay 相关文件',
+          message: [
+            'apps/web/src/lib/i18n.js:126:      relay: {',
+            "apps/web/src/lib/i18n.js:132:        relayUrl: 'Relay 地址',",
+            "apps/server/src/relayServer.js:264:  <form class=\"card\" action=\"/relay/admin/login\" method=\"post\">",
+          ].join('\n'),
+        },
+      },
+    },
+  }, 'OpenCode', 'opencode')
+
+  assert.equal(event.detailBlocks?.[1]?.items?.[0]?.messageBlocks?.[0]?.type, 'search_results')
+})
+
 test('formatCodexEvent formats file changes as concrete file updates', () => {
   const event = formatCodexEvent({
     type: 'item.completed',
@@ -912,6 +977,42 @@ test('applyRunEventToTurn builds turn summary for search command file and agents
   ])
   assert.equal(getTurnSummaryStatus(turn), '最近：已启动 2 个子代理')
   assert.equal(getTurnSummaryDetail(turn), '')
+})
+
+test('applyRunEventToTurn counts sub-agents from agents_states when receiver ids are absent', () => {
+  let turnId = 0
+  let logId = 0
+
+  const turn = createTurnFromRun({
+    id: 'run-agent-states',
+    prompt: 'hello',
+    status: 'running',
+    events: [],
+  }, () => ++turnId, () => ++logId, () => {})
+
+  applyRunEventToTurn(turn, {
+    seq: 1,
+    payload: {
+      type: 'agent_event',
+      event: {
+        type: 'item.completed',
+        item: {
+          type: 'collab_tool_call',
+          tool: 'spawn_agent',
+          receiver_thread_ids: [],
+          agents_states: {
+            'agent-a': { status: 'running', title: '分析 a.js' },
+            'agent-b': { status: 'running', title: '分析 b.js' },
+          },
+        },
+      },
+    },
+  }, () => ++logId, () => {})
+
+  assert.deepEqual(getTurnSummaryItems(turn), [
+    { key: 'agent', label: '子代理', value: '2' },
+  ])
+  assert.equal(getTurnSummaryStatus(turn), '最近：已启动 2 个子代理')
 })
 
 test('applyRunEventToTurn reports waiting agent status in turn summary', () => {
