@@ -845,7 +845,7 @@ body {
 
   .transcript-card {
     @apply border border-dashed;
-    border-color: color-mix(in srgb, var(--theme-borderDefault) 78%, transparent);
+    border-color: var(--theme-borderDefault);
   }
 
   .theme-popover {
@@ -1938,6 +1938,9 @@ body {
   :root[data-theme='promptx-glass-light'] .transcript-card__subtle,
   :root[data-theme='promptx-glass-light'] .transcript-card__media,
   :root[data-theme='promptx-glass-light'] .transcript-event-card,
+  :root[data-theme='promptx-glass-light'] .theme-content-panel,
+  :root[data-theme='promptx-glass-light'] .theme-inline-panel,
+  :root[data-theme='promptx-glass-light'] .theme-empty-state,
   :root[data-theme='promptx-glass-light'] .workbench-select-panel,
   :root[data-theme='promptx-glass-light'] .settings-section-card {
     border-radius: 0.6rem;
