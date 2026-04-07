@@ -409,13 +409,11 @@ body {
   .process-detail {
     font-size: 11px;
     line-height: 1.65;
-    font-family: var(--theme-fontMono);
   }
 
   .process-detail .codex-markdown {
     font-size: 11px;
     line-height: 1.65;
-    font-family: var(--theme-fontMono);
   }
 
   .process-detail .codex-markdown > * + * {
@@ -487,7 +485,6 @@ body {
 
   .process-detail .codex-markdown :not(pre) > code,
   .process-detail .codex-markdown pre code {
-    font-family: var(--theme-fontMono);
     font-size: 11px;
     line-height: 1.65;
   }
@@ -567,10 +564,6 @@ body {
     overflow-wrap: anywhere;
   }
 
-  .process-detail-meta__value--mono {
-    font-family: var(--theme-fontMono);
-  }
-
   .process-detail-meta__item--long .process-detail-meta__value {
     white-space: pre-wrap;
     word-break: break-word;
@@ -586,7 +579,6 @@ body {
     overflow-wrap: anywhere;
     font-size: 11px;
     line-height: 1.65;
-    font-family: var(--theme-fontMono);
     color: inherit;
   }
 
@@ -651,7 +643,6 @@ body {
   .process-detail-directory__list {
     display: grid;
     gap: 0.35rem;
-    font-family: var(--theme-fontMono);
     font-size: 11px;
     line-height: 1.5;
   }
@@ -668,7 +659,6 @@ body {
 
   .process-detail-filechange__path {
     min-width: 0;
-    font-family: var(--theme-fontMono);
     font-size: 11px;
     line-height: 1.5;
     white-space: pre-wrap;

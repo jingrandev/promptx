@@ -392,7 +392,7 @@ defineExpose({
         <div v-for="turn in turns" :key="turn.id" class="space-y-3">
           <div class="flex justify-end">
             <div class="transcript-card transcript-card--prompt min-w-0 w-full rounded-sm bg-[var(--theme-promptBg)] px-4 py-3 font-mono text-sm text-[var(--theme-promptText)]">
-              <div class="flex items-center justify-between gap-3 text-xs opacity-75">
+              <div class="flex items-center justify-between gap-3 text-xs opacity-75 font-sans">
                 <span class="font-semibold">{{ t('sessionPanel.promptTitle') }}</span>
                 <div class="flex items-center gap-2">
                   <button
@@ -447,7 +447,7 @@ defineExpose({
           </div>
 
           <div v-if="showProcessLogs" class="flex justify-start">
-            <div class="transcript-card transcript-card--process min-w-0 w-full rounded-sm px-4 py-3 font-mono" :class="getProcessCardClass(turn)">
+            <div class="transcript-card transcript-card--process min-w-0 w-full rounded-sm px-4 py-3" :class="getProcessCardClass(turn)">
               <div class="flex items-center justify-between gap-3 text-xs">
                 <span class="font-semibold">{{ t('sessionPanel.processTitle') }}</span>
                 <div class="flex items-center gap-2">
@@ -539,7 +539,7 @@ defineExpose({
                 ? 'bg-[var(--theme-dangerSoft)] text-[var(--theme-dangerText)]'
                 : 'bg-[var(--theme-responseBg)] text-[var(--theme-responseText)]'"
             >
-              <div class="flex items-center justify-between gap-3 text-xs text-current/80">
+              <div class="flex items-center justify-between gap-3 text-xs opacity-75 font-sans">
                 <span class="font-semibold">{{ turn.errorMessage ? t('sessionPanel.errorSuffix', { agent: getTurnAgentLabel(turn) }) : t('sessionPanel.responseSuffix', { agent: getTurnAgentLabel(turn) }) }}</span>
                 <div class="flex items-center gap-2">
                   <button
