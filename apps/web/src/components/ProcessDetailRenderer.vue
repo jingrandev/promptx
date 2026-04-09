@@ -5,7 +5,7 @@ defineOptions({
 
 import { computed, ref, watch } from 'vue'
 import { Check } from 'lucide-vue-next'
-import { renderCodexMarkdown } from '../lib/codexMarkdown.js'
+import { renderPlainCodexMarkdown } from '../lib/codexMarkdown.js'
 import { useI18n } from '../composables/useI18n.js'
 import { createProcessDetailBlockKeyEntries } from '../lib/processDetailBlockKeys.js'
 
@@ -61,7 +61,7 @@ watch(normalizedBlocks, (nextBlocks = []) => {
 }, { immediate: true })
 
 function renderMarkdown(text = '') {
-  return renderCodexMarkdown(String(text || ''))
+  return renderPlainCodexMarkdown(String(text || ''))
 }
 
 function formatChangeKind(kind = '') {

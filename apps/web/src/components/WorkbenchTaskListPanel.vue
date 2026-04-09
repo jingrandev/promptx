@@ -205,9 +205,9 @@ function handleDragEnd(event) {
           <div class="flex items-start justify-between gap-3">
             <div class="flex min-w-0 flex-1 items-start gap-2 overflow-hidden">
               <button
+                v-if="!mobile"
                 type="button"
-                class="task-drag-handle mt-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-sm opacity-45 transition hover:opacity-80"
-                :class="mobile ? 'pointer-events-none cursor-default' : 'cursor-grab active:cursor-grabbing'"
+                class="task-drag-handle mt-0.5 inline-flex h-4 w-4 shrink-0 cursor-grab items-center justify-center rounded-sm opacity-45 transition hover:opacity-80 active:cursor-grabbing"
                 :title="t('workbench.dragToReorder')"
                 :aria-label="t('workbench.dragToReorder')"
                 tabindex="-1"

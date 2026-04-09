@@ -332,7 +332,7 @@ export const THEME_PRESETS = [
       responseBorder: '#dddddf',
       responseText: '#1f1f1f',
       codeBg: '#f7f7f7',
-      codeBorder: '#ececec',
+      codeBorder: '#d8d8d8',
       shadowPanel: '0 1px 2px rgba(0, 0, 0, 0.04)',
       shadowPopover: '0 12px 28px rgba(0, 0, 0, 0.12)',
       shellGradient: 'linear-gradient(180deg, #ededed 0%, #ededed 100%)',

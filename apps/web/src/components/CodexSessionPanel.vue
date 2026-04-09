@@ -239,11 +239,7 @@ function getVisibleTurnEvents(turn) {
 }
 
 function getTurnVisibleEventCount(turn) {
-  if (!turn?.eventsLoaded) {
-    return getTurnEventCount(turn)
-  }
-
-  return getVisibleTurnEvents(turn).length
+  return getTurnEventCount(turn)
 }
 
 function shouldShowEventToggle(turn) {
