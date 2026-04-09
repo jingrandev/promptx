@@ -375,7 +375,7 @@ defineExpose({
     <div class="min-h-0 flex-1">
       <div
         ref="transcriptRef"
-        class="workbench-transcript h-full space-y-4 overflow-y-auto px-4 py-4"
+        class="workbench-transcript flex h-full flex-col gap-3 overflow-y-auto px-4 py-4"
         @scroll="handleTranscriptScroll"
         @touchstart.passive="handleTranscriptTouchStart"
         @touchmove.passive="handleTranscriptTouchMove"
@@ -389,7 +389,7 @@ defineExpose({
           {{ t('sessionPanel.empty') }}
         </div>
 
-        <div v-for="turn in turns" :key="turn.id" class="space-y-3">
+        <div v-for="turn in turns" :key="turn.id" class="flex flex-col gap-3">
           <div class="flex justify-end">
             <div class="transcript-card transcript-card--prompt min-w-0 w-full rounded-sm bg-[var(--theme-promptBg)] px-4 py-3 font-mono text-sm text-[var(--theme-promptText)]">
               <div class="flex items-center justify-between gap-3 text-xs opacity-75 font-sans">
@@ -466,10 +466,10 @@ defineExpose({
                   <span>{{ getProcessStatus(turn) }}</span>
                 </div>
               </div>
-              <div v-if="shouldShowEventLoading(turn)" class="transcript-card__subtle mt-3 rounded-sm bg-[var(--theme-appPanelStrong)] px-3 py-2 text-xs text-current">
+              <div v-if="shouldShowEventLoading(turn)" class="transcript-card__subtle mt-2 rounded-sm bg-[var(--theme-appPanelStrong)] px-3 py-2 text-xs text-current">
                 {{ t('sessionPanel.loadingEvents') }}
               </div>
-              <div v-else-if="shouldShowLoadedEvents(turn)" class="mt-3 space-y-3">
+              <div v-else-if="shouldShowLoadedEvents(turn)" class="mt-2 space-y-2">
                 <div
                   v-for="item in getVisibleTurnEvents(turn)"
                   :key="item.id"
@@ -488,16 +488,16 @@ defineExpose({
               </div>
               <div
                 v-else-if="shouldShowCollapsedEventHint(turn) || shouldShowDeferredEventHint(turn)"
-                class="transcript-card__subtle mt-3 rounded-sm bg-[var(--theme-appPanelStrong)] px-3 py-2 text-xs text-current"
+                class="transcript-card__subtle mt-2 rounded-sm bg-[var(--theme-appPanelStrong)] px-3 py-2 text-xs text-current"
               >
                 {{ turn.eventsLoaded
                   ? t('sessionPanel.hiddenEventsLoaded', { count: getTurnVisibleEventCount(turn) })
                   : t('sessionPanel.hiddenEventsLoadLater', { count: getTurnVisibleEventCount(turn) }) }}
               </div>
-              <p v-else class="mt-3 text-xs text-current">{{ ['queued', 'starting', 'running', 'stopping'].includes(turn.status) ? t('sessionPanel.waitingEvents', { agent: getTurnAgentLabel(turn) }) : t('sessionPanel.noEvents') }}</p>
+              <p v-else class="mt-2 text-xs text-current">{{ ['queued', 'starting', 'running', 'stopping'].includes(turn.status) ? t('sessionPanel.waitingEvents', { agent: getTurnAgentLabel(turn) }) : t('sessionPanel.noEvents') }}</p>
               <div
                 v-if="hasTurnSummary(turn)"
-                class="transcript-card__subtle mt-3 rounded-sm bg-[var(--theme-appPanelStrong)] px-3 py-2 text-xs text-current"
+                class="transcript-card__subtle mt-2 rounded-sm bg-[var(--theme-appPanelStrong)] px-3 py-2 text-xs text-current"
               >
                 <div v-if="getTurnSummaryStatus(turn)" class="leading-5">
                   {{ getTurnSummaryStatus(turn) }}

@@ -825,7 +825,7 @@ body {
   }
 
   .transcript-card {
-    @apply border border-dashed;
+    @apply border;
     border-color: var(--theme-borderDefault);
   }
 
