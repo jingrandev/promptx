@@ -7,7 +7,7 @@ import { restoreTiptapNodeViewEditorFocus } from './tiptapNodeViewFocus.js'
 
 const props = defineProps(nodeViewProps)
 const { t } = useI18n()
-const compactDangerButtonClass = 'tool-button tool-button-danger-subtle inline-flex min-w-0 items-center justify-center gap-1 px-1.5 py-1 text-[11px] sm:justify-start sm:gap-1.5 sm:px-2 sm:text-xs'
+const compactDangerButtonClass = 'tool-button tool-button-danger-subtle inline-flex min-w-0 items-center justify-center gap-1 whitespace-nowrap px-2 py-1 text-[11px]'
 
 function openPreview() {
   if (typeof window === 'undefined') {
@@ -33,25 +33,27 @@ function removeNode() {
       :selected="selected"
       frame-class="theme-inline-panel border"
       header-class="theme-muted-text"
-      actions-layout-class="flex w-full shrink-0 items-center justify-start sm:w-auto sm:justify-end"
+      header-padding-class="px-3 py-2"
     >
-      <template #meta>
-        <div class="flex min-w-0 items-center gap-2">
-          <ImageIcon class="h-4 w-4" />
-          <span>{{ t('blockEditor.insertedImage') }}</span>
-        </div>
-      </template>
+      <template #header="{ actionsStateClass }">
+        <div class="flex min-w-0 items-center justify-between gap-3">
+          <div class="theme-heading min-w-0 inline-flex items-center gap-1.5 text-xs font-medium leading-5">
+            <ImageIcon class="h-3.5 w-3.5 shrink-0" />
+            {{ t('blockEditor.image') }}
+          </div>
 
-      <template #actions>
-        <button
-          type="button"
-          :class="compactDangerButtonClass"
-          contenteditable="false"
-          @click="removeNode"
-        >
-          <Trash2 class="h-3 w-3 shrink-0 sm:h-3.5 sm:w-3.5" />
-          <span>{{ t('blockEditor.delete') }}</span>
-        </button>
+          <div class="shrink-0 transition" :class="actionsStateClass">
+            <button
+              type="button"
+              :class="compactDangerButtonClass"
+              contenteditable="false"
+              @click="removeNode"
+            >
+              <Trash2 class="h-3 w-3 shrink-0 sm:h-3.5 sm:w-3.5" />
+              <span>{{ t('blockEditor.delete') }}</span>
+            </button>
+          </div>
+        </div>
       </template>
 
       <div class="mx-auto flex w-full max-w-[720px] justify-center px-4 py-4">

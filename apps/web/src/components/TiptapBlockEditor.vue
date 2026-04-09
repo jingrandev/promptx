@@ -874,7 +874,7 @@ defineExpose({
 
 <template>
   <section
-    class="panel relative flex h-full min-h-0 flex-col overflow-hidden"
+    class="workbench-input-shell panel relative flex h-full min-h-0 flex-col overflow-hidden"
     data-promptx-editor="tiptap"
     @drop="handleSurfaceDrop"
     @dragover.prevent

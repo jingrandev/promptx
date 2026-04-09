@@ -1,6 +1,6 @@
 <script setup>
 import { computed } from 'vue'
-import { ChevronDown, FileText, Trash2 } from 'lucide-vue-next'
+import { ChevronDown, FileText, FileText as FileTextIcon, Trash2 } from 'lucide-vue-next'
 import { NodeViewContent, NodeViewWrapper, nodeViewProps } from '@tiptap/vue-3'
 import { useI18n } from '../composables/useI18n.js'
 import TiptapSpecialBlockFrame from './TiptapSpecialBlockFrame.vue'
@@ -16,11 +16,17 @@ const props = defineProps(nodeViewProps)
 const { t } = useI18n()
 
 const importedText = computed(() => tiptapInlineContentToText(props.node?.content || []))
+const fileNameText = computed(() => String(props.node?.attrs?.fileName || t('blockEditor.unnamedFile')))
 
 const statsText = computed(() => {
   const stats = getImportedStats(importedText.value)
   return t('blockEditor.stats', stats)
 })
+
+const fileSummaryText = computed(() => t('blockEditor.fileSummary', {
+  name: fileNameText.value,
+  stats: statsText.value,
+}))
 
 const previewState = computed(() => {
   const sourceText = String(importedText.value || '').replace(/\r\n/g, '\n')
@@ -51,7 +57,7 @@ const previewState = computed(() => {
   }
 })
 
-const compactButtonClass = 'tool-button inline-flex min-w-0 items-center justify-center gap-1 px-1.5 py-1 text-[11px] sm:justify-start sm:gap-1.5 sm:px-2 sm:text-xs'
+const compactButtonClass = 'tool-button inline-flex min-w-0 items-center justify-center gap-1 whitespace-nowrap px-2 py-1 text-[11px]'
 const compactDangerButtonClass = `${compactButtonClass} tool-button-danger-subtle`
 
 function handleToggleKeydown(event) {
@@ -101,42 +107,59 @@ function removeNode() {
   <NodeViewWrapper class="group relative" data-promptx-node="imported_text">
     <TiptapSpecialBlockFrame
       :selected="selected"
-      :actions-attributes="{ 'data-promptx-imported-actions': '' }"
       frame-class="dashed-panel"
       header-class="theme-secondary-text border-dashed"
-      actions-layout-class="grid w-full shrink-0 grid-cols-3 gap-1.5 sm:flex sm:w-auto sm:grid-cols-none sm:flex-row sm:flex-wrap sm:justify-end sm:gap-2"
+      header-padding-class="px-3 py-2"
     >
-      <template #meta>
+      <template #header="{ actionsStateClass }">
         <div
-          class="cursor-pointer"
+          class="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-x-3 gap-y-1.5"
           data-promptx-imported-meta
-          role="button"
-          tabindex="0"
-          :aria-expanded="String(!node.attrs?.collapsed)"
-          @click="toggleCollapsed"
-          @keydown="handleToggleKeydown"
         >
-          <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <p class="theme-heading font-medium">{{ t('blockEditor.importedFile') }}</p>
-            <p class="theme-muted-text text-[11px] leading-4">{{ statsText }}</p>
+          <div
+            class="min-w-0 cursor-pointer"
+            role="button"
+            tabindex="0"
+            :aria-expanded="String(!node.attrs?.collapsed)"
+            @click="toggleCollapsed"
+            @keydown="handleToggleKeydown"
+          >
+            <p class="theme-heading inline-flex items-center gap-1.5 text-xs font-medium leading-5">
+              <FileTextIcon class="h-3.5 w-3.5 shrink-0" />
+              {{ t('blockEditor.file') }}
+            </p>
           </div>
-          <p class="mt-1 break-all font-mono leading-5 sm:truncate">{{ node.attrs?.fileName || t('blockEditor.unnamedFile') }}</p>
-        </div>
-      </template>
 
-      <template #actions>
-        <button type="button" :class="compactButtonClass" contenteditable="false" @click="toggleCollapsed">
-          <ChevronDown class="h-3 w-3 shrink-0 sm:h-3.5 sm:w-3.5" :class="node.attrs?.collapsed ? 'rotate-180' : ''" />
-          <span>{{ node.attrs?.collapsed ? t('blockEditor.expand') : t('blockEditor.collapse') }}</span>
-        </button>
-        <button type="button" :class="compactButtonClass" contenteditable="false" @click="convertToTextBlock">
-          <FileText class="h-3 w-3 shrink-0 sm:h-3.5 sm:w-3.5" />
-          <span>{{ t('blockEditor.convertToText') }}</span>
-        </button>
-        <button type="button" :class="compactDangerButtonClass" contenteditable="false" @click="removeNode">
-          <Trash2 class="h-3 w-3 shrink-0 sm:h-3.5 sm:w-3.5" />
-          <span>{{ t('blockEditor.delete') }}</span>
-        </button>
+          <div
+            data-promptx-imported-actions
+            class="col-start-2 row-start-1 flex shrink-0 flex-wrap items-center justify-end gap-1 self-start transition"
+            :class="actionsStateClass"
+          >
+            <button type="button" :class="compactButtonClass" contenteditable="false" @click="toggleCollapsed">
+              <ChevronDown class="h-3 w-3 shrink-0 sm:h-3.5 sm:w-3.5" :class="node.attrs?.collapsed ? 'rotate-180' : ''" />
+              <span>{{ node.attrs?.collapsed ? t('blockEditor.expand') : t('blockEditor.collapse') }}</span>
+            </button>
+            <button type="button" :class="compactButtonClass" contenteditable="false" @click="convertToTextBlock">
+              <FileText class="h-3 w-3 shrink-0 sm:h-3.5 sm:w-3.5" />
+              <span>{{ t('blockEditor.convertToText') }}</span>
+            </button>
+            <button type="button" :class="compactDangerButtonClass" contenteditable="false" @click="removeNode">
+              <Trash2 class="h-3 w-3 shrink-0 sm:h-3.5 sm:w-3.5" />
+              <span>{{ t('blockEditor.delete') }}</span>
+            </button>
+          </div>
+
+          <div
+            class="col-span-2 min-w-0 cursor-pointer"
+            role="button"
+            tabindex="0"
+            :aria-expanded="String(!node.attrs?.collapsed)"
+            @click="toggleCollapsed"
+            @keydown="handleToggleKeydown"
+          >
+            <p class="mt-0.5 break-all text-[11px] leading-4 text-[var(--theme-textSecondary)]">{{ fileSummaryText }}</p>
+          </div>
+        </div>
       </template>
 
       <div

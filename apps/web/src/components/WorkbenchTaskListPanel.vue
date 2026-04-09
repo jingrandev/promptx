@@ -2,7 +2,7 @@
 import { Blocks, CircleAlert, Clock3, GripVertical, PencilLine, Plus, Settings2, Trash2 } from 'lucide-vue-next'
 import { ref, watch } from 'vue'
 import { VueDraggable } from 'vue-draggable-plus'
-import { formatDate, formatDateTime, useI18n } from '../composables/useI18n.js'
+import { formatDateTime, useI18n } from '../composables/useI18n.js'
 
 const props = defineProps({
   loadingTasks: {
@@ -83,13 +83,6 @@ watch(
   { immediate: true }
 )
 
-function shouldEnableDrag(task) {
-  return !props.mobile
-    && Boolean(task?.slug)
-    && task.slug !== props.editingTaskTitleSlug
-    && props.tasks.length > 1
-}
-
 function getTaskCardClass(task) {
   if (task.slug === props.currentTaskSlug) {
     return 'workbench-task-card--active theme-card-selected'
@@ -112,28 +105,18 @@ function formatTaskUpdatedAt(task) {
     return ''
   }
 
-  return props.mobile
-    ? formatDate(value.toISOString())
-    : formatDateTime(value.toISOString(), {
-      year: 'numeric',
-      month: 'numeric',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-    })
+  return formatDateTime(value.toISOString(), {
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  })
 }
 
 function shouldShowWorkspaceBadge(task) {
-  if (!task?.workspaceDiffSummary?.supported || !task?.workspaceDiffSummary?.fileCount) {
-    return false
-  }
-
-  if (!props.mobile) {
-    return true
-  }
-
-  return task.slug === props.currentTaskSlug || Boolean(task.sending)
+  return Boolean(task?.workspaceDiffSummary?.supported && task?.workspaceDiffSummary?.fileCount)
 }
 
 function getTaskWorkspaceBadgeClass(task) {
@@ -159,8 +142,8 @@ function handleDragEnd(event) {
 </script>
 
 <template>
-  <aside class="panel flex h-full min-h-0 flex-col overflow-hidden">
-    <div class="workbench-panel-header theme-divider border-b px-4 py-4" :class="mobile ? 'workbench-mobile-header px-3 py-3' : ''">
+  <aside class="workbench-sidebar-panel panel flex h-full min-h-0 flex-col overflow-hidden">
+    <div class="workbench-panel-header theme-divider border-b px-4 py-4">
       <div class="flex items-center justify-between gap-3">
         <div class="flex min-h-8 items-center">
           <div class="theme-heading inline-flex items-center gap-2 text-sm font-medium">
@@ -199,7 +182,6 @@ function handleDragEnd(event) {
         v-else
         v-model="localTasks"
         class="space-y-2"
-        :class="mobile ? 'space-y-1.5' : ''"
         :animation="180"
         :disabled="mobile || tasks.length <= 1"
         handle=".task-drag-handle"
@@ -213,7 +195,7 @@ function handleDragEnd(event) {
           v-for="task in localTasks"
           :key="task.slug"
           class="workbench-task-card group relative cursor-default rounded-sm border px-3 py-3 transition"
-          :class="[getTaskCardClass(task), mobile ? 'workbench-task-card--mobile px-3 py-2.5' : '']"
+          :class="getTaskCardClass(task)"
           @click="emit('select-task', task.slug)"
         >
           <span
@@ -223,9 +205,9 @@ function handleDragEnd(event) {
           <div class="flex items-start justify-between gap-3">
             <div class="flex min-w-0 flex-1 items-start gap-2 overflow-hidden">
               <button
-                v-if="!mobile"
                 type="button"
-                class="task-drag-handle mt-0.5 inline-flex h-4 w-4 shrink-0 cursor-grab items-center justify-center rounded-sm opacity-45 transition hover:opacity-80 active:cursor-grabbing"
+                class="task-drag-handle mt-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-sm opacity-45 transition hover:opacity-80"
+                :class="mobile ? 'pointer-events-none cursor-default' : 'cursor-grab active:cursor-grabbing'"
                 :title="t('workbench.dragToReorder')"
                 :aria-label="t('workbench.dragToReorder')"
                 tabindex="-1"
@@ -268,7 +250,7 @@ function handleDragEnd(event) {
               <span
                 v-if="task.sending"
                 class="inline-flex items-center gap-1.5 rounded-sm border border-dashed px-1.5 py-0.5"
-                :class="[getTaskRunningBadgeClass(), mobile ? 'text-[9px] tracking-[0.14em]' : '']"
+                :class="getTaskRunningBadgeClass()"
               >
                 <span class="task-loading-dots" aria-hidden="true">
                   <span class="task-loading-dots__dot"></span>
@@ -279,14 +261,14 @@ function handleDragEnd(event) {
               </span>
             </div>
           </div>
-          <div class="workbench-task-card__preview mt-2 truncate text-xs opacity-80" :class="mobile ? 'mt-1.5 text-[11px]' : ''">{{ task.lastPromptPreview || t('workbench.noMessagesYet') }}</div>
-          <div class="mt-2 flex items-center justify-between gap-3" :class="mobile ? 'mt-1.5' : ''">
-            <div class="min-w-0 text-[11px] opacity-70" :class="mobile ? 'text-[10px] opacity-60' : ''">{{ formatTaskUpdatedAt(task) }}</div>
-            <div class="flex shrink-0 items-center gap-1.5 text-[10px] uppercase tracking-[0.18em] opacity-80" :class="mobile ? 'tracking-[0.12em]' : ''">
+          <div class="workbench-task-card__preview mt-2 truncate text-xs opacity-80">{{ task.lastPromptPreview || t('workbench.noMessagesYet') }}</div>
+          <div class="mt-2 flex items-center justify-between gap-3">
+            <div class="min-w-0 text-[11px] opacity-70">{{ formatTaskUpdatedAt(task) }}</div>
+            <div class="flex shrink-0 items-center gap-1.5 text-[10px] uppercase tracking-[0.18em] opacity-80">
               <span
                 v-if="shouldShowWorkspaceBadge(task)"
                 class="inline-flex items-center gap-1 rounded-sm border border-dashed px-1.5 py-0.5"
-                :class="[getTaskWorkspaceBadgeClass(task), mobile ? 'text-[9px]' : '']"
+                :class="getTaskWorkspaceBadgeClass(task)"
               >
                 <span>{{ t('workbench.filesCount', { count: task.workspaceDiffSummary?.fileCount || 0 }) }}</span>
               </span>

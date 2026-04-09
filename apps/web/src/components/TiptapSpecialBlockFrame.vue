@@ -2,17 +2,13 @@
 import { computed } from 'vue'
 
 const props = defineProps({
-  actionsAttributes: {
-    type: Object,
-    default: () => ({}),
-  },
-  actionsLayoutClass: {
-    type: String,
-    default: 'flex w-full shrink-0 items-center justify-start sm:w-auto sm:justify-end',
-  },
   frameClass: {
     type: String,
     default: '',
+  },
+  headerPaddingClass: {
+    type: String,
+    default: 'px-4 py-3',
   },
   headerClass: {
     type: String,
@@ -42,20 +38,8 @@ const actionsStateClass = computed(() => (
     class="overflow-hidden rounded-sm transition"
     :class="[frameClass, frameStateClass]"
   >
-    <div class="theme-divider border-b px-4 py-3 text-xs" :class="headerClass">
-      <div class="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div class="min-w-0 flex-1">
-          <slot name="meta" />
-        </div>
-
-        <div
-          v-bind="actionsAttributes"
-          class="transition"
-          :class="[actionsLayoutClass, actionsStateClass]"
-        >
-          <slot name="actions" />
-        </div>
-      </div>
+    <div class="theme-divider border-b text-xs" :class="[headerPaddingClass, headerClass]">
+      <slot name="header" :actions-state-class="actionsStateClass" />
     </div>
 
     <slot />

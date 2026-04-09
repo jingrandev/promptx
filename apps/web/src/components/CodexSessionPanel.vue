@@ -295,7 +295,7 @@ defineExpose({
 </script>
 
 <template>
-  <section class="panel relative flex h-full min-h-0 flex-col overflow-hidden">
+  <section class="workbench-activity-shell panel relative flex h-full min-h-0 flex-col overflow-hidden">
     <CodexSessionManagerDialog
       :open="showManager"
       :sessions="sessions"
@@ -375,7 +375,7 @@ defineExpose({
     <div class="min-h-0 flex-1">
       <div
         ref="transcriptRef"
-        class="h-full space-y-4 overflow-y-auto px-4 py-4"
+        class="workbench-transcript h-full space-y-4 overflow-y-auto px-4 py-4"
         @scroll="handleTranscriptScroll"
         @touchstart.passive="handleTranscriptTouchStart"
         @touchmove.passive="handleTranscriptTouchMove"
@@ -499,8 +499,6 @@ defineExpose({
                 v-if="hasTurnSummary(turn)"
                 class="transcript-card__subtle mt-3 rounded-sm bg-[var(--theme-appPanelStrong)] px-3 py-2 text-xs text-current"
               >
-                <div class="flex items-start justify-between gap-3">
-                  <div class="min-w-0 flex-1">
                 <div v-if="getTurnSummaryStatus(turn)" class="leading-5">
                   {{ getTurnSummaryStatus(turn) }}
                 </div>
@@ -516,17 +514,6 @@ defineExpose({
                     <span>{{ item.label }}</span>
                     <span class="font-medium">{{ item.value }}</span>
                   </span>
-                </div>
-                  </div>
-                  <button
-                    v-if="diffSupported && turn.runId"
-                    type="button"
-                    class="transcript-card__toggle shrink-0 inline-flex items-center gap-1 rounded-sm px-2 py-1 text-[11px] transition hover:bg-[var(--theme-appPanelStrong)]"
-                    @click="openTurnDiff(turn)"
-                  >
-                    <FileDiff class="h-3 w-3" />
-                    <span>{{ t('sessionPanel.view') }}</span>
-                  </button>
                 </div>
               </div>
             </div>
@@ -551,6 +538,15 @@ defineExpose({
                     <ChevronDown v-if="isResponseCollapsed(turn)" class="h-3 w-3" />
                     <ChevronUp v-else class="h-3 w-3" />
                     <span>{{ isResponseCollapsed(turn) ? t('sessionPanel.expand') : t('sessionPanel.collapse') }}</span>
+                  </button>
+                  <button
+                    v-if="diffSupported && turn.runId"
+                    type="button"
+                    class="transcript-card__toggle inline-flex items-center gap-1 rounded-sm px-2 py-1 text-[11px] transition hover:bg-[var(--theme-appPanelStrong)]"
+                    @click="openTurnDiff(turn)"
+                  >
+                    <FileDiff class="h-3 w-3" />
+                    <span>{{ t('sessionPanel.view') }}</span>
                   </button>
                   <span>{{ formatTurnTime(turn.finishedAt || turn.startedAt) }}</span>
                 </div>

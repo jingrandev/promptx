@@ -68,7 +68,7 @@ function formatCreatedAt(value = '') {
   <DialogShell
     :open="open"
     backdrop-class="z-[70] items-end justify-center px-0 py-0 sm:items-center sm:px-4 sm:py-6"
-    panel-class="h-full max-w-3xl sm:h-[40rem] sm:max-h-[86vh]"
+    panel-class="settings-dialog-panel max-w-3xl sm:h-[40rem] sm:max-h-[86vh]"
     header-class="px-5 py-4"
     body-class="min-h-0 flex flex-1 flex-col overflow-hidden"
     @close="emit('close')"
@@ -99,7 +99,7 @@ function formatCreatedAt(value = '') {
               :key="item.id"
               class="theme-card-idle-muted rounded-sm border border-dashed p-4"
             >
-              <div class="flex flex-wrap items-start justify-between gap-3">
+              <div class="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between">
                 <div class="min-w-0 flex-1">
                   <div class="theme-heading flex flex-wrap items-center gap-2 text-sm font-medium">
                     <span>{{ t('todoDialog.itemTitle') }}</span>
@@ -139,10 +139,10 @@ function formatCreatedAt(value = '') {
                   </div>
                 </div>
 
-                <div class="flex shrink-0 items-center gap-2">
+                <div class="flex w-full items-center gap-2 sm:w-auto sm:shrink-0">
                   <button
                     type="button"
-                    class="tool-button inline-flex items-center gap-2 px-3 py-2 text-xs"
+                    class="tool-button inline-flex flex-1 items-center justify-center gap-2 px-3 py-2 text-xs sm:flex-none"
                     @click="emit('use', item.id)"
                   >
                     <ArrowUpLeft class="h-4 w-4" />
@@ -150,7 +150,7 @@ function formatCreatedAt(value = '') {
                   </button>
                   <button
                     type="button"
-                    class="tool-button tool-button-danger-subtle inline-flex items-center gap-2 px-3 py-2 text-xs"
+                    class="tool-button tool-button-danger-subtle inline-flex flex-1 items-center justify-center gap-2 px-3 py-2 text-xs sm:flex-none"
                     @click="emit('delete', item.id)"
                   >
                     <Trash2 class="h-4 w-4" />

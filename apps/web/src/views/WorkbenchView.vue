@@ -627,13 +627,13 @@ const mobileDetailHeaderListeners = {
       @saved="handleTaskSettingsSaved"
     />
 
-    <div v-if="!isMobileLayout" class="grid min-h-0 flex-1 gap-4 lg:grid-cols-[260px_minmax(0,1fr)] lg:grid-rows-1">
+    <div v-if="!isMobileLayout" class="workbench-desktop-layout grid min-h-0 flex-1 gap-4 lg:grid-cols-[260px_minmax(0,1fr)] lg:grid-rows-1">
       <WorkbenchTaskListPanel
         v-bind="taskListPanelProps"
         v-on="taskListPanelListeners"
       />
 
-      <div class="grid min-h-0 gap-4 overflow-hidden lg:grid-cols-2 lg:grid-rows-1">
+      <div class="workbench-detail-layout grid min-h-0 gap-4 overflow-hidden lg:grid-cols-2 lg:grid-rows-1">
         <div class="min-h-0 min-w-0 overflow-hidden">
           <WorkbenchActivityPanel
             v-if="currentRenderedTask"
@@ -662,7 +662,7 @@ const mobileDetailHeaderListeners = {
         v-on="taskListPanelListeners"
       />
 
-      <div v-else class="flex h-full min-h-0 flex-col gap-1.5 overflow-hidden">
+      <div v-else class="workbench-mobile-detail-layout flex h-full min-h-0 flex-col gap-1.5 overflow-hidden">
         <WorkbenchMobileDetailHeader
           v-bind="mobileDetailHeaderProps"
           v-on="mobileDetailHeaderListeners"
