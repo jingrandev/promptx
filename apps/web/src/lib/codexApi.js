@@ -126,6 +126,28 @@ export function searchCodexSessionFiles(sessionId, query, options = {}) {
   })
 }
 
+export function getCodexSessionFileContent(sessionId, options = {}) {
+  const params = new URLSearchParams()
+  const targetPath = String(options.path || '').trim()
+  const limit = Number(options.limit || 0)
+  const refreshToken = String(options.refreshToken || '').trim()
+
+  if (targetPath) {
+    params.set('path', targetPath)
+  }
+  if (Number.isFinite(limit) && limit > 0) {
+    params.set('limit', String(limit))
+  }
+  if (refreshToken) {
+    params.set('_', refreshToken)
+  }
+
+  const query = params.toString()
+  return request(`/api/codex/sessions/${encodeURIComponent(sessionId)}/files/content${query ? `?${query}` : ''}`, {
+    cache: 'no-store',
+  })
+}
+
 export function updateTaskCodexSession(taskSlug, sessionId) {
   return request(`/api/tasks/${encodeURIComponent(taskSlug)}/codex-session`, {
     method: 'POST',

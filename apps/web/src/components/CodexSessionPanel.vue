@@ -1,5 +1,5 @@
 <script setup>
-import { computed, defineAsyncComponent, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, ref } from 'vue'
 import {
   ArrowDown,
   ChevronDown,
@@ -16,9 +16,11 @@ import CodexSessionSelect from './CodexSessionSelect.vue'
 import ImagePreviewOverlay from './ImagePreviewOverlay.vue'
 import ProcessDetailRenderer from './ProcessDetailRenderer.vue'
 import { useI18n } from '../composables/useI18n.js'
+import { useAsyncRenderedMarkdown } from '../composables/useAsyncRenderedMarkdown.js'
 import { useCodexSessionPanel } from '../composables/useCodexSessionPanel.js'
 import { useCodexTranscriptCollapse } from '../composables/useCodexTranscriptCollapse.js'
-import { renderCodexMarkdown } from '../lib/codexMarkdown.js'
+import { useTheme } from '../composables/useTheme.js'
+import { renderCodexMarkdown, renderPlainCodexMarkdown } from '../lib/codexMarkdown.js'
 import { aggregateProcessEvents } from '../lib/processEventGrouping.js'
 
 const CodexSessionManagerDialog = defineAsyncComponent(() => import('./CodexSessionManagerDialog.vue'))
@@ -123,9 +125,10 @@ const {
 } = useCodexSessionPanel(props, emit)
 
 const COLLAPSED_PREVIEW_CLASS = 'max-h-40 overflow-hidden'
-const renderedResponseCache = new Map()
 const previewPromptImageUrl = ref('')
 const { t } = useI18n()
+const { isDark } = useTheme()
+const responseThemeKey = computed(() => (isDark.value ? 'dark' : 'light'))
 
 function shouldHideSystemEvent(item = {}) {
   if (item?.kind === 'reasoning') {
@@ -198,29 +201,17 @@ function openTaskDiff() {
   })
 }
 
-function renderResponseBody(turn) {
-  if (turn?.errorMessage) {
-    return ''
-  }
-
-  const responseMessage = String(turn?.responseMessage || '')
-  const cacheKey = getResponseCacheKey(turn)
-  if (!cacheKey) {
-    return renderCodexMarkdown(responseMessage)
-  }
-
-  const cached = renderedResponseCache.get(cacheKey)
-  if (cached?.source === responseMessage) {
-    return cached.html
-  }
-
-  const html = renderCodexMarkdown(responseMessage)
-  renderedResponseCache.set(cacheKey, {
-    source: responseMessage,
-    html,
-  })
-  return html
-}
+const { getRenderedHtml: renderResponseBody } = useAsyncRenderedMarkdown({
+  items: turns,
+  themeKey: responseThemeKey,
+  getCacheKey: getResponseCacheKey,
+  getSource: (turn) => String(turn?.responseMessage || ''),
+  shouldRender: (turn) => Boolean(turn?.responseMessage) && !turn?.errorMessage,
+  renderAsync: (source) => renderCodexMarkdown(source, {
+    isDark: isDark.value,
+  }),
+  renderFallback: (source) => renderPlainCodexMarkdown(source),
+})
 
 function openPromptImage(url) {
   previewPromptImageUrl.value = String(url || '').trim()
@@ -269,19 +260,6 @@ function shouldShowDeferredEventHint(turn) {
 function getEventCardClass(item = {}) {
   return 'bg-[var(--theme-appPanelStrong)]'
 }
-
-watch(
-  turns,
-  (nextTurns) => {
-    const validResponseCacheKeys = new Set((nextTurns || []).map((turn) => getResponseCacheKey(turn)).filter(Boolean))
-    for (const key of renderedResponseCache.keys()) {
-      if (!validResponseCacheKeys.has(key)) {
-        renderedResponseCache.delete(key)
-      }
-    }
-  },
-  { immediate: true, deep: true }
-)
 
 defineExpose({
   send: handleSend,
@@ -371,7 +349,7 @@ defineExpose({
     <div class="min-h-0 flex-1">
       <div
         ref="transcriptRef"
-        class="workbench-transcript flex h-full flex-col gap-3 overflow-y-auto px-4 py-4"
+        class="workbench-transcript flex h-full flex-col gap-3 overflow-x-hidden overflow-y-auto px-4 py-4"
         @scroll="handleTranscriptScroll"
         @touchstart.passive="handleTranscriptTouchStart"
         @touchmove.passive="handleTranscriptTouchMove"
@@ -385,7 +363,7 @@ defineExpose({
           {{ t('sessionPanel.empty') }}
         </div>
 
-        <div v-for="turn in turns" :key="turn.id" class="flex flex-col gap-3">
+        <div v-for="turn in turns" :key="turn.id" class="flex min-w-0 flex-col gap-3">
           <div class="flex justify-end">
             <div class="transcript-card transcript-card--prompt min-w-0 w-full rounded-sm bg-[var(--theme-promptBg)] px-4 py-3 font-mono text-sm text-[var(--theme-promptText)]">
               <div class="flex items-center justify-between gap-3 text-xs opacity-75 font-sans">
@@ -442,7 +420,7 @@ defineExpose({
             </div>
           </div>
 
-          <div v-if="showProcessLogs" class="flex justify-start">
+          <div v-if="showProcessLogs" class="flex min-w-0 justify-start">
             <div class="transcript-card transcript-card--process min-w-0 w-full rounded-sm px-4 py-3" :class="getProcessCardClass(turn)">
               <div class="flex items-center justify-between gap-3 text-xs">
                 <span class="font-semibold">{{ t('sessionPanel.processTitle') }}</span>
@@ -465,11 +443,11 @@ defineExpose({
               <div v-if="shouldShowEventLoading(turn)" class="transcript-card__subtle mt-2 rounded-sm bg-[var(--theme-appPanelStrong)] px-3 py-2 text-xs text-current">
                 {{ t('sessionPanel.loadingEvents') }}
               </div>
-              <div v-else-if="shouldShowLoadedEvents(turn)" class="mt-2 space-y-2">
+              <div v-else-if="shouldShowLoadedEvents(turn)" class="mt-2 min-w-0 space-y-2">
                 <div
                   v-for="item in getVisibleTurnEvents(turn)"
                   :key="item.id"
-                  class="transcript-event-card rounded-sm px-3 py-2"
+                  class="transcript-event-card min-w-0 rounded-sm px-3 py-2"
                   :class="getEventCardClass(item)"
                 >
                   <div class="text-sm font-medium leading-6">{{ item.title }}</div>

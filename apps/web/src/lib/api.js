@@ -29,6 +29,7 @@ export {
   createTaskCodexRun,
   createCodexSession,
   deleteCodexSession,
+  getCodexSessionFileContent,
   getTaskGitDiff,
   listCodexRunEvents,
   listCodexDirectoryTree,

@@ -3,7 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { createApiError } from './apiErrors.js'
 
-const IGNORED_DIRECTORY_NAMES = new Set([
+const WORKSPACE_HIDDEN_DIRECTORY_NAMES = new Set([
   '.git',
   '.hg',
   '.svn',
@@ -13,6 +13,10 @@ const IGNORED_DIRECTORY_NAMES = new Set([
   '.turbo',
   '.cache',
   'node_modules',
+])
+
+const DIRECTORY_PICKER_IGNORED_DIRECTORY_NAMES = new Set([
+  ...WORKSPACE_HIDDEN_DIRECTORY_NAMES,
   'dist',
   'build',
   'coverage',
@@ -35,6 +39,88 @@ const DEFAULT_TREE_LIMIT = 200
 const DEFAULT_SEARCH_LIMIT = 80
 const MAX_SEARCH_VISITS = 20000
 const DIRECTORY_PICKER_LIMIT = 240
+const DEFAULT_FILE_PREVIEW_LIMIT = 200 * 1024
+const MAX_IMAGE_PREVIEW_BYTES = 2 * 1024 * 1024
+
+const TEXT_FILE_EXTENSIONS = new Set([
+  '.c',
+  '.cc',
+  '.conf',
+  '.cpp',
+  '.css',
+  '.csv',
+  '.env',
+  '.gitignore',
+  '.go',
+  '.graphql',
+  '.h',
+  '.html',
+  '.ini',
+  '.java',
+  '.js',
+  '.json',
+  '.jsx',
+  '.log',
+  '.md',
+  '.mjs',
+  '.py',
+  '.rb',
+  '.rs',
+  '.sh',
+  '.sql',
+  '.svg',
+  '.toml',
+  '.ts',
+  '.tsx',
+  '.txt',
+  '.vue',
+  '.xml',
+  '.yaml',
+  '.yml',
+])
+
+const IMAGE_MIME_TYPES = new Map([
+  ['.avif', 'image/avif'],
+  ['.bmp', 'image/bmp'],
+  ['.gif', 'image/gif'],
+  ['.ico', 'image/x-icon'],
+  ['.jpeg', 'image/jpeg'],
+  ['.jpg', 'image/jpeg'],
+  ['.png', 'image/png'],
+  ['.webp', 'image/webp'],
+])
+
+const LANGUAGE_BY_EXTENSION = new Map([
+  ['.bash', 'bash'],
+  ['.bat', 'bash'],
+  ['.c', 'c'],
+  ['.cc', 'cpp'],
+  ['.cpp', 'cpp'],
+  ['.css', 'css'],
+  ['.diff', 'diff'],
+  ['.go', 'go'],
+  ['.h', 'c'],
+  ['.html', 'html'],
+  ['.java', 'java'],
+  ['.js', 'javascript'],
+  ['.json', 'json'],
+  ['.jsx', 'react'],
+  ['.md', 'markdown'],
+  ['.mjs', 'javascript'],
+  ['.py', 'python'],
+  ['.rs', 'rust'],
+  ['.sh', 'bash'],
+  ['.sql', 'sql'],
+  ['.svg', 'svg'],
+  ['.ts', 'typescript'],
+  ['.tsx', 'react'],
+  ['.txt', 'text'],
+  ['.vue', 'vue'],
+  ['.xml', 'xml'],
+  ['.yaml', 'yaml'],
+  ['.yml', 'yaml'],
+  ['Dockerfile', 'dockerfile'],
+])
 
 function createHttpError(message, statusCode = 400) {
   return createApiError('', message, statusCode)
@@ -118,7 +204,7 @@ function getPathType(absolutePath = '') {
 }
 
 function shouldIgnoreDirectory(entry) {
-  return entry?.isDirectory?.() && IGNORED_DIRECTORY_NAMES.has(entry.name)
+  return entry?.isDirectory?.() && WORKSPACE_HIDDEN_DIRECTORY_NAMES.has(entry.name)
 }
 
 function shouldIgnorePickerDirectory(entry) {
@@ -132,7 +218,7 @@ function shouldIgnorePickerDirectory(entry) {
   }
 
   return name.startsWith('.')
-    || IGNORED_DIRECTORY_NAMES.has(name)
+    || DIRECTORY_PICKER_IGNORED_DIRECTORY_NAMES.has(name)
     || DIRECTORY_PICKER_HIDDEN_NAMES.has(name)
 }
 
@@ -242,6 +328,60 @@ function clampLimit(value, fallback, max) {
   }
 
   return Math.min(Math.floor(normalized), max)
+}
+
+function readFileSlice(absolutePath = '', length = 0) {
+  const fileHandle = fs.openSync(absolutePath, 'r')
+
+  try {
+    const buffer = Buffer.alloc(Math.max(0, length))
+    const bytesRead = fs.readSync(fileHandle, buffer, 0, buffer.length, 0)
+    return buffer.subarray(0, bytesRead)
+  } finally {
+    fs.closeSync(fileHandle)
+  }
+}
+
+function isLikelyBinaryBuffer(buffer) {
+  if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
+    return false
+  }
+
+  const sample = buffer.subarray(0, Math.min(buffer.length, 8000))
+  let suspiciousBytes = 0
+
+  for (const byte of sample) {
+    if (byte === 0) {
+      return true
+    }
+
+    const isControlChar = byte < 32 && byte !== 9 && byte !== 10 && byte !== 13
+    if (isControlChar) {
+      suspiciousBytes += 1
+    }
+  }
+
+  return (suspiciousBytes / sample.length) > 0.1
+}
+
+function getFileLanguage(relativePath = '', absolutePath = '') {
+  const relativeName = path.basename(String(relativePath || '').trim())
+  const absoluteName = path.basename(String(absolutePath || '').trim())
+
+  if (LANGUAGE_BY_EXTENSION.has(relativeName)) {
+    return LANGUAGE_BY_EXTENSION.get(relativeName)
+  }
+  if (LANGUAGE_BY_EXTENSION.has(absoluteName)) {
+    return LANGUAGE_BY_EXTENSION.get(absoluteName)
+  }
+
+  const extension = path.extname(relativeName || absoluteName).toLowerCase()
+  return LANGUAGE_BY_EXTENSION.get(extension) || ''
+}
+
+function getImageMimeType(relativePath = '', absolutePath = '') {
+  const extension = path.extname(String(relativePath || absolutePath || '')).toLowerCase()
+  return IMAGE_MIME_TYPES.get(extension) || ''
 }
 
 function removeExtension(value = '') {
@@ -536,6 +676,77 @@ export function searchWorkspaceEntries(workspacePath, options = {}) {
     query,
     items: matches.slice(0, limit).map(({ score, ...item }) => item),
     truncated: truncated || matches.length > limit,
+  }
+}
+
+export function readWorkspaceFileContent(workspacePath, options = {}) {
+  const target = resolveWorkspaceTarget(workspacePath, options.path)
+  const previewLimit = clampLimit(options.limit, DEFAULT_FILE_PREVIEW_LIMIT, DEFAULT_FILE_PREVIEW_LIMIT)
+  const fileName = path.basename(target.absolutePath)
+
+  let stats
+  try {
+    stats = fs.statSync(target.absolutePath)
+  } catch {
+    throw createApiError('errors.fileNotFound', '文件不存在。', 404)
+  }
+
+  if (!stats.isFile()) {
+    throw createApiError('errors.fileOnly', '只能读取文件内容。')
+  }
+
+  const language = getFileLanguage(target.relativePath, target.absolutePath)
+  const imageMimeType = getImageMimeType(target.relativePath, target.absolutePath)
+  const basePayload = {
+    cwd: target.root,
+    name: fileName,
+    path: target.relativePath,
+    type: 'file',
+    language,
+    size: stats.size,
+    binary: false,
+    truncated: false,
+    tooLarge: false,
+    content: '',
+    mimeType: imageMimeType || '',
+    previewUrl: '',
+  }
+
+  if (imageMimeType) {
+    if (stats.size > MAX_IMAGE_PREVIEW_BYTES) {
+      return {
+        ...basePayload,
+        binary: true,
+        tooLarge: true,
+      }
+    }
+
+    const buffer = fs.readFileSync(target.absolutePath)
+    return {
+      ...basePayload,
+      binary: true,
+      previewUrl: `data:${imageMimeType};base64,${buffer.toString('base64')}`,
+    }
+  }
+
+  const sliceLength = Math.min(stats.size, previewLimit)
+  const buffer = readFileSlice(target.absolutePath, sliceLength)
+  const extension = path.extname(fileName).toLowerCase()
+  const isKnownTextFile = TEXT_FILE_EXTENSIONS.has(extension)
+  const binary = !isKnownTextFile && isLikelyBinaryBuffer(buffer)
+
+  if (binary) {
+    return {
+      ...basePayload,
+      binary: true,
+    }
+  }
+
+  return {
+    ...basePayload,
+    content: buffer.toString('utf8').replace(/\r\n/g, '\n'),
+    truncated: stats.size > previewLimit,
+    tooLarge: stats.size > previewLimit,
   }
 }
 

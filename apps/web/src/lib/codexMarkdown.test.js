@@ -3,8 +3,8 @@ import test from 'node:test'
 
 import { renderCodexMarkdown, renderPlainCodexMarkdown } from './codexMarkdown.js'
 
-test('renderCodexMarkdown renders fenced code blocks and lists', () => {
-  const html = renderCodexMarkdown([
+test('renderCodexMarkdown renders fenced code blocks and lists', async () => {
+  const html = await renderCodexMarkdown([
     '# 标题',
     '',
     '- 一',
@@ -18,14 +18,15 @@ test('renderCodexMarkdown renders fenced code blocks and lists', () => {
   assert.match(html, /<ul>/)
   assert.match(html, /class="codex-code-block codex-code-block--labeled"/)
   assert.match(html, /class="codex-code-block__language">JavaScript</)
-  assert.match(html, /<pre class="hljs"><code class="hljs language-js">/)
-  assert.match(html, /hljs-variable[^>]*>console</)
-  assert.match(html, /hljs-title function_[^>]*>log</)
-  assert.match(html, /hljs-number[^>]*>1</)
+  assert.match(html, /<pre><code class="language-js">/)
+  assert.match(html, /style="color:[^"]+"/)
+  assert.match(html, />console\.</)
+  assert.match(html, />log</)
+  assert.match(html, />1</)
 })
 
-test('renderCodexMarkdown renders react language badge', () => {
-  const html = renderCodexMarkdown([
+test('renderCodexMarkdown renders react language badge', async () => {
+  const html = await renderCodexMarkdown([
     '```react',
     'export default function Hello() {',
     '  return <div>Hello</div>',
@@ -34,7 +35,33 @@ test('renderCodexMarkdown renders react language badge', () => {
   ].join('\n'))
 
   assert.match(html, /class="codex-code-block__language">React</)
-  assert.match(html, /<pre class="hljs"><code class="hljs language-react">/)
+  assert.match(html, /<pre><code class="language-react">/)
+})
+
+test('renderCodexMarkdown keeps multiple fenced blocks in order', async () => {
+  const html = await renderCodexMarkdown([
+    '```ts',
+    'const answer: number = 42',
+    '```',
+    '',
+    '| A | B |',
+    '| - | - |',
+    '| 1 | 2 |',
+    '',
+    '```sql',
+    'SELECT * FROM tasks;',
+    '```',
+  ].join('\n'))
+
+  const tsIndex = html.indexOf('language-ts')
+  const tableIndex = html.indexOf('<div class="codex-table-wrap">')
+  const sqlIndex = html.indexOf('language-sql')
+
+  assert.notEqual(tsIndex, -1)
+  assert.notEqual(tableIndex, -1)
+  assert.notEqual(sqlIndex, -1)
+  assert.equal(tsIndex < tableIndex, true)
+  assert.equal(tableIndex < sqlIndex, true)
 })
 
 test('renderPlainCodexMarkdown keeps fenced code plain', () => {
@@ -45,13 +72,12 @@ test('renderPlainCodexMarkdown keeps fenced code plain', () => {
   ].join('\n'))
 
   assert.doesNotMatch(html, /codex-code-block/)
-  assert.doesNotMatch(html, /hljs/)
   assert.match(html, /<pre><code class="language-js">/)
   assert.match(html, /console\.log\(1\)/)
 })
 
-test('renderCodexMarkdown escapes raw html and hardens links', () => {
-  const html = renderCodexMarkdown('<script>alert(1)</script>\n\n[link](https://example.com)')
+test('renderCodexMarkdown escapes raw html and hardens links', async () => {
+  const html = await renderCodexMarkdown('<script>alert(1)</script>\n\n[link](https://example.com)')
 
   assert.doesNotMatch(html, /<script>/)
   assert.match(html, /target="_blank"/)

@@ -47,7 +47,7 @@ const resolvedCancelText = computed(() => props.cancelText || t('common.cancel')
 <template>
   <DialogShell
     :open="open"
-    backdrop-class="z-[90] items-end justify-center px-0 py-0 sm:items-center sm:px-4 sm:py-6"
+    :stack-level="4"
     panel-class="max-w-md"
     header-class="px-5 py-4"
     body-class="flex flex-col"

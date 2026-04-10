@@ -67,7 +67,7 @@ function formatCreatedAt(value = '') {
 <template>
   <DialogShell
     :open="open"
-    backdrop-class="z-[70] items-end justify-center px-0 py-0 sm:items-center sm:px-4 sm:py-6"
+    :stack-level="2"
     panel-class="settings-dialog-panel max-w-3xl sm:h-[40rem] sm:max-h-[86vh]"
     header-class="px-5 py-4"
     body-class="min-h-0 flex flex-1 flex-col overflow-hidden"

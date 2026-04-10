@@ -269,6 +269,8 @@ body {
     text-decoration: underline;
     text-decoration-thickness: 1px;
     text-underline-offset: 4px;
+    overflow-wrap: anywhere;
+    word-break: break-word;
   }
 
   .codex-markdown {
@@ -417,56 +419,6 @@ body {
     word-break: normal;
   }
 
-  .codex-markdown .hljs {
-    color: var(--theme-textPrimary);
-    background: transparent;
-  }
-
-  .codex-markdown .hljs-comment,
-  .codex-markdown .hljs-quote {
-    color: var(--theme-textMuted);
-    font-style: italic;
-  }
-
-  .codex-markdown .hljs-keyword,
-  .codex-markdown .hljs-selector-tag,
-  .codex-markdown .hljs-literal,
-  .codex-markdown .hljs-type,
-  .codex-markdown .hljs-built_in {
-    color: var(--theme-accentText);
-  }
-
-  .codex-markdown .hljs-title,
-  .codex-markdown .hljs-title.class_,
-  .codex-markdown .hljs-title.function_,
-  .codex-markdown .hljs-function .hljs-title,
-  .codex-markdown .hljs-section {
-    color: var(--theme-primaryBg);
-  }
-
-  .codex-markdown .hljs-string,
-  .codex-markdown .hljs-regexp,
-  .codex-markdown .hljs-symbol,
-  .codex-markdown .hljs-attribute,
-  .codex-markdown .hljs-template-variable {
-    color: var(--theme-success);
-  }
-
-  .codex-markdown .hljs-number,
-  .codex-markdown .hljs-attr,
-  .codex-markdown .hljs-variable,
-  .codex-markdown .hljs-params,
-  .codex-markdown .hljs-bullet,
-  .codex-markdown .hljs-meta {
-    color: var(--theme-warningText);
-  }
-
-  .codex-markdown .hljs-subst,
-  .codex-markdown .hljs-punctuation,
-  .codex-markdown .hljs-operator {
-    color: var(--theme-textSecondary);
-  }
-
   .codex-table-wrap {
     width: 100%;
     margin: 0.85rem 0 0;
@@ -490,17 +442,48 @@ body {
     border: 1px dashed var(--theme-borderDefault);
     border-radius: var(--theme-processDetailRadius);
     background: var(--theme-appPanelStrong);
+    min-width: 0;
+    max-width: 100%;
     padding: 0.65rem 0.75rem;
   }
 
   .process-detail {
     font-size: 12px;
     line-height: 1.65;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .process-detail-panel > * {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .process-detail-panel :is(ul, ol) {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .process-detail-panel :is(ul, ol, li) {
+    min-width: 0;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    word-break: break-word;
   }
 
   .process-detail .codex-markdown {
     font-size: 12px;
     line-height: 1.65;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .process-detail .codex-markdown :is(p, li, blockquote, td, th, a, span) {
+    overflow-wrap: anywhere;
+    word-break: break-word;
   }
 
   .process-detail .codex-markdown > * + * {
@@ -914,6 +897,12 @@ body {
   .transcript-card {
     @apply border;
     border-color: var(--theme-borderDefault);
+  }
+
+  .transcript-event-card {
+    min-width: 0;
+    max-width: 100%;
+    overflow-x: hidden;
   }
 
   .theme-popover {

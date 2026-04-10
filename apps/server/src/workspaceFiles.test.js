@@ -4,7 +4,13 @@ import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 
-import { listDirectoryPickerTree, searchDirectoryPickerEntries } from './workspaceFiles.js'
+import {
+  listDirectoryPickerTree,
+  listWorkspaceTree,
+  readWorkspaceFileContent,
+  searchWorkspaceEntries,
+  searchDirectoryPickerEntries,
+} from './workspaceFiles.js'
 
 test('listDirectoryPickerTree returns filesystem roots when path is empty', () => {
   const payload = listDirectoryPickerTree()
@@ -61,4 +67,80 @@ test('searchDirectoryPickerEntries returns matching directories only', () => {
   assert.equal(payload.items.some((item) => item.path === betaDir), false)
   assert.equal(payload.items.some((item) => item.path === hiddenAlphaDir), false)
   assert.equal(payload.items.some((item) => item.path === alphaFile), false)
+})
+
+test('listWorkspaceTree keeps project tmp directory visible', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-workspace-tree-'))
+  const tmpDir = path.join(tempDir, 'tmp')
+  const uploadsDir = path.join(tempDir, 'uploads')
+  const nodeModulesDir = path.join(tempDir, 'node_modules')
+
+  fs.mkdirSync(tmpDir)
+  fs.mkdirSync(uploadsDir)
+  fs.mkdirSync(nodeModulesDir)
+
+  const payload = listWorkspaceTree(tempDir)
+
+  assert.equal(payload.items.some((item) => item.path === 'tmp' && item.type === 'directory'), true)
+  assert.equal(payload.items.some((item) => item.path === 'uploads' && item.type === 'directory'), true)
+  assert.equal(payload.items.some((item) => item.path === 'node_modules'), false)
+})
+
+test('searchWorkspaceEntries keeps tmp files searchable', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-workspace-search-'))
+  const screenshotPath = path.join(tempDir, 'tmp', 'screenshots', 'mobile.png')
+  const hiddenPath = path.join(tempDir, 'node_modules', 'pkg', 'index.js')
+
+  fs.mkdirSync(path.dirname(screenshotPath), { recursive: true })
+  fs.mkdirSync(path.dirname(hiddenPath), { recursive: true })
+  fs.writeFileSync(screenshotPath, 'image')
+  fs.writeFileSync(hiddenPath, 'export default 1')
+
+  const payload = searchWorkspaceEntries(tempDir, {
+    query: 'mobile',
+  })
+
+  assert.equal(payload.items.some((item) => item.path === 'tmp/screenshots/mobile.png'), true)
+  assert.equal(payload.items.some((item) => item.path.includes('node_modules')), false)
+})
+
+test('readWorkspaceFileContent returns text preview for workspace file', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-workspace-file-'))
+  const filePath = path.join(tempDir, 'src', 'main.ts')
+
+  fs.mkdirSync(path.dirname(filePath), { recursive: true })
+  fs.writeFileSync(filePath, 'export const answer = 42\n', 'utf8')
+
+  const payload = readWorkspaceFileContent(tempDir, {
+    path: 'src/main.ts',
+  })
+
+  assert.equal(payload.path, 'src/main.ts')
+  assert.equal(payload.language, 'typescript')
+  assert.equal(payload.binary, false)
+  assert.equal(payload.content, 'export const answer = 42\n')
+})
+
+test('readWorkspaceFileContent blocks paths outside workspace', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-workspace-escape-'))
+
+  assert.throws(() => {
+    readWorkspaceFileContent(tempDir, {
+      path: '../secret.txt',
+    })
+  }, /路径不合法|只能访问当前工作目录内的文件/)
+})
+
+test('readWorkspaceFileContent marks binary files', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-workspace-binary-'))
+  const filePath = path.join(tempDir, 'sample.bin')
+
+  fs.writeFileSync(filePath, Buffer.from([0x00, 0x01, 0x02, 0x03, 0xff]))
+
+  const payload = readWorkspaceFileContent(tempDir, {
+    path: 'sample.bin',
+  })
+
+  assert.equal(payload.binary, true)
+  assert.equal(payload.content, '')
 })
