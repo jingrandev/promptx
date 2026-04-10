@@ -9,6 +9,7 @@ export function useAsyncRenderedMarkdown(options = {}) {
     shouldRender = () => true,
     renderAsync = async (source) => source,
     renderFallback = (source) => source,
+    onRendered = null,
   } = options
 
   const renderedCache = new Map()
@@ -87,6 +88,11 @@ export function useAsyncRenderedMarkdown(options = {}) {
         html,
       })
       renderVersion.value += 1
+      onRendered?.(item, {
+        cacheKey,
+        source,
+        themeKey: currentThemeKey,
+      })
     } catch {
       // 回退到同步 markdown 即可
     } finally {

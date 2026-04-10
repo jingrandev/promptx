@@ -542,6 +542,7 @@ export function useCodexSessionPanel(props, emit) {
     handleTranscriptTouchEnd,
     handleTranscriptTouchMove,
     handleTranscriptTouchStart,
+    scheduleScrollToBottom,
     scrollToBottom,
   }
 }

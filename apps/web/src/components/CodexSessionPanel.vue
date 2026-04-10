@@ -121,6 +121,7 @@ const {
   workingLabel,
   sessions,
   loadSessions,
+  scheduleScrollToBottom,
   scrollToBottom,
 } = useCodexSessionPanel(props, emit)
 
@@ -163,16 +164,10 @@ function shouldHideSystemEvent(item = {}) {
 }
 
 const {
-  canCollapsePrompt,
-  canCollapseResponse,
   getTurnEventCollapseKey,
   getTurnEventCount,
   hasTurnEventHistory,
-  isPromptCollapsed,
-  isResponseCollapsed,
   isTurnEventsCollapsed,
-  togglePrompt,
-  toggleResponse,
   toggleTurnEvents,
 } = useCodexTranscriptCollapse({
   turns,
@@ -211,6 +206,14 @@ const { getRenderedHtml: renderResponseBody } = useAsyncRenderedMarkdown({
     isDark: isDark.value,
   }),
   renderFallback: (source) => renderPlainCodexMarkdown(source),
+  onRendered: (turn) => {
+    const latestTurn = turns.value.at(-1) || null
+    if (!props.active || !latestTurn?.runId || latestTurn.runId !== turn?.runId) {
+      return
+    }
+
+    scheduleScrollToBottom()
+  },
 })
 
 function openPromptImage(url) {
@@ -369,16 +372,6 @@ defineExpose({
               <div class="flex items-center justify-between gap-3 text-xs opacity-75 font-sans">
                 <span class="font-semibold">{{ t('sessionPanel.promptTitle') }}</span>
                 <div class="flex items-center gap-2">
-                  <button
-                    v-if="canCollapsePrompt(turn)"
-                    type="button"
-                    class="transcript-card__toggle inline-flex items-center gap-1 rounded-sm px-2 py-1 text-[11px] transition hover:bg-[var(--theme-appPanelStrong)]"
-                    @click="togglePrompt(turn)"
-                  >
-                    <ChevronDown v-if="isPromptCollapsed(turn)" class="h-3 w-3" />
-                    <ChevronUp v-else class="h-3 w-3" />
-                    <span>{{ isPromptCollapsed(turn) ? t('sessionPanel.expand') : t('sessionPanel.collapse') }}</span>
-                  </button>
                   <span>{{ formatTurnTime(turn.startedAt) }}</span>
                 </div>
               </div>
@@ -386,7 +379,6 @@ defineExpose({
                 <div
                   v-if="Array.isArray(turn.promptBlocks) && turn.promptBlocks.length"
                   class="space-y-3"
-                  :class="canCollapsePrompt(turn) && isPromptCollapsed(turn) ? COLLAPSED_PREVIEW_CLASS : ''"
                 >
                   <template v-for="(item, itemIndex) in turn.promptBlocks" :key="`${turn.id}-prompt-${itemIndex}`">
                     <pre
@@ -410,12 +402,7 @@ defineExpose({
                 <pre
                   v-else
                   class="whitespace-pre-wrap break-words leading-7"
-                  :class="canCollapsePrompt(turn) && isPromptCollapsed(turn) ? COLLAPSED_PREVIEW_CLASS : ''"
                 >{{ turn.prompt }}</pre>
-                <div
-                  v-if="canCollapsePrompt(turn) && isPromptCollapsed(turn)"
-                  class="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-[var(--theme-promptBg)] via-[var(--theme-promptBg)] to-transparent"
-                />
               </div>
             </div>
           </div>
@@ -504,16 +491,6 @@ defineExpose({
                 <span class="font-semibold">{{ turn.errorMessage ? t('sessionPanel.errorSuffix', { agent: getTurnAgentLabel(turn) }) : t('sessionPanel.responseSuffix', { agent: getTurnAgentLabel(turn) }) }}</span>
                 <div class="flex items-center gap-2">
                   <button
-                    v-if="canCollapseResponse(turn)"
-                    type="button"
-                    class="transcript-card__toggle inline-flex items-center gap-1 rounded-sm px-2 py-1 text-[11px] transition hover:bg-[var(--theme-appPanelStrong)]"
-                    @click="toggleResponse(turn)"
-                  >
-                    <ChevronDown v-if="isResponseCollapsed(turn)" class="h-3 w-3" />
-                    <ChevronUp v-else class="h-3 w-3" />
-                    <span>{{ isResponseCollapsed(turn) ? t('sessionPanel.expand') : t('sessionPanel.collapse') }}</span>
-                  </button>
-                  <button
                     v-if="diffSupported && turn.runId"
                     type="button"
                     class="transcript-card__toggle inline-flex items-center gap-1 rounded-sm px-2 py-1 text-[11px] transition hover:bg-[var(--theme-appPanelStrong)]"
@@ -528,23 +505,12 @@ defineExpose({
               <div class="relative mt-2">
                 <div
                   v-if="turn.errorMessage"
-                  :class="canCollapseResponse(turn) && isResponseCollapsed(turn) ? COLLAPSED_PREVIEW_CLASS : ''"
                   class="whitespace-pre-wrap break-words"
                 >{{ turn.errorMessage }}</div>
                 <div
                   v-else
-                  :class="[
-                    'prose-like codex-markdown',
-                    canCollapseResponse(turn) && isResponseCollapsed(turn) ? COLLAPSED_PREVIEW_CLASS : '',
-                  ]"
+                  class="prose-like codex-markdown"
                   v-html="renderResponseBody(turn)"
-                />
-                <div
-                  v-if="canCollapseResponse(turn) && isResponseCollapsed(turn)"
-                  class="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t"
-                  :class="turn.errorMessage
-                    ? 'from-[var(--theme-dangerSoft)] via-[var(--theme-dangerSoft)] to-transparent'
-                    : 'from-[var(--theme-responseBg)] via-[var(--theme-responseBg)] to-transparent'"
                 />
               </div>
             </div>

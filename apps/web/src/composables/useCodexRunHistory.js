@@ -11,6 +11,12 @@ const FALLBACK_RUN_POLL_INTERVAL_MS = 1800
 const FALLBACK_SESSION_POLL_INTERVAL_MS = 7200
 const REALTIME_RECONCILE_INTERVAL_MS = 15000
 
+export const codexRunHistoryApi = {
+  clearTaskCodexRuns,
+  listCodexRunEvents,
+  listTaskCodexRuns,
+}
+
 export function buildTurnVisibleSnapshot(turn = {}, showProcessLogs = true) {
   const normalized = {
     id: String(turn?.runId || turn?.id || '').trim(),
@@ -215,7 +221,7 @@ export function useCodexRunHistory(options = {}) {
     const requestPromise = (async () => {
       try {
         const previousVisibleSnapshot = buildTurnVisibleSnapshot(currentTurn, Boolean(showProcessLogs?.value))
-        const payload = await listCodexRunEvents(runId, {
+        const payload = await codexRunHistoryApi.listCodexRunEvents(runId, {
           limit: 5000,
         })
         const appliedTurn = applyRunEventsPayloadToTurns(
@@ -367,7 +373,7 @@ export function useCodexRunHistory(options = {}) {
     runsLoadTaskSlug = taskSlug
     runsLoadPromise = (async () => {
       try {
-        const payload = await listTaskCodexRuns(taskSlug, {
+        const payload = await codexRunHistoryApi.listTaskCodexRuns(taskSlug, {
           limit: 30,
           events: 'latest',
         })
@@ -387,11 +393,18 @@ export function useCodexRunHistory(options = {}) {
 
         const latestTurn = turns.value.at(-1) || null
         if (latestTurn?.runId && !latestTurn.eventsLoaded) {
-          loadTurnEvents(latestTurn).catch(() => {})
+          const latestRunId = latestTurn.runId
+          loadTurnEvents(latestTurn)
+            .catch(() => {})
+            .finally(() => {
+              if (scrollToLatest && props.active && turns.value.at(-1)?.runId === latestRunId) {
+                scheduleScrollToBottom({ force: true })
+              }
+            })
         }
 
         if (shouldScroll) {
-          scheduleScrollToBottom()
+          scheduleScrollToBottom({ force: scrollToLatest })
         }
       } catch (err) {
         sessionError.value = err.message
@@ -442,7 +455,7 @@ export function useCodexRunHistory(options = {}) {
     }
 
     try {
-      await clearTaskCodexRuns(props.taskSlug)
+      await codexRunHistoryApi.clearTaskCodexRuns(props.taskSlug)
       resetRunHistoryState()
       scheduleScrollToBottom({ force: true })
     } catch (err) {
