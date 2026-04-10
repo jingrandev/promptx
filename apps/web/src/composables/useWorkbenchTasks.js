@@ -468,11 +468,28 @@ export function useWorkbenchTasks(options = {}) {
     return content.slice(apiBase.length)
   }
 
+function trimBoundaryBlankLines(value = '') {
+  const lines = String(value || '').replace(/\r\n/g, '\n').split('\n')
+
+  while (lines.length && !String(lines[0] || '').trim()) {
+    lines.shift()
+  }
+
+  while (lines.length && !String(lines[lines.length - 1] || '').trim()) {
+    lines.pop()
+  }
+
+  return lines.join('\n')
+}
+
 function normalizeBlocksForSave(blocks = []) {
   return blocks.map((block) => ({
     id: Number.isInteger(Number(block?.id)) ? Number(block.id) : null,
     type: block?.type,
-    content: block?.type === 'image' ? normalizeImageContent(block.content) : block.content,
+    content:
+      block?.type === 'image'
+        ? normalizeImageContent(block.content)
+        : trimBoundaryBlankLines(block.content),
     meta: block?.meta ? { ...block.meta } : {},
   }))
 }

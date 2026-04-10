@@ -43,6 +43,20 @@ function parsePromptBlocks(rawValue = '[]') {
   }
 }
 
+function trimBoundaryBlankLines(value = '') {
+  const lines = String(value || '').replace(/\r\n/g, '\n').split('\n')
+
+  while (lines.length && !String(lines[0] || '').trim()) {
+    lines.shift()
+  }
+
+  while (lines.length && !String(lines[lines.length - 1] || '').trim()) {
+    lines.pop()
+  }
+
+  return lines.join('\n')
+}
+
 function normalizePromptBlock(block = {}) {
   const type =
     block.type === BLOCK_TYPES.IMAGE
@@ -52,7 +66,9 @@ function normalizePromptBlock(block = {}) {
         : BLOCK_TYPES.TEXT
 
   const content = clampText(
-    String(block.content || ''),
+    type === BLOCK_TYPES.IMAGE
+      ? String(block.content || '')
+      : trimBoundaryBlankLines(block.content),
     type === BLOCK_TYPES.IMAGE ? 1000 : 50000
   )
   const meta =

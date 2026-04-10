@@ -4,7 +4,8 @@
 
 :root {
   color-scheme: light;
-  --theme-fontMono: "IBM Plex Mono", monospace;
+  --theme-fontSans: "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", "Source Han Sans SC", Roboto, "Helvetica Neue", Arial, system-ui, sans-serif;
+  --theme-fontMono: "Geist Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, Monaco, monospace;
   --theme-processDetailRadius: 0;
   --theme-processDetailBadgeRadius: 0;
   --theme-appBg: #f1eee8;
@@ -87,9 +88,13 @@ body {
   background-image: var(--theme-shellGradient);
   background-attachment: fixed;
   color: var(--theme-textPrimary);
-  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-family: var(--theme-fontSans);
   -webkit-font-smoothing: antialiased;
   transition: background-color 180ms ease, color 180ms ease;
+}
+
+.font-sans {
+  font-family: var(--theme-fontSans);
 }
 
 ::selection {
@@ -2431,7 +2436,7 @@ body {
   :root[data-theme='promptx-wechat-light'] .transcript-card--prompt {
     border-color: var(--theme-promptBorder);
     background: var(--theme-promptBg);
-    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-family: var(--theme-fontSans);
   }
 
   :root[data-theme='promptx-wechat-light'] .transcript-card--process {

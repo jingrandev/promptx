@@ -20,12 +20,26 @@ function resolveImageUrl(content = '', rawUrl = '') {
   }
 }
 
+function trimBoundaryBlankLines(value = '') {
+  const lines = String(value || '').replace(/\r\n/g, '\n').split('\n')
+
+  while (lines.length && !String(lines[0] || '').trim()) {
+    lines.shift()
+  }
+
+  while (lines.length && !String(lines[lines.length - 1] || '').trim()) {
+    lines.pop()
+  }
+
+  return lines.join('\n')
+}
+
 function buildCodexTaskBody(task, rawTaskUrl) {
   const parts = []
 
   for (const [index, block] of (task?.blocks || []).entries()) {
     if (block.type === BLOCK_TYPES.TEXT || block.type === BLOCK_TYPES.IMPORTED_TEXT) {
-      const text = String(block.content || '').trim()
+      const text = trimBoundaryBlankLines(block.content)
       if (text) {
         parts.push(text, '')
       }
