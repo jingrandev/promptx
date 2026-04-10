@@ -1,8 +1,17 @@
 <script setup>
+import { computed, ref, watch } from 'vue'
 import { ChevronDown, ChevronUp } from 'lucide-vue-next'
 import { useI18n } from '../composables/useI18n.js'
+import { useTheme } from '../composables/useTheme.js'
+import {
+  DIFF_HIGHLIGHT_LIMITS,
+  exceedsHighlightThresholdForLines,
+  inferPreviewLanguageFromPath,
+  renderHighlightedCodeLines,
+  renderPlainCodeLines,
+} from '../lib/sourceCodePreview.js'
 
-defineProps({
+const props = defineProps({
   activeHunkIndex: {
     type: Number,
     default: 0,
@@ -49,6 +58,116 @@ defineProps({
   },
 })
 const { t } = useI18n()
+const { isDark } = useTheme()
+const renderedPatchLines = ref([])
+const selectedLanguage = computed(() => inferPreviewLanguageFromPath(props.selectedFile?.path || ''))
+
+function getLinePrefix(line) {
+  if (line?.kind === 'add') {
+    return '+'
+  }
+  if (line?.kind === 'delete') {
+    return '-'
+  }
+  if (line?.kind === 'context') {
+    return ' '
+  }
+  return ''
+}
+
+function getLineBody(line) {
+  const content = String(line?.content || '')
+  if (line?.kind === 'add' || line?.kind === 'delete' || line?.kind === 'context') {
+    return content.slice(1)
+  }
+  return content
+}
+
+function escapeHtml(value = '') {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+function buildRenderedPatchLine(line, bodyHtml = '') {
+  if (line?.kind === 'add' || line?.kind === 'delete' || line?.kind === 'context') {
+    const prefix = getLinePrefix(line)
+    const kindClass = `task-diff-line__prefix--${line.kind}`
+
+    return {
+      ...line,
+      renderedHtml: `<span class="task-diff-line__prefix ${kindClass}">${escapeHtml(prefix || ' ')}</span><span class="task-diff-line__body">${bodyHtml || '&#8203;'}</span>`,
+    }
+  }
+
+  return {
+    ...line,
+    renderedHtml: escapeHtml(String(line?.content || '')),
+  }
+}
+
+async function renderPatchLines() {
+  const lines = Array.isArray(props.selectedPatchLines) ? props.selectedPatchLines : []
+  const codeEntries = []
+
+  lines.forEach((line, index) => {
+    if (line?.kind === 'add' || line?.kind === 'delete' || line?.kind === 'context') {
+      codeEntries.push({
+        lineIndex: index,
+        body: getLineBody(line),
+      })
+    }
+  })
+
+  const plainBodies = renderPlainCodeLines(codeEntries.map((entry) => entry.body))
+  let plainBodyIndex = 0
+  renderedPatchLines.value = lines.map((line) => {
+    if (line?.kind === 'add' || line?.kind === 'delete' || line?.kind === 'context') {
+      const bodyHtml = plainBodies[plainBodyIndex] || '&#8203;'
+      plainBodyIndex += 1
+      return buildRenderedPatchLine(line, bodyHtml)
+    }
+
+    return buildRenderedPatchLine(line)
+  })
+
+  if (!codeEntries.length) {
+    return
+  }
+  
+  if (exceedsHighlightThresholdForLines(codeEntries.map((entry) => entry.body), DIFF_HIGHLIGHT_LIMITS)) {
+    return
+  }
+
+  const highlightedBodies = await renderHighlightedCodeLines(codeEntries.map((entry) => entry.body), {
+    isDark: isDark.value,
+    language: selectedLanguage.value,
+    maxHighlightLines: DIFF_HIGHLIGHT_LIMITS.maxLines,
+    maxHighlightChars: DIFF_HIGHLIGHT_LIMITS.maxChars,
+  })
+
+  let highlightedIndex = 0
+  renderedPatchLines.value = lines.map((line) => {
+    if (line?.kind === 'add' || line?.kind === 'delete' || line?.kind === 'context') {
+      const bodyHtml = highlightedBodies[highlightedIndex] || '&#8203;'
+      highlightedIndex += 1
+      return buildRenderedPatchLine(line, bodyHtml)
+    }
+
+    return buildRenderedPatchLine(line)
+  })
+}
+
+watch(
+  () => [props.selectedPatchLines, props.selectedFile?.path, isDark.value],
+  () => {
+    renderPatchLines()
+  },
+  { immediate: true, deep: true }
+)
 </script>
 
 <template>
@@ -142,10 +261,10 @@ const { t } = useI18n()
     <div v-else-if="selectedPatchLines.length" :ref="setPatchViewportRef" class="flex-1 overflow-auto">
       <div class="min-w-max px-4 py-4 font-mono text-[11px] leading-5">
         <div
-          v-for="line in selectedPatchLines"
+          v-for="line in renderedPatchLines"
           :key="line.id"
           :ref="(element) => setPatchLineRef(line.id, element)"
-          class="grid grid-cols-[56px_56px_minmax(0,1fr)]"
+          class="task-diff-row grid"
           :class="[
             getPatchLineClass(line.kind),
             line.kind === 'hunk' && selectedPatchHunks[activeHunkIndex]?.id === line.id
@@ -153,13 +272,17 @@ const { t } = useI18n()
               : '',
           ]"
         >
-          <span class="select-none border-r border-[var(--theme-borderMuted)] px-2 py-0.5 text-right opacity-60">
+          <span class="task-diff-row__number select-none">
             {{ line.oldNumber }}
           </span>
-          <span class="select-none border-r border-[var(--theme-borderMuted)] px-2 py-0.5 text-right opacity-60">
+          <span class="task-diff-row__number select-none">
             {{ line.newNumber }}
           </span>
-          <pre class="overflow-visible whitespace-pre px-3 py-0.5">{{ line.content }}</pre>
+          <pre
+            class="task-diff-line overflow-visible whitespace-pre px-3 py-0.5"
+            :class="line.kind === 'meta' || line.kind === 'hunk' ? 'task-diff-line--plain' : ''"
+            v-html="line.renderedHtml"
+          />
         </div>
       </div>
     </div>
@@ -174,3 +297,48 @@ const { t } = useI18n()
     {{ t('diffReview.selectFile') }}
   </div>
 </template>
+
+<style scoped>
+.task-diff-row {
+  grid-template-columns: 3.1rem 3.1rem minmax(0, 1fr);
+}
+
+.task-diff-row__number {
+  border-right: 1px solid var(--theme-borderMuted);
+  color: color-mix(in srgb, var(--theme-textPrimary) 52%, transparent);
+  font-variant-numeric: tabular-nums;
+  padding: 0.125rem 0.5rem;
+  text-align: right;
+}
+
+.task-diff-line {
+  color: inherit;
+}
+
+.task-diff-line :deep(.task-diff-line__prefix) {
+  display: inline-block;
+  font-weight: 600;
+  user-select: none;
+  width: 1ch;
+}
+
+.task-diff-line :deep(.task-diff-line__prefix--add) {
+  color: var(--theme-successText);
+}
+
+.task-diff-line :deep(.task-diff-line__prefix--delete) {
+  color: var(--theme-dangerText);
+}
+
+.task-diff-line :deep(.task-diff-line__prefix--context) {
+  color: color-mix(in srgb, var(--theme-textPrimary) 35%, transparent);
+}
+
+.task-diff-line :deep(.task-diff-line__body) {
+  display: inline;
+}
+
+.task-diff-line--plain {
+  color: inherit;
+}
+</style>

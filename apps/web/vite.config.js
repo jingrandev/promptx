@@ -4,6 +4,7 @@ import vue from '@vitejs/plugin-vue'
 export default defineConfig({
   plugins: [vue()],
   build: {
+    chunkSizeWarningLimit: 2200,
     rollupOptions: {
       output: {
         manualChunks(id) {
@@ -25,6 +26,18 @@ export default defineConfig({
 
           if (id.includes('/vue-router/')) {
             return 'vendor-router'
+          }
+
+          if (id.includes('/shiki/') || id.includes('/@shikijs/')) {
+            if (id.includes('/dist/langs/')) {
+              return `vendor-shiki-lang-${id.split('/dist/langs/')[1].replace(/\.mjs.*$/, '').replace(/[^a-zA-Z0-9_-]/g, '-')}`
+            }
+
+            if (id.includes('/dist/themes/')) {
+              return `vendor-shiki-theme-${id.split('/dist/themes/')[1].replace(/\.mjs.*$/, '').replace(/[^a-zA-Z0-9_-]/g, '-')}`
+            }
+
+            return 'vendor-shiki-core'
           }
 
           return 'vendor-misc'

@@ -1,5 +1,5 @@
 <script setup>
-import { onBeforeUnmount, watch } from 'vue'
+import { computed, onBeforeUnmount, watch } from 'vue'
 import { X } from 'lucide-vue-next'
 
 const props = defineProps({
@@ -9,7 +9,11 @@ const props = defineProps({
   },
   backdropClass: {
     type: String,
-    default: 'z-50 items-end justify-center px-0 py-0 sm:items-center sm:px-4 sm:py-6',
+    default: '',
+  },
+  stackLevel: {
+    type: Number,
+    default: 0,
   },
   panelClass: {
     type: String,
@@ -46,6 +50,25 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['close'])
+
+const resolvedBackdropClass = computed(() => {
+  if (props.backdropClass) {
+    return props.backdropClass
+  }
+
+  const layoutClass = 'items-end justify-center px-0 py-0 sm:items-center sm:px-4 sm:py-6'
+  const zIndexClass = props.stackLevel >= 4
+    ? 'z-[90]'
+    : props.stackLevel === 3
+      ? 'z-[75]'
+      : props.stackLevel === 2
+        ? 'z-[70]'
+        : props.stackLevel === 1
+          ? 'z-[60]'
+          : 'z-50'
+
+  return `${zIndexClass} ${layoutClass}`
+})
 
 function requestClose() {
   if (props.closeDisabled) {
@@ -105,7 +128,7 @@ onBeforeUnmount(() => {
       <div
         v-if="open"
         class="theme-modal-backdrop dialog-shell-backdrop fixed inset-0 flex"
-        :class="backdropClass"
+        :class="resolvedBackdropClass"
         @click.self="handleBackdropClick"
       >
         <section class="panel dialog-shell-panel flex min-h-0 w-full flex-col overflow-hidden" :class="panelClass">

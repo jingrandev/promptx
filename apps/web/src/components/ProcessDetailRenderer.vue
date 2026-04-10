@@ -223,7 +223,7 @@ function hasStructuredSubAgentMessage(item = {}) {
 </script>
 
 <template>
-  <div v-if="normalizedBlocks.length" class="process-detail space-y-2">
+  <div v-if="normalizedBlocks.length" class="process-detail min-w-0 w-full max-w-full space-y-2">
     <template v-for="(block, blockIndex) in normalizedBlocks" :key="blockKeys[blockIndex] || `${block.type}-${blockIndex}`">
       <div v-if="block.type === 'meta'" class="process-detail-meta">
         <div
@@ -292,8 +292,14 @@ function hasStructuredSubAgentMessage(item = {}) {
       </div>
 
       <div v-else-if="block.type === 'bullet_list'" class="process-detail-panel">
-        <ul class="list-disc space-y-1.5 pl-5">
-          <li v-for="(item, itemIndex) in block.items || []" :key="`${blockIndex}-bullet-${itemIndex}`">{{ item }}</li>
+        <ul class="list-disc min-w-0 w-full max-w-full space-y-1.5 pl-5">
+          <li
+            v-for="(item, itemIndex) in block.items || []"
+            :key="`${blockIndex}-bullet-${itemIndex}`"
+            class="min-w-0 w-full max-w-full break-words [overflow-wrap:anywhere]"
+          >
+            {{ item }}
+          </li>
         </ul>
         <div v-if="block.hiddenCount" class="process-detail-footnote">{{ formatHiddenItems(block.hiddenCount) }}</div>
       </div>

@@ -4,6 +4,7 @@ import {
   ArrowLeft,
   Bot,
   CircleAlert,
+  Eye,
   RotateCcw,
   PencilLine,
   Trash2,
@@ -16,6 +17,7 @@ import DialogShell from './DialogShell.vue'
 import CodexSessionManagerForm from './CodexSessionManagerForm.vue'
 import CodexSessionManagerList from './CodexSessionManagerList.vue'
 import CodexSessionManagerStatus from './CodexSessionManagerStatus.vue'
+import CodexSessionSourceBrowserDialog from './CodexSessionSourceBrowserDialog.vue'
 import {
   fetchEnabledAgentEngineOptions,
   getEnabledAgentEngineOptions,
@@ -96,6 +98,7 @@ const resetting = ref(false)
 const showDeleteDialog = ref(false)
 const showResetDialog = ref(false)
 const showDirectoryPicker = ref(false)
+const showSourceBrowser = ref(false)
 const threadIdCopied = ref(false)
 const { matches: isMobileLayout } = useMediaQuery('(max-width: 767px)')
 const mobileView = ref('list')
@@ -370,6 +373,7 @@ function initializeDialog() {
   error.value = ''
   showDeleteDialog.value = false
   showResetDialog.value = false
+  showSourceBrowser.value = false
   threadIdCopied.value = false
   mobileDetailTab.value = 'basic'
   mobileView.value = isMobileLayout.value ? 'list' : 'detail'
@@ -615,6 +619,7 @@ watch(
     showDirectoryPicker.value = false
     showDeleteDialog.value = false
     showResetDialog.value = false
+    showSourceBrowser.value = false
     threadIdCopied.value = false
     error.value = ''
   },
@@ -709,6 +714,11 @@ onBeforeUnmount(() => {
     @close="showDirectoryPicker = false"
     @select="handleDirectoryPicked"
   />
+  <CodexSessionSourceBrowserDialog
+    :open="showSourceBrowser"
+    :session="activeSession"
+    @close="showSourceBrowser = false"
+  />
   <DialogShell
     :open="open"
     panel-class="settings-dialog-panel h-full max-w-5xl sm:h-auto sm:max-h-[88vh]"
@@ -790,6 +800,16 @@ onBeforeUnmount(() => {
 
             <div class="theme-divider mt-6 flex flex-col gap-3 border-t border-dashed pt-4 sm:flex-row sm:items-center sm:justify-between">
               <div class="flex flex-wrap items-center gap-2">
+                <button
+                  v-if="mode === 'edit' && activeSession"
+                  type="button"
+                  class="tool-button inline-flex items-center gap-2 px-3 py-2 text-xs"
+                  :disabled="busy || !activeSession?.cwd"
+                  @click="showSourceBrowser = true"
+                >
+                  <Eye class="h-4 w-4" />
+                  <span>{{ t('projectManager.viewSource') }}</span>
+                </button>
                 <button
                   v-if="mode === 'edit' && activeSession"
                   type="button"
@@ -949,6 +969,15 @@ onBeforeUnmount(() => {
                     @click="handleSubmit"
                   >
                     {{ desktopSubmitLabel }}
+                  </button>
+                  <button
+                    v-if="mode === 'edit' && activeSession"
+                    type="button"
+                    class="tool-button w-full px-3 py-2 text-sm"
+                    :disabled="busy || !activeSession?.cwd"
+                    @click="showSourceBrowser = true"
+                  >
+                    {{ t('projectManager.viewSource') }}
                   </button>
                   <button
                     v-if="mode === 'edit' && activeSession"

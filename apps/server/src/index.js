@@ -52,6 +52,7 @@ import {
 import { listKnownWorkspacesByEngine } from './agents/index.js'
 import {
   listDirectoryPickerTree,
+  readWorkspaceFileContent,
   listWorkspaceTree,
   searchDirectoryPickerEntries,
   searchWorkspaceEntries,
@@ -417,6 +418,7 @@ registerCodexRoutes(app, {
   listTaskSlugsByCodexSessionId,
   listWorkspaceSuggestions: workspaceSuggestionService.listWorkspaceSuggestions,
   listWorkspaceTree,
+  readWorkspaceFileContent,
   resetPromptxCodexSession,
   runDispatchService,
   searchDirectoryPickerEntries,

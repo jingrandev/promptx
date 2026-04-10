@@ -1,50 +1,8 @@
 import MarkdownIt from 'markdown-it'
-import hljs from 'highlight.js/lib/core'
-import bash from 'highlight.js/lib/languages/bash'
-import css from 'highlight.js/lib/languages/css'
-import diff from 'highlight.js/lib/languages/diff'
-import java from 'highlight.js/lib/languages/java'
-import javascript from 'highlight.js/lib/languages/javascript'
-import json from 'highlight.js/lib/languages/json'
-import markdownLanguage from 'highlight.js/lib/languages/markdown'
-import python from 'highlight.js/lib/languages/python'
-import sql from 'highlight.js/lib/languages/sql'
-import typescript from 'highlight.js/lib/languages/typescript'
-import xml from 'highlight.js/lib/languages/xml'
-
-hljs.registerLanguage('bash', bash)
-hljs.registerLanguage('css', css)
-hljs.registerLanguage('diff', diff)
-hljs.registerLanguage('java', java)
-hljs.registerLanguage('javascript', javascript)
-hljs.registerLanguage('json', json)
-hljs.registerLanguage('markdown', markdownLanguage)
-hljs.registerLanguage('python', python)
-hljs.registerLanguage('sql', sql)
-hljs.registerLanguage('typescript', typescript)
-hljs.registerLanguage('xml', xml)
-
-hljs.registerAliases(['sh', 'shell', 'zsh'], { languageName: 'bash' })
-hljs.registerAliases(['js', 'jsx', 'react'], { languageName: 'javascript' })
-hljs.registerAliases(['ts', 'tsx'], { languageName: 'typescript' })
-hljs.registerAliases(['md'], { languageName: 'markdown' })
-hljs.registerAliases(['html', 'vue', 'svg'], { languageName: 'xml' })
-
-const AUTO_HIGHLIGHT_LANGUAGES = [
-  'bash',
-  'css',
-  'diff',
-  'java',
-  'javascript',
-  'json',
-  'markdown',
-  'python',
-  'sql',
-  'typescript',
-  'xml',
-]
+import { renderHighlightedCodeLines, resolvePreviewLanguage } from './sourceCodePreview.js'
 
 const markdownUtils = new MarkdownIt()
+const FENCE_PLACEHOLDER_PREFIX = '__PROMPTX_FENCE__'
 
 function normalizeLanguage(value = '') {
   return String(value || '').trim().toLowerCase()
@@ -108,35 +66,6 @@ function getDisplayLanguage(value = '') {
   return normalized.charAt(0).toUpperCase() + normalized.slice(1)
 }
 
-function highlightCode(code = '', language = '') {
-  const source = String(code || '')
-  const requestedLanguage = normalizeLanguage(language)
-
-  if (requestedLanguage && hljs.getLanguage(requestedLanguage)) {
-    return hljs.highlight(source, { language: requestedLanguage, ignoreIllegals: true }).value
-  }
-
-  const autoResult = hljs.highlightAuto(source, AUTO_HIGHLIGHT_LANGUAGES)
-  return autoResult.value || markdown.utils.escapeHtml(source)
-}
-
-function renderHighlightedFence(content = '', language = '') {
-  const highlighted = highlightCode(content, language)
-  const normalizedLanguage = normalizeLanguage(language)
-  const languageClass = normalizedLanguage
-    ? ` language-${normalizedLanguage}`
-    : ''
-  const languageLabel = getDisplayLanguage(language)
-  const languageBadge = languageLabel
-    ? `<div class="codex-code-block__header"><span class="codex-code-block__language">${escapeHtml(languageLabel)}</span></div>`
-    : ''
-  const blockClass = languageLabel
-    ? 'codex-code-block codex-code-block--labeled'
-    : 'codex-code-block'
-
-  return `<div class="${blockClass}">${languageBadge}<pre class="hljs"><code class="hljs${languageClass}">${highlighted}</code></pre></div>`
-}
-
 function createMarkdownRenderer(options = {}) {
   const instance = new MarkdownIt({
     html: false,
@@ -146,9 +75,9 @@ function createMarkdownRenderer(options = {}) {
   })
 
   const defaultLinkOpenRule = instance.renderer.rules.link_open
-  const defaultFenceRule = instance.renderer.rules.fence
   const defaultTableOpenRule = instance.renderer.rules.table_open
   const defaultTableCloseRule = instance.renderer.rules.table_close
+  const defaultFenceRule = instance.renderer.rules.fence
 
   instance.renderer.rules.link_open = (tokens, idx, renderOptions, env, self) => {
     const token = tokens[idx]
@@ -160,23 +89,6 @@ function createMarkdownRenderer(options = {}) {
     }
 
     return self.renderToken(tokens, idx, renderOptions)
-  }
-
-  if (options.highlightFences) {
-    instance.renderer.rules.fence = (tokens, idx, renderOptions, env, self) => {
-      const token = tokens[idx]
-      const language = String(token?.info || '').trim().split(/\s+/)[0] || ''
-
-      if (token?.content) {
-        return renderHighlightedFence(token.content, language)
-      }
-
-      if (typeof defaultFenceRule === 'function') {
-        return defaultFenceRule(tokens, idx, renderOptions, env, self)
-      }
-
-      return ''
-    }
   }
 
   instance.renderer.rules.table_open = (tokens, idx, renderOptions, env, self) => {
@@ -195,19 +107,78 @@ function createMarkdownRenderer(options = {}) {
     return `${rendered}</div>`
   }
 
+  if (options.captureFences) {
+    instance.renderer.rules.fence = (tokens, idx, renderOptions, env = {}, self) => {
+      const token = tokens[idx]
+      const fenceEntries = Array.isArray(env.__promptxFences) ? env.__promptxFences : []
+      const fenceIndex = fenceEntries.length
+      const placeholder = `${FENCE_PLACEHOLDER_PREFIX}${fenceIndex}__`
+
+      fenceEntries.push({
+        content: String(token?.content || ''),
+        language: String(token?.info || '').trim().split(/\s+/)[0] || '',
+        placeholder,
+      })
+      env.__promptxFences = fenceEntries
+
+      return placeholder
+    }
+  } else if (typeof defaultFenceRule === 'function') {
+    instance.renderer.rules.fence = defaultFenceRule
+  }
+
   return instance
 }
 
-const markdown = createMarkdownRenderer({ highlightFences: true })
+const markdown = createMarkdownRenderer({ captureFences: true })
 const plainMarkdown = createMarkdownRenderer()
 
-export function renderCodexMarkdown(value = '') {
+async function renderHighlightedFence(content = '', language = '', options = {}) {
+  const normalizedContent = String(content || '').replace(/\r\n/g, '\n')
+  const normalizedLanguage = normalizeLanguage(language)
+  const resolvedLanguage = resolvePreviewLanguage(normalizedLanguage)
+  const highlightedLines = await renderHighlightedCodeLines(normalizedContent.split('\n'), {
+    isDark: Boolean(options.isDark),
+    language: resolvedLanguage || normalizedLanguage,
+  })
+  const highlighted = highlightedLines.join('\n')
+  const codeClassAttr = normalizedLanguage
+    ? ` class="language-${escapeHtml(normalizedLanguage)}"`
+    : ''
+  const languageLabel = getDisplayLanguage(language)
+  const languageBadge = languageLabel
+    ? `<div class="codex-code-block__header"><span class="codex-code-block__language">${escapeHtml(languageLabel)}</span></div>`
+    : ''
+  const blockClass = languageLabel
+    ? 'codex-code-block codex-code-block--labeled'
+    : 'codex-code-block'
+
+  return `<div class="${blockClass}">${languageBadge}<pre><code${codeClassAttr}>${highlighted}</code></pre></div>`
+}
+
+async function resolveFencePlaceholders(html = '', fenceEntries = [], options = {}) {
+  if (!Array.isArray(fenceEntries) || !fenceEntries.length) {
+    return html
+  }
+
+  const renderedEntries = await Promise.all(
+    fenceEntries.map((entry) => renderHighlightedFence(entry.content, entry.language, options))
+  )
+
+  return fenceEntries.reduce((output, entry, index) => (
+    output.replace(entry.placeholder, renderedEntries[index] || entry.placeholder)
+  ), html)
+}
+
+export async function renderCodexMarkdown(value = '', options = {}) {
   const text = String(value || '').trim()
   if (!text) {
     return ''
   }
 
-  return markdown.render(text)
+  const env = {}
+  const html = markdown.render(text, env)
+  return resolveFencePlaceholders(html, env.__promptxFences || [], options)
 }
 
 export function renderPlainCodexMarkdown(value = '') {
@@ -217,4 +188,8 @@ export function renderPlainCodexMarkdown(value = '') {
   }
 
   return plainMarkdown.render(text)
+}
+
+export async function renderHighlightedCodeBlock(value = '', language = '', options = {}) {
+  return renderHighlightedFence(value, language, options)
 }
