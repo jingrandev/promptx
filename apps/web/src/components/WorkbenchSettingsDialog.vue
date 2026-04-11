@@ -7,6 +7,11 @@ import ThemeToggle from './ThemeToggle.vue'
 import WorkbenchSelect from './WorkbenchSelect.vue'
 import { formatDateTime as formatLocaleDateTime, useI18n } from '../composables/useI18n.js'
 import {
+  WORKBENCH_PREFERENCE_KEYS,
+  WORKBENCH_SEND_BEHAVIOR_OPTIONS,
+  useWorkbenchPreferences,
+} from '../lib/workbenchPreferences.js'
+import {
   getMeta,
   getRelayConfig,
   reconnectRelay,
@@ -25,6 +30,7 @@ const props = defineProps({
 
 const emit = defineEmits(['close'])
 const { locale, localeOptions, setLocale, t } = useI18n()
+const { getPreference, setPreference } = useWorkbenchPreferences()
 const version = ref('')
 const versionLoading = ref(false)
 const versionError = ref('')
@@ -58,12 +64,21 @@ const relayForm = reactive({
 const systemForm = reactive({
   runnerMaxConcurrentRuns: 3,
 })
-const activeSection = ref('theme')
+const generalForm = reactive({
+  sendBehavior: '',
+})
+const activeSection = ref('general')
 let relayCopyTimer = null
 let systemCopyTimer = null
 let systemDiagnosticsTimer = null
 
 const settingsSections = computed(() => ([
+  {
+    id: 'general',
+    label: t('settingsDialog.general.sectionLabel'),
+    description: t('settingsDialog.general.sectionDescription'),
+    icon: Keyboard,
+  },
   {
     id: 'theme',
     label: t('theme.title'),
@@ -95,6 +110,12 @@ const settingsSections = computed(() => ([
     icon: Info,
   },
 ]))
+
+const sendBehaviorOptions = computed(() => WORKBENCH_SEND_BEHAVIOR_OPTIONS.map((item) => ({
+  value: item.value,
+  label: t(item.labelKey),
+  description: t(item.descriptionKey),
+})))
 
 function resolvePayloadMessage(payload = null, fallbackKey = '') {
   const messageKey = String(payload?.messageKey || '').trim()
@@ -387,6 +408,14 @@ function syncSystemForm(payload = {}) {
   systemForm.runnerMaxConcurrentRuns = Math.max(1, Number(payload?.runner?.maxConcurrentRuns) || 3)
 }
 
+function syncGeneralForm() {
+  generalForm.sendBehavior = String(
+    getPreference(WORKBENCH_PREFERENCE_KEYS.SEND_BEHAVIOR)
+      || WORKBENCH_SEND_BEHAVIOR_OPTIONS[1]?.value
+      || ''
+  )
+}
+
 async function loadRelayConfig() {
   relayLoading.value = true
   relayError.value = ''
@@ -499,6 +528,10 @@ async function handleSaveSystem() {
   } finally {
     systemSaving.value = false
   }
+}
+
+function handleSaveGeneral() {
+  setPreference(WORKBENCH_PREFERENCE_KEYS.SEND_BEHAVIOR, generalForm.sendBehavior)
 }
 
 function hasCompleteRelayFields() {
@@ -622,7 +655,8 @@ watch(
   () => props.open,
   (open) => {
     if (open) {
-      activeSection.value = 'theme'
+      activeSection.value = 'general'
+      syncGeneralForm()
       loadMeta()
       loadRelayConfig()
       loadSystemConfig()
@@ -681,7 +715,63 @@ onBeforeUnmount(() => {
 
     <div class="settings-dialog-content min-h-0 flex-1 overflow-y-auto px-5 py-5">
             <section
-              v-if="activeSection === 'theme'"
+              v-if="activeSection === 'general'"
+              class="space-y-4"
+            >
+              <div>
+                <div class="theme-heading inline-flex items-center gap-2 text-base font-medium">
+                  <Keyboard class="h-4 w-4" />
+                  <span>{{ t('settingsDialog.general.title') }}</span>
+                </div>
+                <p class="theme-muted-text mt-1 text-xs leading-5">{{ t('settingsDialog.general.intro') }}</p>
+              </div>
+
+              <section class="settings-section-card space-y-4 px-4 py-4">
+                <div>
+                  <div class="theme-heading text-sm font-medium">{{ t('settingsDialog.general.sendBehavior.title') }}</div>
+                  <p class="theme-muted-text mt-1 text-xs leading-5">{{ t('settingsDialog.general.sendBehavior.description') }}</p>
+                </div>
+
+                <div class="grid gap-3">
+                  <label
+                    v-for="option in sendBehaviorOptions"
+                    :key="option.value"
+                    class="settings-form-card flex items-start gap-3 px-3 py-3"
+                  >
+                    <input
+                      v-model="generalForm.sendBehavior"
+                      :value="option.value"
+                      type="radio"
+                      name="workbench-send-behavior"
+                      class="mt-0.5 h-4 w-4"
+                    >
+                    <div class="min-w-0">
+                      <div class="text-sm font-medium text-[var(--theme-textPrimary)]">{{ option.label }}</div>
+                      <p class="theme-muted-text mt-1 text-xs leading-5">{{ option.description }}</p>
+                    </div>
+                  </label>
+                </div>
+
+                <div class="settings-form-footer flex flex-wrap items-center justify-between gap-3">
+                  <p class="theme-muted-text theme-note-text">
+                    {{ t('settingsDialog.general.sendBehavior.hint') }}
+                  </p>
+
+                  <div class="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      class="tool-button tool-button-primary inline-flex items-center gap-2 px-3 py-2 text-xs"
+                      @click="handleSaveGeneral"
+                    >
+                      <span>{{ t('common.save') }}</span>
+                    </button>
+                  </div>
+                </div>
+              </section>
+            </section>
+
+            <section
+              v-else-if="activeSection === 'theme'"
               class="space-y-4"
             >
               <div>

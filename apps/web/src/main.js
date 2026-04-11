@@ -10,8 +10,10 @@ import router from './router.js'
 import './styles.css'
 import { initializeI18n } from './composables/useI18n.js'
 import { initializeTheme } from './composables/useTheme.js'
+import { initializeWorkbenchPreferences } from './lib/workbenchPreferences.js'
 
 initializeTheme()
 initializeI18n()
+initializeWorkbenchPreferences()
 
 createApp(App).use(router).mount('#app')

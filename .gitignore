@@ -14,3 +14,4 @@ apps/server/tmp
 data
 uploads
 tmp
+.omx/

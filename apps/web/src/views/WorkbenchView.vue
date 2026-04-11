@@ -13,6 +13,7 @@ import { useWorkbenchMobileLayout } from '../composables/useWorkbenchMobileLayou
 import { usePageTitle } from '../composables/usePageTitle.js'
 import { useToast } from '../composables/useToast.js'
 import { useWorkbenchTasks } from '../composables/useWorkbenchTasks.js'
+import { shouldSendOnWorkbenchKeydown, useWorkbenchPreferences } from '../lib/workbenchPreferences.js'
 
 const showClearDialog = ref(false)
 const showDeleteDialog = ref(false)
@@ -30,6 +31,7 @@ const preferredDiffScope = ref('workspace')
 const preferredDiffRunId = ref('')
 const { t } = useI18n()
 const { toastMessage, toastType, flashToast, clearToast } = useToast()
+const { sendBehavior } = useWorkbenchPreferences()
 const TaskDiffReviewDialog = defineAsyncComponent(() => import('../components/TaskDiffReviewDialog.vue'))
 const WorkbenchSettingsDialog = defineAsyncComponent(() => import('../components/WorkbenchSettingsDialog.vue'))
 
@@ -530,7 +532,11 @@ function handleWindowKeydown(event) {
     return
   }
 
-  if (!event.metaKey && !event.ctrlKey && event.shiftKey && event.key === 'Enter') {
+  if (shouldSendOnWorkbenchKeydown(event, {
+    sendBehavior: sendBehavior.value,
+    isEditing: Boolean(editorRef.value?.isEditing?.()),
+    isComposing: Boolean(editorRef.value?.isComposing?.()),
+  })) {
     event.preventDefault()
     sendToCodex()
     return

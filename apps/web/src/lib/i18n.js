@@ -125,6 +125,31 @@ export const MESSAGES = {
       },
     },
     settingsDialog: {
+      general: {
+        sectionLabel: '通用',
+        sectionDescription: '基础工作台偏好',
+        title: '通用偏好',
+        intro: '这里放工作台层面的基础交互偏好。后续新增的通用设置可以按配置项来源分别接入，不影响界面使用方式。',
+        sendBehavior: {
+          title: '发送消息方式',
+          description: '设置编辑区里使用回车发送还是只允许点击按钮发送。',
+          hint: '发送按钮始终可用；这里仅控制编辑器里的键盘发送方式。',
+          options: {
+            enter: {
+              label: '回车发送',
+              description: '单击 Enter 发送，Shift + Enter 换行。',
+            },
+            shiftEnter: {
+              label: 'Shift + 回车发送',
+              description: '单击 Enter 换行，Shift + Enter 发送。',
+            },
+            buttonOnly: {
+              label: '仅按钮发送',
+              description: '回车只用于编辑内容，必须点击发送按钮才会发送。',
+            },
+          },
+        },
+      },
       relay: {
         sectionLabel: '远程',
         sectionDescription: 'Relay 与手机访问',
@@ -816,6 +841,31 @@ export const MESSAGES = {
       },
     },
     settingsDialog: {
+      general: {
+        sectionLabel: 'General',
+        sectionDescription: 'Core workbench preferences',
+        title: 'General Preferences',
+        intro: 'This section holds core workbench interaction preferences. Future general settings can use different backing stores without changing the UI model.',
+        sendBehavior: {
+          title: 'Send Message Behavior',
+          description: 'Choose whether Enter sends from the editor or sending is limited to the button.',
+          hint: 'The send button always works. This only changes keyboard sending inside the editor.',
+          options: {
+            enter: {
+              label: 'Enter Sends',
+              description: 'Press Enter to send and Shift + Enter to insert a new line.',
+            },
+            shiftEnter: {
+              label: 'Shift + Enter Sends',
+              description: 'Press Enter to insert a new line and Shift + Enter to send.',
+            },
+            buttonOnly: {
+              label: 'Button Only',
+              description: 'Enter is always used for editing. Sending only happens from the send button.',
+            },
+          },
+        },
+      },
       relay: {
         sectionLabel: 'Remote',
         sectionDescription: 'Relay and mobile access',
