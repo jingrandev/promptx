@@ -723,7 +723,6 @@ onBeforeUnmount(() => {
                   <Keyboard class="h-4 w-4" />
                   <span>{{ t('settingsDialog.general.title') }}</span>
                 </div>
-                <p class="theme-muted-text mt-1 text-xs leading-5">{{ t('settingsDialog.general.intro') }}</p>
               </div>
 
               <section class="settings-section-card space-y-4 px-4 py-4">
@@ -753,10 +752,6 @@ onBeforeUnmount(() => {
                 </div>
 
                 <div class="settings-form-footer flex flex-wrap items-center justify-between gap-3">
-                  <p class="theme-muted-text theme-note-text">
-                    {{ t('settingsDialog.general.sendBehavior.hint') }}
-                  </p>
-
                   <div class="flex flex-wrap items-center gap-2">
                     <button
                       type="button"
