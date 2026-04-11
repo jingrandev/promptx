@@ -1286,12 +1286,12 @@ onBeforeUnmount(() => {
               <div class="min-w-0 flex-1">
                 <div>
                   <span
-                    class="theme-list-item-title truncate"
+                    class="theme-list-item-title block break-all"
                     v-html="getHighlightedName(item)"
                   />
                 </div>
                 <div
-                  class="theme-list-item-subtitle theme-list-item-subtitle--mono truncate"
+                  class="theme-list-item-subtitle theme-list-item-subtitle--mono break-all"
                   v-html="getHighlightedPath(item)"
                 />
               </div>
@@ -1319,12 +1319,12 @@ onBeforeUnmount(() => {
               <div class="min-w-0 flex-1">
                 <div>
                   <span
-                    class="theme-list-item-title truncate"
+                    class="theme-list-item-title block break-all"
                     v-html="getHighlightedName(item)"
                   />
                 </div>
                 <div
-                  class="theme-list-item-subtitle theme-list-item-subtitle--mono truncate"
+                  class="theme-list-item-subtitle theme-list-item-subtitle--mono break-all"
                   v-html="getHighlightedPath(item)"
                 />
               </div>
@@ -1340,7 +1340,7 @@ onBeforeUnmount(() => {
               <div class="theme-divider flex items-start gap-2.5 border-b px-3 py-2.5">
                 <File class="theme-list-item-icon" />
                 <div class="min-w-0 flex-1">
-                  <div class="theme-list-item-title theme-list-item-title--strong truncate">
+                  <div class="theme-list-item-title theme-list-item-title--strong break-all">
                     {{ getContentSearchGroupName(group) }}
                   </div>
                   <div

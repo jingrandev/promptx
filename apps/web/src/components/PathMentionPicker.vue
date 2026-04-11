@@ -159,12 +159,12 @@ defineExpose({
               <div class="min-w-0 flex-1">
                 <div>
                   <span
-                    class="theme-list-item-title truncate"
+                    class="theme-list-item-title block break-all"
                     v-html="getHighlightedName(item)"
                   />
                 </div>
                 <div
-                  class="theme-list-item-subtitle theme-list-item-subtitle--mono truncate"
+                  class="theme-list-item-subtitle theme-list-item-subtitle--mono break-all"
                   v-html="getHighlightedPath(item)"
                 />
               </div>
@@ -193,12 +193,12 @@ defineExpose({
               <div class="min-w-0 flex-1">
                 <div>
                   <span
-                    class="theme-list-item-title truncate"
+                    class="theme-list-item-title block break-all"
                     v-html="getHighlightedName(item)"
                   />
                 </div>
                 <div
-                  class="theme-list-item-subtitle theme-list-item-subtitle--mono truncate"
+                  class="theme-list-item-subtitle theme-list-item-subtitle--mono break-all"
                   v-html="getHighlightedPath(item)"
                 />
               </div>

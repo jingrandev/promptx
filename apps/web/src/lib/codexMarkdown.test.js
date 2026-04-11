@@ -58,6 +58,26 @@ test('renderCodexMarkdown renders shell variant language badges', async () => {
   assert.match(html, /class="codex-code-block__language">Bash</)
 })
 
+test('renderCodexMarkdown renders common config and style language badges', async () => {
+  const html = await renderCodexMarkdown([
+    '```scss',
+    '$color: #0f0;',
+    '```',
+    '',
+    '```toml',
+    'title = "PromptX"',
+    '```',
+    '',
+    '```cs',
+    'Console.WriteLine("hi");',
+    '```',
+  ].join('\n'))
+
+  assert.match(html, /class="codex-code-block__language">SCSS</)
+  assert.match(html, /class="codex-code-block__language">TOML</)
+  assert.match(html, /class="codex-code-block__language">C#</)
+})
+
 test('renderCodexMarkdown keeps multiple fenced blocks in order', async () => {
   const html = await renderCodexMarkdown([
     '```ts',

@@ -71,6 +71,34 @@ function getDisplayLanguage(value = '') {
     return 'SQL'
   }
 
+  if (normalized === 'scss') {
+    return 'SCSS'
+  }
+
+  if (normalized === 'sass') {
+    return 'Sass'
+  }
+
+  if (normalized === 'less') {
+    return 'Less'
+  }
+
+  if (normalized === 'toml') {
+    return 'TOML'
+  }
+
+  if (normalized === 'ini') {
+    return 'INI'
+  }
+
+  if (['env', 'dotenv'].includes(normalized)) {
+    return '.env'
+  }
+
+  if (['cs', 'csharp'].includes(normalized)) {
+    return 'C#'
+  }
+
   return normalized.charAt(0).toUpperCase() + normalized.slice(1)
 }
 

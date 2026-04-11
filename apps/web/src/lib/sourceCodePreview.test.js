@@ -40,10 +40,15 @@ test('source preview resolves shell and powershell aliases', () => {
   assert.equal(resolvePreviewLanguage('ps1'), 'powershell')
   assert.equal(resolvePreviewLanguage('pwsh'), 'powershell')
   assert.equal(resolvePreviewLanguage('csh'), 'bash')
+  assert.equal(resolvePreviewLanguage('scss'), 'scss')
+  assert.equal(resolvePreviewLanguage('cs'), 'csharp')
+  assert.equal(resolvePreviewLanguage('env'), 'dotenv')
 })
 
 test('source preview infers language from script file extensions', () => {
   assert.equal(inferPreviewLanguageFromPath('scripts/hello.fish'), 'fish')
   assert.equal(inferPreviewLanguageFromPath('scripts/hello.ps1'), 'powershell')
   assert.equal(inferPreviewLanguageFromPath('scripts/hello.csh'), 'bash')
+  assert.equal(inferPreviewLanguageFromPath('styles/index.scss'), 'scss')
+  assert.equal(inferPreviewLanguageFromPath('config/.env'), 'dotenv')
 })

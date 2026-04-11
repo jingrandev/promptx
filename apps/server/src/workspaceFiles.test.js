@@ -221,6 +221,22 @@ test('readWorkspaceFileContent detects shell language variants', () => {
   assert.equal(readWorkspaceFileContent(tempDir, { path: 'scripts/hello.csh' }).language, 'bash')
 })
 
+test('readWorkspaceFileContent detects common style and config languages', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-workspace-style-config-'))
+  const scssPath = path.join(tempDir, 'src', 'style.scss')
+  const envPath = path.join(tempDir, '.env')
+  const tomlPath = path.join(tempDir, 'config.toml')
+
+  fs.mkdirSync(path.dirname(scssPath), { recursive: true })
+  fs.writeFileSync(scssPath, '$color: #18ac71;\n.button { color: $color; }\n', 'utf8')
+  fs.writeFileSync(envPath, 'PROMPTX_TEST=1\n', 'utf8')
+  fs.writeFileSync(tomlPath, 'name = "promptx"\n', 'utf8')
+
+  assert.equal(readWorkspaceFileContent(tempDir, { path: 'src/style.scss' }).language, 'scss')
+  assert.equal(readWorkspaceFileContent(tempDir, { path: '.env' }).language, 'dotenv')
+  assert.equal(readWorkspaceFileContent(tempDir, { path: 'config.toml' }).language, 'toml')
+})
+
 test('readWorkspaceFileContent blocks paths outside workspace', () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-workspace-escape-'))
 
