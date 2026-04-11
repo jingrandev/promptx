@@ -13,7 +13,7 @@ import { useWorkbenchMobileLayout } from '../composables/useWorkbenchMobileLayou
 import { usePageTitle } from '../composables/usePageTitle.js'
 import { useToast } from '../composables/useToast.js'
 import { useWorkbenchTasks } from '../composables/useWorkbenchTasks.js'
-import { shouldSendOnWorkbenchKeydown, useWorkbenchPreferences } from '../lib/workbenchPreferences.js'
+import { useWorkbenchPreferences } from '../lib/workbenchPreferences.js'
 
 const showClearDialog = ref(false)
 const showDeleteDialog = ref(false)
@@ -146,6 +146,7 @@ const inputPanelProps = computed(() => ({
   canAddTodo: hasCurrentDraftContent.value,
   codexSessionId: currentSelectedSessionId.value,
   isCurrentTaskSending: isCurrentTaskSending.value,
+  sendBehavior: sendBehavior.value,
   sendState: currentTaskSendState.value,
   loading: loadingTask.value,
   todoCount: currentTodoItems.value.length,
@@ -529,16 +530,6 @@ function handleWindowKeydown(event) {
       event.preventDefault()
       event.stopImmediatePropagation?.()
     }
-    return
-  }
-
-  if (shouldSendOnWorkbenchKeydown(event, {
-    sendBehavior: sendBehavior.value,
-    isEditing: Boolean(editorRef.value?.isEditing?.()),
-    isComposing: Boolean(editorRef.value?.isComposing?.()),
-  })) {
-    event.preventDefault()
-    sendToCodex()
     return
   }
 

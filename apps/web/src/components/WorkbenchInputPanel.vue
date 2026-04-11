@@ -21,6 +21,10 @@ const props = defineProps({
     type: String,
     default: 'idle',
   },
+  sendBehavior: {
+    type: String,
+    default: 'shift_enter',
+  },
   modelValue: {
     type: Array,
     default: () => [],
@@ -121,12 +125,14 @@ defineExpose({
     ref="blockEditorRef"
     v-model="blocks"
     :codex-session-id="codexSessionId"
+    :send-behavior="sendBehavior"
     :uploading="uploading"
     @upload-files="emit('upload-files', $event)"
     @import-text-files="emit('import-text-files', $event)"
     @import-pdf-files="emit('import-pdf-files', $event)"
     @file-feedback="emit('file-feedback', $event)"
     @clear-request="emit('clear-request')"
+    @send-request="emit('send-request')"
   >
     <template #header-actions>
       <WorkbenchEditorActions

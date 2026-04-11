@@ -530,10 +530,6 @@ async function handleSaveSystem() {
   }
 }
 
-function handleSaveGeneral() {
-  setPreference(WORKBENCH_PREFERENCE_KEYS.SEND_BEHAVIOR, generalForm.sendBehavior)
-}
-
 function hasCompleteRelayFields() {
   return Boolean(
     String(relayForm.relayUrl || '').trim()
@@ -743,24 +739,13 @@ onBeforeUnmount(() => {
                       type="radio"
                       name="workbench-send-behavior"
                       class="mt-0.5 h-4 w-4"
+                      @change="setPreference(WORKBENCH_PREFERENCE_KEYS.SEND_BEHAVIOR, option.value)"
                     >
                     <div class="min-w-0">
                       <div class="text-sm font-medium text-[var(--theme-textPrimary)]">{{ option.label }}</div>
                       <p class="theme-muted-text mt-1 text-xs leading-5">{{ option.description }}</p>
                     </div>
                   </label>
-                </div>
-
-                <div class="settings-form-footer flex flex-wrap items-center justify-between gap-3">
-                  <div class="flex flex-wrap items-center gap-2">
-                    <button
-                      type="button"
-                      class="tool-button tool-button-primary inline-flex items-center gap-2 px-3 py-2 text-xs"
-                      @click="handleSaveGeneral"
-                    >
-                      <span>{{ t('common.save') }}</span>
-                    </button>
-                  </div>
                 </div>
               </section>
             </section>

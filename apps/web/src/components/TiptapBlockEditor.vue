@@ -7,6 +7,7 @@ import StarterKit from '@tiptap/starter-kit'
 import Paragraph from '@tiptap/extension-paragraph'
 import { BLOCK_TYPES } from '@promptx/shared'
 import { useI18n } from '../composables/useI18n.js'
+import { shouldSendOnWorkbenchKeydown } from '../lib/workbenchPreferences.js'
 import ImagePreviewOverlay from './ImagePreviewOverlay.vue'
 import PathMentionPicker from './PathMentionPicker.vue'
 import TiptapTextBlockView from './TiptapTextBlockView.vue'
@@ -31,6 +32,10 @@ const props = defineProps({
     type: String,
     default: '',
   },
+  sendBehavior: {
+    type: String,
+    default: 'shift_enter',
+  },
   uploading: {
     type: Boolean,
     default: false,
@@ -44,6 +49,7 @@ const emit = defineEmits([
   'import-pdf-files',
   'clear-request',
   'file-feedback',
+  'send-request',
 ])
 
 const { t } = useI18n()
@@ -265,6 +271,17 @@ const editor = useEditor({
       class: 'tiptap-editor min-h-full outline-none',
     },
     handleKeyDown(view, event) {
+      if (shouldSendOnWorkbenchKeydown(event, {
+        sendBehavior: props.sendBehavior,
+        isEditing: true,
+        isComposing: isComposing(),
+      })) {
+        event.preventDefault()
+        event.stopPropagation()
+        emit('send-request')
+        return true
+      }
+
       if (
         !event.shiftKey
         && !event.altKey
