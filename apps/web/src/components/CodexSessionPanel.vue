@@ -1,5 +1,5 @@
 <script setup>
-import { computed, defineAsyncComponent, ref } from 'vue'
+import { computed, defineAsyncComponent, nextTick, ref } from 'vue'
 import {
   ArrowDown,
   ChevronDown,
@@ -15,6 +15,7 @@ import {
 import CodexSessionSelect from './CodexSessionSelect.vue'
 import ImagePreviewOverlay from './ImagePreviewOverlay.vue'
 import ProcessDetailRenderer from './ProcessDetailRenderer.vue'
+import CodexSessionSourceBrowserDialog from './CodexSessionSourceBrowserDialog.vue'
 import { useI18n } from '../composables/useI18n.js'
 import { useAsyncRenderedMarkdown } from '../composables/useAsyncRenderedMarkdown.js'
 import { useCodexSessionPanel } from '../composables/useCodexSessionPanel.js'
@@ -126,6 +127,9 @@ const {
 } = useCodexSessionPanel(props, emit)
 
 const COLLAPSED_PREVIEW_CLASS = 'max-h-40 overflow-hidden'
+const managerDialogRef = ref(null)
+const showSourceBrowser = ref(false)
+const sourceBrowserSessionId = ref('')
 const previewPromptImageUrl = ref('')
 const { t } = useI18n()
 const { isDark } = useTheme()
@@ -264,7 +268,62 @@ function getEventCardClass(item = {}) {
   return 'bg-[var(--theme-appPanelStrong)]'
 }
 
+function resolveSourceBrowserSession(candidate = null) {
+  const candidateId = String(candidate?.id || '').trim()
+  if (candidateId) {
+    return sessions.value.find((item) => item.id === candidateId) || null
+  }
+
+  const selectedId = String(selectedSessionId.value || '').trim()
+  if (selectedId) {
+    return sessions.value.find((item) => item.id === selectedId) || null
+  }
+
+  return sortedSessions.value[0] || null
+}
+
+function openSourceBrowser(session = null) {
+  const targetSession = resolveSourceBrowserSession(session)
+  if (!targetSession?.cwd) {
+    return false
+  }
+
+  sourceBrowserSessionId.value = targetSession.id
+  showSourceBrowser.value = true
+  return true
+}
+
+function openProjectManager() {
+  if (managerBusy.value) {
+    return false
+  }
+
+  openManager()
+  return true
+}
+
+function closeTopDialog() {
+  if (showSourceBrowser.value) {
+    showSourceBrowser.value = false
+    return true
+  }
+
+  if (managerDialogRef.value?.closeTopDialog?.()) {
+    return true
+  }
+
+  if (showManager.value) {
+    closeManager()
+    return true
+  }
+
+  return false
+}
+
 defineExpose({
+  closeTopDialog,
+  openProjectManager,
+  openSourceBrowser,
   send: handleSend,
   scrollToBottom,
   stop: stopSending,
@@ -273,7 +332,13 @@ defineExpose({
 
 <template>
   <section class="workbench-activity-shell panel relative flex h-full min-h-0 flex-col overflow-hidden">
+    <CodexSessionSourceBrowserDialog
+      :open="showSourceBrowser"
+      :session="sessions.find((item) => item.id === sourceBrowserSessionId) || null"
+      @close="showSourceBrowser = false"
+    />
     <CodexSessionManagerDialog
+      ref="managerDialogRef"
       :open="showManager"
       :sessions="sessions"
       :workspaces="workspaces"
@@ -288,6 +353,7 @@ defineExpose({
       :on-delete="handleDeleteSession"
       :on-reset="handleResetSession"
       @close="closeManager"
+      @open-source-browser="openSourceBrowser($event)"
       @project-created="emit('project-created', $event)"
       @select-session="handleSelectSession"
     />

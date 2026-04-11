@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
-import { Cpu, Eye, EyeOff, Info, LoaderCircle, Palette, Settings2, Wifi } from 'lucide-vue-next'
+import { Cpu, Eye, EyeOff, Info, Keyboard, LoaderCircle, Palette, Settings2, Wifi } from 'lucide-vue-next'
 import DialogShell from './DialogShell.vue'
 import DialogSideNav from './DialogSideNav.vue'
 import ThemeToggle from './ThemeToggle.vue'
@@ -81,6 +81,12 @@ const settingsSections = computed(() => ([
     label: t('settingsDialog.system.sectionLabel'),
     description: t('settingsDialog.system.sectionDescription'),
     icon: Cpu,
+  },
+  {
+    id: 'shortcuts',
+    label: t('settingsDialog.shortcuts.sectionLabel'),
+    description: t('settingsDialog.shortcuts.sectionDescription'),
+    icon: Keyboard,
   },
   {
     id: 'about',
@@ -187,6 +193,44 @@ const relayStatusClass = computed(() => {
   }
   return 'theme-status-neutral'
 })
+
+const shortcutItems = computed(() => ([
+  {
+    id: 'open-settings',
+    label: t('settingsDialog.shortcuts.openSettingsTitle'),
+    description: t('settingsDialog.shortcuts.openSettingsDescription'),
+    mac: '⌘ ⇧ ,',
+    windows: 'Ctrl + Shift + ,',
+  },
+  {
+    id: 'open-project-manager',
+    label: t('settingsDialog.shortcuts.openProjectManagerTitle'),
+    description: t('settingsDialog.shortcuts.openProjectManagerDescription'),
+    mac: '⌘ ⇧ K',
+    windows: 'Ctrl + Shift + K',
+  },
+  {
+    id: 'open-source-browser',
+    label: t('settingsDialog.shortcuts.openSourceBrowserTitle'),
+    description: t('settingsDialog.shortcuts.openSourceBrowserDescription'),
+    mac: '⌘ ⇧ O',
+    windows: 'Ctrl + Shift + O',
+  },
+  {
+    id: 'open-diff-review',
+    label: t('settingsDialog.shortcuts.openDiffReviewTitle'),
+    description: t('settingsDialog.shortcuts.openDiffReviewDescription'),
+    mac: '⌘ ⇧ D',
+    windows: 'Ctrl + Shift + D',
+  },
+  {
+    id: 'close-top-dialog',
+    label: t('settingsDialog.shortcuts.closeTopDialogTitle'),
+    description: t('settingsDialog.shortcuts.closeTopDialogDescription'),
+    mac: 'Esc',
+    windows: 'Esc',
+  },
+]))
 
 const showRelayDefaultHint = computed(() => (
   !relayManagedByEnv.value
@@ -1096,6 +1140,47 @@ onBeforeUnmount(() => {
                     baseUrl: {{ systemDiagnostics?.runner?.baseUrl || '-' }}
                   </p>
                 </div>
+              </section>
+            </section>
+
+            <section
+              v-else-if="activeSection === 'shortcuts'"
+              class="space-y-4"
+            >
+              <div>
+                <div class="theme-heading inline-flex items-center gap-2 text-base font-medium">
+                  <Keyboard class="h-4 w-4" />
+                  <span>{{ t('settingsDialog.shortcuts.title') }}</span>
+                </div>
+                <p class="theme-muted-text mt-1 text-xs leading-5">
+                  {{ t('settingsDialog.shortcuts.intro') }}
+                </p>
+              </div>
+
+              <section class="settings-section-card space-y-3 px-4 py-4">
+                <div
+                  v-for="item in shortcutItems"
+                  :key="item.id"
+                  class="settings-form-card flex flex-col justify-between gap-3 px-3 py-3 sm:flex-row sm:items-center"
+                >
+                  <div class="min-w-0">
+                    <div class="text-sm font-medium text-[var(--theme-textPrimary)]">{{ item.label }}</div>
+                    <p class="theme-muted-text mt-1 text-xs leading-5">{{ item.description }}</p>
+                  </div>
+
+                  <div class="flex flex-wrap items-center gap-2">
+                    <span class="rounded-sm border border-dashed border-[var(--theme-borderDefault)] px-2.5 py-1 text-xs font-medium text-[var(--theme-textPrimary)]">
+                      {{ item.mac }}
+                    </span>
+                    <span class="rounded-sm border border-dashed border-[var(--theme-borderDefault)] px-2.5 py-1 text-xs font-medium text-[var(--theme-textPrimary)]">
+                      {{ item.windows }}
+                    </span>
+                  </div>
+                </div>
+
+                <p class="theme-muted-text theme-note-text">
+                  {{ t('settingsDialog.shortcuts.note') }}
+                </p>
               </section>
             </section>
 

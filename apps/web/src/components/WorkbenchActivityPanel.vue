@@ -63,7 +63,22 @@ function scrollToBottom() {
   panelRef.value?.scrollToBottom?.()
 }
 
+function openProjectManager() {
+  return panelRef.value?.openProjectManager?.() || false
+}
+
+function openSourceBrowser() {
+  return panelRef.value?.openSourceBrowser?.() || false
+}
+
+function closeTopDialog() {
+  return panelRef.value?.closeTopDialog?.() || false
+}
+
 defineExpose({
+  closeTopDialog,
+  openProjectManager,
+  openSourceBrowser,
   send,
   stop,
   scrollToBottom,

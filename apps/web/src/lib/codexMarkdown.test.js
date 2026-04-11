@@ -38,6 +38,26 @@ test('renderCodexMarkdown renders react language badge', async () => {
   assert.match(html, /<pre><code class="language-react">/)
 })
 
+test('renderCodexMarkdown renders shell variant language badges', async () => {
+  const html = await renderCodexMarkdown([
+    '```fish',
+    'echo hello',
+    '```',
+    '',
+    '```ps1',
+    'Write-Host "hello"',
+    '```',
+    '',
+    '```csh',
+    'echo hello',
+    '```',
+  ].join('\n'))
+
+  assert.match(html, /class="codex-code-block__language">Fish</)
+  assert.match(html, /class="codex-code-block__language">PowerShell</)
+  assert.match(html, /class="codex-code-block__language">Bash</)
+})
+
 test('renderCodexMarkdown keeps multiple fenced blocks in order', async () => {
   const html = await renderCodexMarkdown([
     '```ts',

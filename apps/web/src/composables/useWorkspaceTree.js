@@ -24,6 +24,7 @@ export function useWorkspaceTree(options) {
   })
 
   const pickerData = useWorkspacePickerData({
+    getMode: () => (String(props.query || '').trim() ? 'search' : 'tree'),
     props,
     onSelect,
   })
@@ -90,13 +91,6 @@ export function useWorkspaceTree(options) {
       pickerData.handleVisibleItemsChange()
     },
     { immediate: true }
-  )
-
-  watch(
-    () => pickerData.activeKey.value,
-    () => {
-      pickerData.handleVisibleItemsChange()
-    }
   )
 
   return {

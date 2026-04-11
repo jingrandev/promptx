@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import {
   Check,
   ChevronRight,
@@ -13,6 +13,11 @@ import {
   listCodexDirectoryTree,
   searchCodexDirectories,
 } from '../lib/api.js'
+import {
+  isAbortError,
+  WORKSPACE_PATH_SEARCH_DEBOUNCE_MS,
+  WORKSPACE_SEARCH_MIN_QUERY_LENGTH,
+} from '../lib/workspaceSearch.js'
 
 const props = defineProps({
   open: {
@@ -41,17 +46,30 @@ const searchError = ref('')
 const searchResults = ref([])
 const searchTruncated = ref(false)
 const query = ref('')
-const activeTab = ref('tree')
 const selectedPath = ref('')
-const selectedName = ref('')
+const searchInputRef = ref(null)
 
 let searchTimer = null
 let searchRequestId = 0
+let searchAbortController = null
+const itemRefs = new Map()
 
 const treeItems = computed(() => flattenTreeNodes(rootNode.value ? [rootNode.value] : []))
-const showSearchPromptState = computed(() => activeTab.value === 'search' && !query.value.trim())
-const showSearchEmptyState = computed(() => activeTab.value === 'search' && !!query.value.trim() && !searchLoading.value && !searchError.value && !searchResults.value.length)
-const showTreeEmptyState = computed(() => activeTab.value === 'tree' && !treeLoading.value && !treeError.value && !treeItems.value.length)
+const normalizedQuery = computed(() => String(query.value || '').trim())
+const isQueryReady = computed(() => normalizedQuery.value.length >= WORKSPACE_SEARCH_MIN_QUERY_LENGTH)
+const isSearchMode = computed(() => Boolean(normalizedQuery.value))
+const visibleItems = computed(() => (isSearchMode.value ? searchResults.value : treeItems.value))
+const visibleItemsSignature = computed(() => visibleItems.value
+  .map((item) => {
+    const path = normalizePathForCompare(item?.path || '')
+    const expanded = item?.expanded ? 1 : 0
+    const loading = item?.loading ? 1 : 0
+    return `${path}:${expanded}:${loading}`
+  })
+  .join('|'))
+const showSearchPromptState = computed(() => isSearchMode.value && !isQueryReady.value && !searchLoading.value && !searchError.value)
+const showSearchEmptyState = computed(() => isSearchMode.value && isQueryReady.value && !searchLoading.value && !searchError.value && !searchResults.value.length)
+const showTreeEmptyState = computed(() => !isSearchMode.value && !treeLoading.value && !treeError.value && !treeItems.value.length)
 
 function isWindowsPath(value = '') {
   const text = String(value || '').trim()
@@ -247,6 +265,17 @@ function refreshTree() {
   }
 }
 
+function clearSearchRequest() {
+  if (searchTimer) {
+    window.clearTimeout(searchTimer)
+    searchTimer = null
+  }
+  if (searchAbortController) {
+    searchAbortController.abort()
+    searchAbortController = null
+  }
+}
+
 function findTreeNode(targetPath, nodes = rootNode.value ? [rootNode.value] : []) {
   const compareKey = normalizePathForCompare(targetPath)
   if (!compareKey) {
@@ -270,7 +299,215 @@ function findTreeNode(targetPath, nodes = rootNode.value ? [rootNode.value] : []
 
 function updateSelectedDirectory(item) {
   selectedPath.value = String(item?.path || '').trim()
-  selectedName.value = getDisplayName(item)
+}
+
+function getItemRefKey(pathValue = '') {
+  return normalizePathForCompare(pathValue)
+}
+
+function setItemRef(pathValue, element) {
+  const key = getItemRefKey(pathValue)
+  if (!key) {
+    return
+  }
+
+  if (element) {
+    itemRefs.set(key, element)
+    return
+  }
+
+  itemRefs.delete(key)
+}
+
+function scrollActiveItemIntoView() {
+  const target = itemRefs.get(getItemRefKey(selectedPath.value))
+  target?.scrollIntoView?.({ block: 'nearest' })
+}
+
+function focusSearchInput() {
+  nextTick(() => {
+    searchInputRef.value?.focus?.()
+  })
+}
+
+function syncSelectedDirectory() {
+  const items = visibleItems.value
+  if (!items.length) {
+    selectedPath.value = ''
+    return
+  }
+
+  const selectedKey = getItemRefKey(selectedPath.value)
+  if (selectedKey && items.some((item) => getItemRefKey(item?.path || '') === selectedKey)) {
+    return
+  }
+
+  updateSelectedDirectory(items[0])
+}
+
+function getCurrentActiveIndex() {
+  const items = visibleItems.value
+  if (!items.length) {
+    return -1
+  }
+
+  const selectedKey = getItemRefKey(selectedPath.value)
+  const index = items.findIndex((item) => getItemRefKey(item?.path || '') === selectedKey)
+  return index >= 0 ? index : 0
+}
+
+function getActiveItem() {
+  const items = visibleItems.value
+  const index = getCurrentActiveIndex()
+  if (index < 0 || !items.length) {
+    return null
+  }
+
+  return items[index] || null
+}
+
+function moveActive(step = 1) {
+  const items = visibleItems.value
+  if (!items.length) {
+    return false
+  }
+
+  const currentIndex = getCurrentActiveIndex()
+  const nextIndex = currentIndex < 0
+    ? 0
+    : (currentIndex + step + items.length) % items.length
+
+  updateSelectedDirectory(items[nextIndex])
+  nextTick(scrollActiveItemIntoView)
+  return true
+}
+
+async function expandActiveDirectory() {
+  if (isSearchMode.value) {
+    return false
+  }
+
+  const item = getActiveItem()
+  if (!item || !item.hasChildren) {
+    return false
+  }
+
+  if (!item.expanded) {
+    await toggleDirectory(item)
+    return true
+  }
+
+  const items = visibleItems.value
+  const currentIndex = getCurrentActiveIndex()
+  const nextItem = items[currentIndex + 1]
+  if (nextItem && getParentPath(nextItem.path) === item.path) {
+    updateSelectedDirectory(nextItem)
+    nextTick(scrollActiveItemIntoView)
+    return true
+  }
+
+  return false
+}
+
+function collapseActiveDirectory() {
+  if (isSearchMode.value) {
+    return false
+  }
+
+  const item = getActiveItem()
+  if (!item) {
+    return false
+  }
+
+  if (item.expanded && item.hasChildren) {
+    item.expanded = false
+    refreshTree()
+    updateSelectedDirectory(item)
+    return true
+  }
+
+  const parentPath = getParentPath(item.path)
+  if (!parentPath) {
+    return false
+  }
+
+  const parentNode = findTreeNode(parentPath)
+  if (!parentNode) {
+    return false
+  }
+
+  updateSelectedDirectory(parentNode)
+  nextTick(scrollActiveItemIntoView)
+  return true
+}
+
+function handleEscapeIntent(event) {
+  event?.preventDefault?.()
+
+  if (normalizedQuery.value) {
+    event?.stopPropagation?.()
+    query.value = ''
+    return
+  }
+
+  event?.stopPropagation?.()
+  emit('close')
+}
+
+function handleListKeydown(event) {
+  const key = String(event?.key || '')
+  if (!['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Enter', 'Escape'].includes(key)) {
+    return
+  }
+
+  if (isSearchMode.value && (key === 'ArrowLeft' || key === 'ArrowRight')) {
+    return
+  }
+
+  if (key === 'ArrowDown') {
+    event.preventDefault()
+    moveActive(1)
+    return
+  }
+
+  if (key === 'ArrowUp') {
+    event.preventDefault()
+    moveActive(-1)
+    return
+  }
+
+  if (key === 'Escape') {
+    handleEscapeIntent(event)
+    return
+  }
+
+  if (isSearchMode.value) {
+    if (key === 'Enter') {
+      event.preventDefault()
+      const activeItem = getActiveItem()
+      if (activeItem) {
+        handleSearchSelect(activeItem)
+      }
+    }
+    return
+  }
+
+  if (key === 'ArrowRight') {
+    event.preventDefault()
+    expandActiveDirectory()
+    return
+  }
+
+  if (key === 'ArrowLeft') {
+    event.preventDefault()
+    collapseActiveDirectory()
+    return
+  }
+
+  if (key === 'Enter') {
+    event.preventDefault()
+    handlePick()
+  }
 }
 
 async function loadDirectoryNode(node, options = {}) {
@@ -359,12 +596,10 @@ async function expandToPath(targetPath = '') {
 
 async function initializePicker() {
   query.value = ''
-  activeTab.value = 'tree'
   searchResults.value = []
   searchError.value = ''
   searchTruncated.value = false
   selectedPath.value = ''
-  selectedName.value = ''
 
   await loadHomeRoot()
 
@@ -402,15 +637,15 @@ function handleTreeSelect(item) {
   }
 
   updateSelectedDirectory(item)
-  activeTab.value = 'tree'
 }
 
 async function refreshSearch() {
   const keyword = String(query.value || '').trim()
   searchRequestId += 1
   const requestId = searchRequestId
+  clearSearchRequest()
 
-  if (!props.open || !keyword || !homePath.value) {
+  if (!props.open || !keyword || !homePath.value || !isQueryReady.value) {
     searchLoading.value = false
     searchError.value = ''
     searchResults.value = []
@@ -420,11 +655,13 @@ async function refreshSearch() {
 
   searchLoading.value = true
   searchError.value = ''
+  searchAbortController = new AbortController()
 
   try {
     const payload = await searchCodexDirectories(keyword, {
       path: homePath.value,
       limit: 80,
+      signal: searchAbortController.signal,
     })
 
     if (requestId !== searchRequestId) {
@@ -434,6 +671,9 @@ async function refreshSearch() {
     searchResults.value = Array.isArray(payload.items) ? payload.items : []
     searchTruncated.value = Boolean(payload.truncated)
   } catch (err) {
+    if (isAbortError(err)) {
+      return
+    }
     if (requestId !== searchRequestId) {
       return
     }
@@ -443,18 +683,18 @@ async function refreshSearch() {
     searchTruncated.value = false
   } finally {
     if (requestId === searchRequestId) {
+      searchAbortController = null
+    }
+    if (requestId === searchRequestId) {
       searchLoading.value = false
     }
   }
 }
 
 function scheduleSearch() {
-  if (searchTimer) {
-    window.clearTimeout(searchTimer)
-    searchTimer = null
-  }
+  clearSearchRequest()
 
-  if (!String(query.value || '').trim()) {
+  if (!String(query.value || '').trim() || !isQueryReady.value) {
     searchLoading.value = false
     searchError.value = ''
     searchResults.value = []
@@ -465,8 +705,9 @@ function scheduleSearch() {
   searchLoading.value = true
   searchError.value = ''
   searchTimer = window.setTimeout(() => {
+    searchTimer = null
     refreshSearch()
-  }, 120)
+  }, WORKSPACE_PATH_SEARCH_DEBOUNCE_MS)
 }
 
 async function handleSearchSelect(item) {
@@ -474,8 +715,8 @@ async function handleSearchSelect(item) {
     return
   }
 
-  activeTab.value = 'tree'
   await expandToPath(item.path)
+  query.value = ''
 }
 
 function handlePick() {
@@ -488,24 +729,34 @@ function handlePick() {
 }
 
 watch(query, () => {
-  activeTab.value = query.value.trim() ? 'search' : 'tree'
   scheduleSearch()
 })
+
+watch(
+  visibleItemsSignature,
+  () => {
+    syncSelectedDirectory()
+    nextTick(scrollActiveItemIntoView)
+  },
+  { immediate: true }
+)
 
 watch(
   () => props.open,
   (open) => {
     if (open) {
       initializePicker().catch(() => {})
+      focusSearchInput()
       return
     }
 
-    if (searchTimer) {
-      window.clearTimeout(searchTimer)
-      searchTimer = null
-    }
+    clearSearchRequest()
   }
 )
+
+onBeforeUnmount(() => {
+  clearSearchRequest()
+})
 
 </script>
 
@@ -533,215 +784,198 @@ watch(
       </div>
     </template>
 
-    <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
-          <div class="theme-divider mt-4 rounded-sm border border-dashed px-3 py-2">
-            <div class="flex items-start gap-2 text-xs leading-5">
-              <span class="theme-muted-text shrink-0">{{ t('directoryPicker.currentSelection') }}</span>
-              <span class="min-w-0 break-all font-mono text-[var(--theme-textPrimary)]">
-                {{ selectedPath || t('directoryPicker.selectionPlaceholder') }}
-              </span>
+    <div class="flex min-h-0 flex-1 flex-col overflow-hidden" @keydown="handleListKeydown">
+      <div class="theme-divider mt-4 rounded-sm border border-dashed px-3 py-2">
+        <div class="flex items-start gap-2 text-xs leading-5">
+          <span class="theme-muted-text shrink-0">{{ t('directoryPicker.currentSelection') }}</span>
+          <span class="min-w-0 break-all font-mono text-[var(--theme-textPrimary)]">
+            {{ selectedPath || t('directoryPicker.selectionPlaceholder') }}
+          </span>
+        </div>
+      </div>
+
+      <label class="theme-muted-text mt-4 block text-xs">
+        <span>{{ t('directoryPicker.searchLabel') }}</span>
+        <div
+          class="theme-input-shell mt-1 flex h-10 items-center gap-2 rounded-sm border px-3 transition focus-within:ring-2"
+        >
+          <Search class="h-4 w-4 shrink-0 text-[var(--theme-textMuted)]" />
+          <input
+            ref="searchInputRef"
+            v-model="query"
+            type="text"
+            :placeholder="t('directoryPicker.searchPlaceholder')"
+            class="min-w-0 flex-1 border-0 bg-transparent px-0 text-sm text-[var(--theme-textPrimary)] outline-none placeholder:text-[var(--theme-textMuted)]"
+            @keydown.esc="handleEscapeIntent"
+          >
+        </div>
+      </label>
+
+      <div class="theme-content-panel mt-3 min-h-0 flex-1 overflow-y-auto p-2">
+        <div
+          v-if="isSearchMode && searchError"
+          class="theme-status-danger rounded-sm border border-dashed px-3 py-3 text-xs"
+        >
+          {{ searchError }}
+        </div>
+
+        <div
+          v-else-if="!isSearchMode && treeError"
+          class="theme-status-danger rounded-sm border border-dashed px-3 py-3 text-xs"
+        >
+          {{ treeError }}
+        </div>
+
+        <div
+          v-else-if="isSearchMode && searchLoading"
+          class="theme-empty-state flex items-center justify-center gap-2 px-3 py-8 text-sm"
+        >
+          <LoaderCircle class="h-4 w-4 animate-spin" />
+          <span>{{ t('directoryPicker.searching') }}</span>
+        </div>
+
+        <div
+          v-else-if="!isSearchMode && treeLoading"
+          class="theme-empty-state flex items-center justify-center gap-2 px-3 py-8 text-sm"
+        >
+          <LoaderCircle class="h-4 w-4 animate-spin" />
+          <span>{{ t('directoryPicker.treeLoading') }}</span>
+        </div>
+
+        <div
+          v-else-if="showSearchPromptState"
+          class="theme-empty-state px-3 py-8 text-sm"
+        >
+          {{ t('directoryPicker.searchMinKeywordHint', { count: WORKSPACE_SEARCH_MIN_QUERY_LENGTH }) }}
+        </div>
+
+        <div
+          v-else-if="showSearchEmptyState"
+          class="theme-empty-state px-3 py-8 text-sm"
+        >
+          {{ t('directoryPicker.noSearchResults') }}
+        </div>
+
+        <div
+          v-else-if="showTreeEmptyState"
+          class="theme-empty-state px-3 py-8 text-sm"
+        >
+          {{ t('directoryPicker.emptyTree') }}
+        </div>
+
+        <div v-else-if="isSearchMode" class="space-y-1">
+          <button
+            v-for="item in searchResults"
+            :key="item.path"
+            :ref="(element) => setItemRef(item.path, element)"
+            type="button"
+            class="theme-list-row focus:outline-none"
+            :class="normalizePathForCompare(selectedPath) === normalizePathForCompare(item.path)
+              ? 'theme-list-item-active'
+              : 'theme-list-item-hover'"
+            @click="handleSearchSelect(item)"
+          >
+            <FolderOpen class="theme-list-item-icon" />
+            <div class="min-w-0 flex-1">
+              <div>
+                <span
+                  class="theme-list-item-title truncate"
+                  v-html="getHighlightedName(item)"
+                />
+              </div>
+              <div
+                class="theme-list-item-subtitle theme-list-item-subtitle--mono truncate"
+                v-html="getHighlightedPath(item)"
+              />
             </div>
-          </div>
+          </button>
+          <p v-if="searchTruncated" class="theme-muted-text px-1 pt-2 text-xs">
+            {{ t('directoryPicker.truncatedHint') }}
+          </p>
+        </div>
 
-          <label class="theme-muted-text mt-4 block text-xs">
-            <span>{{ t('directoryPicker.searchLabel') }}</span>
-            <div
-              class="theme-input-shell mt-1 flex h-10 items-center gap-2 rounded-sm border px-3 transition focus-within:ring-2"
-            >
-              <Search class="h-4 w-4 shrink-0 text-[var(--theme-textMuted)]" />
-              <input
-                v-model="query"
-                type="text"
-                :placeholder="t('directoryPicker.searchPlaceholder')"
-                class="min-w-0 flex-1 border-0 bg-transparent px-0 text-sm text-[var(--theme-textPrimary)] outline-none placeholder:text-[var(--theme-textMuted)]"
-              >
-            </div>
-          </label>
-
-          <div class="mt-4 flex items-center gap-1.5">
-            <button
-              type="button"
-              class="inline-flex h-8 items-center gap-1 rounded-sm border px-2 text-[11px] transition"
-              :class="activeTab === 'search' ? 'tool-button-accent-subtle' : 'theme-filter-idle border-dashed'"
-              @click="activeTab = 'search'"
-            >
-              <Search class="h-3.5 w-3.5" />
-              <span>{{ t('directoryPicker.searchTab') }}</span>
-            </button>
-            <button
-              type="button"
-              class="inline-flex h-8 items-center gap-1 rounded-sm border px-2 text-[11px] transition"
-              :class="activeTab === 'tree' ? 'tool-button-accent-subtle' : 'theme-filter-idle border-dashed'"
-              @click="activeTab = 'tree'"
-            >
-              <FolderOpen class="h-3.5 w-3.5" />
-              <span>{{ t('directoryPicker.treeTab') }}</span>
-            </button>
-          </div>
-
-          <div class="theme-content-panel mt-3 min-h-0 flex-1 overflow-y-auto p-2">
-            <div
-              v-if="activeTab === 'search' && searchError"
-              class="theme-status-danger rounded-sm border border-dashed px-3 py-3 text-xs"
-            >
-              {{ searchError }}
-            </div>
-
-            <div
-              v-else-if="activeTab === 'tree' && treeError"
-              class="theme-status-danger rounded-sm border border-dashed px-3 py-3 text-xs"
-            >
-              {{ treeError }}
-            </div>
-
-            <div
-              v-else-if="activeTab === 'search' && searchLoading"
-              class="theme-empty-state flex items-center justify-center gap-2 px-3 py-8 text-sm"
-            >
-              <LoaderCircle class="h-4 w-4 animate-spin" />
-              <span>{{ t('directoryPicker.searching') }}</span>
-            </div>
-
-            <div
-              v-else-if="activeTab === 'tree' && treeLoading"
-              class="theme-empty-state flex items-center justify-center gap-2 px-3 py-8 text-sm"
-            >
-              <LoaderCircle class="h-4 w-4 animate-spin" />
-              <span>{{ t('directoryPicker.treeLoading') }}</span>
-            </div>
-
-            <div
-              v-else-if="showSearchPromptState"
-              class="theme-empty-state px-3 py-8 text-sm"
-            >
-              {{ t('directoryPicker.searchPrompt') }}
-            </div>
-
-            <div
-              v-else-if="showSearchEmptyState"
-              class="theme-empty-state px-3 py-8 text-sm"
-            >
-              {{ t('directoryPicker.noSearchResults') }}
-            </div>
-
-            <div
-              v-else-if="showTreeEmptyState"
-              class="theme-empty-state px-3 py-8 text-sm"
-            >
-              {{ t('directoryPicker.emptyTree') }}
-            </div>
-
-            <div v-else-if="activeTab === 'search'" class="space-y-1">
+        <div v-else class="space-y-1">
+          <div
+            v-for="item in treeItems"
+            :key="item.path"
+            :ref="(element) => setItemRef(item.path, element)"
+            class="theme-list-tree-item outline-none focus:outline-none focus-visible:outline-none"
+            :class="normalizePathForCompare(selectedPath) === normalizePathForCompare(item.path)
+              ? 'theme-list-item-active'
+              : item.expanded
+                ? 'theme-list-item-expanded'
+                : 'theme-list-item-hover'"
+            :style="{ paddingLeft: `${item.depth * 16 + 6}px` }"
+          >
+            <div class="flex items-start gap-1.5">
               <button
-                v-for="item in searchResults"
-                :key="item.path"
                 type="button"
-                class="flex w-full items-start gap-2 rounded-sm border border-transparent px-2.5 py-1.5 text-left transition"
-                :class="normalizePathForCompare(selectedPath) === normalizePathForCompare(item.path)
-                  ? 'theme-list-item-active'
-                  : 'theme-list-item-hover'"
-                @click="handleSearchSelect(item)"
+                class="theme-icon-button h-5 w-5 shrink-0"
+                :class="!item.hasChildren ? 'invisible pointer-events-none' : ''"
+                @click.stop="toggleDirectory(item)"
               >
-                <FolderOpen class="theme-muted-text mt-0.5 h-4 w-4 shrink-0" />
+                <LoaderCircle v-if="item.loading" class="h-3.5 w-3.5 animate-spin" />
+                <ChevronRight
+                  v-else
+                  class="h-3.5 w-3.5 transition"
+                  :class="item.expanded ? 'rotate-90 text-[var(--theme-textPrimary)]' : ''"
+                />
+              </button>
+
+              <button
+                type="button"
+                class="flex min-w-0 flex-1 items-start gap-1.5 rounded-sm px-0.5 py-0.5 text-left"
+                @click="handleTreeSelect(item)"
+              >
+                <FolderOpen
+                  class="h-4 w-4 shrink-0"
+                  :class="normalizePathForCompare(selectedPath) === normalizePathForCompare(item.path)
+                    ? 'text-[var(--theme-textPrimary)]'
+                    : 'text-[var(--theme-textMuted)]'"
+                />
                 <div class="min-w-0 flex-1">
-                  <div>
-                    <span
-                      class="truncate text-[13px] text-[var(--theme-textPrimary)]"
-                      v-html="getHighlightedName(item)"
-                    />
+                  <div
+                    class="theme-list-item-title truncate"
+                    :class="item.isHomeRoot
+                      ? 'font-medium text-[var(--theme-textSecondary)]'
+                      : 'font-medium text-[var(--theme-textPrimary)]'"
+                  >
+                    {{ getDisplayName(item) }}
                   </div>
                   <div
-                    class="theme-muted-text truncate font-mono text-[10px]"
-                    v-html="getHighlightedPath(item)"
-                  />
+                    v-if="item.isHomeRoot"
+                    class="theme-list-item-subtitle theme-list-item-subtitle--mono truncate"
+                  >
+                    {{ item.path }}
+                  </div>
                 </div>
               </button>
-              <p v-if="searchTruncated" class="theme-muted-text px-1 pt-2 text-xs">
-                {{ t('directoryPicker.truncatedHint') }}
-              </p>
-            </div>
-
-            <div v-else class="space-y-1">
-              <div
-                v-for="item in treeItems"
-                :key="item.path"
-                class="rounded-sm border border-transparent px-1.5 py-1 transition"
-                :class="normalizePathForCompare(selectedPath) === normalizePathForCompare(item.path)
-                  ? 'theme-list-item-active'
-                  : item.expanded
-                    ? 'theme-list-item-expanded'
-                    : 'theme-list-item-hover'"
-                :style="{ paddingLeft: `${item.depth * 16 + 6}px` }"
-              >
-                <div class="flex items-start gap-1.5">
-                  <button
-                    type="button"
-                    class="theme-icon-button h-5 w-5 shrink-0"
-                    :class="!item.hasChildren ? 'invisible pointer-events-none' : ''"
-                    @click.stop="toggleDirectory(item)"
-                  >
-                    <LoaderCircle v-if="item.loading" class="h-3.5 w-3.5 animate-spin" />
-                    <ChevronRight
-                      v-else
-                      class="h-3.5 w-3.5 transition"
-                      :class="item.expanded ? 'rotate-90 text-[var(--theme-textPrimary)]' : ''"
-                    />
-                  </button>
-
-                  <button
-                    type="button"
-                    class="flex min-w-0 flex-1 items-start gap-1.5 rounded-sm px-0.5 py-0.5 text-left"
-                    @click="handleTreeSelect(item)"
-                  >
-                    <FolderOpen
-                      class="h-4 w-4 shrink-0"
-                      :class="normalizePathForCompare(selectedPath) === normalizePathForCompare(item.path)
-                        ? 'text-[var(--theme-textPrimary)]'
-                        : 'text-[var(--theme-textMuted)]'"
-                    />
-                    <div class="min-w-0 flex-1">
-                      <div
-                        class="truncate text-[13px]"
-                        :class="item.isHomeRoot
-                          ? 'font-medium text-[var(--theme-textSecondary)]'
-                          : 'font-medium text-[var(--theme-textPrimary)]'"
-                      >
-                        {{ getDisplayName(item) }}
-                      </div>
-                      <div
-                        v-if="item.isHomeRoot"
-                        class="theme-muted-text truncate font-mono text-[10px]"
-                      >
-                        {{ item.path }}
-                      </div>
-                    </div>
-                  </button>
-                </div>
-              </div>
             </div>
           </div>
         </div>
+      </div>
+    </div>
 
-        <div class="theme-divider flex flex-col-reverse gap-2 border-t border-dashed px-4 py-4 sm:flex-row sm:items-center sm:justify-end sm:px-5">
-          <div class="flex flex-col-reverse gap-2 sm:flex-row sm:items-center">
-            <button
-              type="button"
-              class="tool-button w-full px-3 py-2 text-xs sm:w-auto"
-              :disabled="treeLoading || searchLoading"
-              @click="emit('close')"
-            >
-              {{ t('directoryPicker.cancel') }}
-            </button>
-            <button
-              type="button"
-              class="tool-button tool-button-primary inline-flex w-full items-center justify-center gap-2 px-3 py-2 text-xs sm:w-auto"
-              :disabled="treeLoading || searchLoading || !selectedPath"
-              @click="handlePick"
-            >
-              <Check class="h-4 w-4" />
-              <span>{{ t('directoryPicker.useCurrentDirectory') }}</span>
-            </button>
-          </div>
+    <div class="theme-divider flex flex-col-reverse gap-2 border-t border-dashed px-4 py-4 sm:flex-row sm:items-center sm:justify-end sm:px-5">
+      <div class="flex flex-col-reverse gap-2 sm:flex-row sm:items-center">
+        <button
+          type="button"
+          class="tool-button w-full px-3 py-2 text-xs sm:w-auto"
+          :disabled="treeLoading || searchLoading"
+          @click="emit('close')"
+        >
+          {{ t('directoryPicker.cancel') }}
+        </button>
+        <button
+          type="button"
+          class="tool-button tool-button-primary inline-flex w-full items-center justify-center gap-2 px-3 py-2 text-xs sm:w-auto"
+          :disabled="treeLoading || searchLoading || !selectedPath"
+          @click="handlePick"
+        >
+          <Check class="h-4 w-4" />
+          <span>{{ t('directoryPicker.useCurrentDirectory') }}</span>
+        </button>
+      </div>
     </div>
   </DialogShell>
 </template>

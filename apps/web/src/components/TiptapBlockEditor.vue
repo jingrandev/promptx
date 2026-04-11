@@ -265,6 +265,15 @@ const editor = useEditor({
       class: 'tiptap-editor min-h-full outline-none',
     },
     handleKeyDown(view, event) {
+      if (
+        !event.shiftKey
+        && !event.altKey
+        && (event.metaKey || event.ctrlKey)
+        && String(event.key || '').toLowerCase() === 'k'
+      ) {
+        return openShortcutMentionPicker()
+      }
+
       return handleMentionPickerKeydown(event)
     },
   },
@@ -729,6 +738,29 @@ function updateMentionAnchor(position = mentionState.value.end) {
 
 function syncMentionState(currentEditor = editor.value) {
   const context = getCurrentTextLikeContext(currentEditor)
+  const existingState = mentionState.value
+
+  if (existingState.open && existingState.trigger === 'shortcut') {
+    if (!context || context.clientId !== existingState.clientId || context.from < existingState.start) {
+      closeMentionPicker()
+      return
+    }
+
+    const mentionQuery = currentEditor.state.doc.textBetween(existingState.start, context.from, '\n', '\0')
+    if (/\s/.test(mentionQuery)) {
+      closeMentionPicker()
+      return
+    }
+
+    mentionDismissedState.value = null
+    mentionState.value = {
+      ...existingState,
+      end: context.from,
+      query: mentionQuery,
+    }
+    updateMentionAnchor(context.from)
+    return
+  }
 
   if (!context) {
     closeMentionPicker()
@@ -771,6 +803,27 @@ function syncMentionState(currentEditor = editor.value) {
   updateMentionAnchor(end)
 }
 
+function openShortcutMentionPicker() {
+  const currentEditor = editor.value
+  const context = getCurrentTextLikeContext(currentEditor)
+  if (!currentEditor || !context) {
+    return false
+  }
+
+  mentionDismissedState.value = null
+  mentionState.value = {
+    open: true,
+    start: context.from,
+    end: context.from,
+    query: '',
+    trigger: 'shortcut',
+    blockType: context.nodeTypeName,
+    clientId: context.clientId,
+  }
+  updateMentionAnchor(context.from)
+  return true
+}
+
 function applyMentionSelection(item) {
   const currentEditor = editor.value
   const pathValue = String(item?.path || '').trim()
@@ -781,7 +834,7 @@ function applyMentionSelection(item) {
     return false
   }
 
-  const insertedValue = `@${pathValue} `
+  const insertedValue = state.trigger === 'shortcut' ? `${pathValue} ` : `@${pathValue} `
   const selectionTo = state.start + insertedValue.length
 
   currentEditor.chain().focus().command(({ tr, dispatch }) => {
@@ -815,6 +868,10 @@ function handleMentionPickerKeydown(event) {
     return Boolean(mentionPickerRef.value?.moveActive?.(-1))
   }
 
+  if (mentionState.value.query && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
+    return false
+  }
+
   if (event.key === 'ArrowRight') {
     const result = mentionPickerRef.value?.expandActiveDirectory?.()
     if (result && typeof result.then === 'function') {
@@ -826,10 +883,6 @@ function handleMentionPickerKeydown(event) {
 
   if (event.key === 'ArrowLeft') {
     return Boolean(mentionPickerRef.value?.collapseActiveDirectory?.())
-  }
-
-  if (!event.altKey && !event.metaKey && !event.ctrlKey && event.key === 'Tab') {
-    return Boolean(mentionPickerRef.value?.switchTab?.(event.shiftKey ? -1 : 1))
   }
 
   if (!event.shiftKey && !event.altKey && !event.metaKey && !event.ctrlKey && event.key === 'Enter') {

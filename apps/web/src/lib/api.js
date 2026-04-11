@@ -30,6 +30,7 @@ export {
   createCodexSession,
   deleteCodexSession,
   getCodexSessionFileContent,
+  searchCodexSessionFileContent,
   getTaskGitDiff,
   listCodexRunEvents,
   listCodexDirectoryTree,

@@ -55,6 +55,7 @@ import {
   readWorkspaceFileContent,
   listWorkspaceTree,
   searchDirectoryPickerEntries,
+  searchWorkspaceFileContent,
   searchWorkspaceEntries,
 } from './workspaceFiles.js'
 import { ensurePromptxStorageReady, serverRootDir } from './appPaths.js'
@@ -422,6 +423,7 @@ registerCodexRoutes(app, {
   resetPromptxCodexSession,
   runDispatchService,
   searchDirectoryPickerEntries,
+  searchWorkspaceFileContent,
   searchWorkspaceEntries,
   updatePromptxCodexSession,
 })

@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { renderHighlightedCodeLines, renderSourceCodePreview } from './sourceCodePreview.js'
+import {
+  inferPreviewLanguageFromPath,
+  renderHighlightedCodeLines,
+  renderSourceCodePreview,
+  resolvePreviewLanguage,
+} from './sourceCodePreview.js'
 
 test('renderHighlightedCodeLines falls back to plain text when diff threshold is exceeded', async () => {
   const lines = Array.from({ length: 3 }, (_, index) => `const value${index} = ${index}`)
@@ -28,4 +33,17 @@ test('renderSourceCodePreview falls back to plain table rows when source thresho
   assert.match(rendered.html, /source-code-view__gutter/)
   assert.match(rendered.html, /const answer = 42/)
   assert.doesNotMatch(rendered.html, /style="color:/)
+})
+
+test('source preview resolves shell and powershell aliases', () => {
+  assert.equal(resolvePreviewLanguage('fish'), 'fish')
+  assert.equal(resolvePreviewLanguage('ps1'), 'powershell')
+  assert.equal(resolvePreviewLanguage('pwsh'), 'powershell')
+  assert.equal(resolvePreviewLanguage('csh'), 'bash')
+})
+
+test('source preview infers language from script file extensions', () => {
+  assert.equal(inferPreviewLanguageFromPath('scripts/hello.fish'), 'fish')
+  assert.equal(inferPreviewLanguageFromPath('scripts/hello.ps1'), 'powershell')
+  assert.equal(inferPreviewLanguageFromPath('scripts/hello.csh'), 'bash')
 })

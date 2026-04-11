@@ -83,6 +83,7 @@ test('codex routes return stop acceptance and event history', async () => {
       },
     },
     searchDirectoryPickerEntries: () => ({}),
+    searchWorkspaceFileContent: () => ({}),
     searchWorkspaceEntries: () => ({}),
     updatePromptxCodexSession: () => null,
   })
@@ -139,6 +140,7 @@ test('codex routes broadcast task updates when deleting a session with reference
       },
     },
     searchDirectoryPickerEntries: () => ({}),
+    searchWorkspaceFileContent: () => ({}),
     searchWorkspaceEntries: () => ({}),
     updatePromptxCodexSession: () => null,
   })
@@ -204,6 +206,7 @@ test('codex routes reset session and clear related run history', async () => {
       },
     },
     searchDirectoryPickerEntries: () => ({}),
+    searchWorkspaceFileContent: () => ({}),
     searchWorkspaceEntries: () => ({}),
     updatePromptxCodexSession: () => null,
   })
@@ -239,6 +242,76 @@ test('codex routes reset session and clear related run history', async () => {
         payload: { taskSlug: 'task-b' },
       },
     ])
+  } finally {
+    await app.close()
+  }
+})
+
+test('codex routes expose workspace content search for source browser', async () => {
+  const app = Fastify()
+  registerCodexRoutes(app, {
+    broadcastServerEvent: () => {},
+    clearTaskCodexSessionReferences: () => [],
+    createPromptxCodexSession: () => ({ id: 'session-1' }),
+    decorateCodexSession: (session) => session,
+    decorateCodexSessionList: (items) => items,
+    deletePromptxCodexSession: () => null,
+    getCodexRunById: () => null,
+    getPromptxCodexSessionById: (sessionId) => (sessionId === 'session-1' ? { id: 'session-1', cwd: '/tmp/project' } : null),
+    getRunningCodexRunBySessionId: () => null,
+    isActiveRunStatus: () => false,
+    listCodexRunEvents: () => [],
+    listDirectoryPickerTree: () => ({}),
+    listPromptxCodexSessions: () => [],
+    listWorkspaceSuggestions: () => [],
+    listWorkspaceTree: () => ({}),
+    readWorkspaceFileContent: () => ({}),
+    runDispatchService: {
+      async requestRunStop() {
+        return null
+      },
+    },
+    searchDirectoryPickerEntries: () => ({}),
+    searchWorkspaceEntries: () => ({}),
+    searchWorkspaceFileContent(cwd, options) {
+      return {
+        cwd,
+        query: options.query,
+        items: [
+          {
+            path: 'src/main.ts',
+            line: 3,
+            column: 5,
+            preview: 'const needle = true',
+          },
+        ],
+        truncated: false,
+      }
+    },
+    updatePromptxCodexSession: () => null,
+  })
+  await app.ready()
+
+  try {
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/codex/sessions/session-1/files/content-search?q=needle',
+    })
+
+    assert.equal(response.statusCode, 200)
+    assert.deepEqual(response.json(), {
+      cwd: '/tmp/project',
+      query: 'needle',
+      items: [
+        {
+          path: 'src/main.ts',
+          line: 3,
+          column: 5,
+          preview: 'const needle = true',
+        },
+      ],
+      truncated: false,
+    })
   } finally {
     await app.close()
   }

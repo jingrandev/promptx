@@ -77,6 +77,7 @@ function registerCodexRoutes(app, options = {}) {
     resetPromptxCodexSession = () => null,
     runDispatchService,
     searchDirectoryPickerEntries,
+    searchWorkspaceFileContent,
     searchWorkspaceEntries,
     updatePromptxCodexSession,
   } = options
@@ -136,6 +137,18 @@ function registerCodexRoutes(app, options = {}) {
 
     return readWorkspaceFileContent(session.cwd, {
       path: request.query?.path,
+      limit: request.query?.limit,
+    })
+  })
+
+  app.get('/api/codex/sessions/:sessionId/files/content-search', async (request, reply) => {
+    const session = getPromptxCodexSessionById(request.params.sessionId)
+    if (!session) {
+      return reply.code(404).send({ messageKey: 'errors.sessionNotFound', message: '没有找到对应的 PromptX 项目。' })
+    }
+
+    return searchWorkspaceFileContent(session.cwd, {
+      query: request.query?.q,
       limit: request.query?.limit,
     })
   })

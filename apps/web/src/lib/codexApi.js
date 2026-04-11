@@ -35,6 +35,7 @@ export function listCodexDirectoryTree(options = {}) {
   const query = params.toString()
   return request(`/api/codex/directories/tree${query ? `?${query}` : ''}`, {
     cache: 'no-store',
+    signal: options.signal,
   })
 }
 
@@ -57,6 +58,7 @@ export function searchCodexDirectories(query, options = {}) {
   const search = params.toString()
   return request(`/api/codex/directories/search${search ? `?${search}` : ''}`, {
     cache: 'no-store',
+    signal: options.signal,
   })
 }
 
@@ -101,6 +103,7 @@ export function listCodexSessionFiles(sessionId, options = {}) {
   const query = params.toString()
   return request(`/api/codex/sessions/${encodeURIComponent(sessionId)}/files/tree${query ? `?${query}` : ''}`, {
     cache: 'no-store',
+    signal: options.signal,
   })
 }
 
@@ -123,6 +126,7 @@ export function searchCodexSessionFiles(sessionId, query, options = {}) {
   const search = params.toString()
   return request(`/api/codex/sessions/${encodeURIComponent(sessionId)}/files/search${search ? `?${search}` : ''}`, {
     cache: 'no-store',
+    signal: options.signal,
   })
 }
 
@@ -145,6 +149,30 @@ export function getCodexSessionFileContent(sessionId, options = {}) {
   const query = params.toString()
   return request(`/api/codex/sessions/${encodeURIComponent(sessionId)}/files/content${query ? `?${query}` : ''}`, {
     cache: 'no-store',
+    signal: options.signal,
+  })
+}
+
+export function searchCodexSessionFileContent(sessionId, query, options = {}) {
+  const params = new URLSearchParams()
+  const keyword = String(query || '').trim()
+  const limit = Number(options.limit || 80)
+  const refreshToken = String(options.refreshToken || '').trim()
+
+  if (keyword) {
+    params.set('q', keyword)
+  }
+  if (Number.isFinite(limit) && limit > 0) {
+    params.set('limit', String(limit))
+  }
+  if (refreshToken) {
+    params.set('_', refreshToken)
+  }
+
+  const search = params.toString()
+  return request(`/api/codex/sessions/${encodeURIComponent(sessionId)}/files/content-search${search ? `?${search}` : ''}`, {
+    cache: 'no-store',
+    signal: options.signal,
   })
 }
 

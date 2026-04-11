@@ -469,26 +469,116 @@ function handleBeforeUnload(event) {
   event.returnValue = ''
 }
 
+function closeTopWorkbenchDialog() {
+  if (showTodoUseConfirm.value) {
+    closeTodoUseConfirm()
+    return true
+  }
+
+  if (showTodoDeleteConfirm.value) {
+    closeTodoDeleteConfirm()
+    return true
+  }
+
+  if (showClearDialog.value) {
+    closeClearDialog()
+    return true
+  }
+
+  if (showDeleteDialog.value) {
+    closeDeleteDialog()
+    return true
+  }
+
+  if (showEditTaskDialog.value) {
+    closeEditTaskDialog()
+    return true
+  }
+
+  if (showTodoDialog.value) {
+    closeTodoDialog()
+    return true
+  }
+
+  if (showDiffDialog.value) {
+    closeTaskDiff()
+    return true
+  }
+
+  if (showSettingsDialog.value) {
+    closeSettingsDialog()
+    return true
+  }
+
+  if (getCurrentPanelRef(currentTaskSlug.value)?.closeTopDialog?.()) {
+    return true
+  }
+
+  return false
+}
+
 function handleWindowKeydown(event) {
+  const key = String(event.key || '')
+  const keyLower = key.toLowerCase()
+  const commandPressed = event.metaKey || event.ctrlKey
+
+  if (key === 'Escape') {
+    if (closeTopWorkbenchDialog()) {
+      event.preventDefault()
+      event.stopImmediatePropagation?.()
+    }
+    return
+  }
+
   if (!event.metaKey && !event.ctrlKey && event.shiftKey && event.key === 'Enter') {
     event.preventDefault()
     sendToCodex()
     return
   }
 
-  if (!(event.metaKey || event.ctrlKey)) {
+  if (!commandPressed) {
     return
   }
 
-  if (event.key.toLowerCase() === 's') {
+  if (keyLower === 's') {
     event.preventDefault()
     saveTask({ auto: false })
     return
   }
 
-  if (event.shiftKey && event.key === 'Backspace') {
+  if (event.shiftKey && key === 'Backspace') {
     event.preventDefault()
     openClearDialog()
+    return
+  }
+
+  if (event.isComposing) {
+    return
+  }
+
+  if (event.shiftKey && event.code === 'Comma') {
+    event.preventDefault()
+    openSettingsDialog()
+    return
+  }
+
+  if (event.shiftKey && keyLower === 'k') {
+    event.preventDefault()
+    getCurrentPanelRef(currentTaskSlug.value)?.openProjectManager?.()
+    return
+  }
+
+  if (event.shiftKey && keyLower === 'o') {
+    event.preventDefault()
+    getCurrentPanelRef(currentTaskSlug.value)?.openSourceBrowser?.()
+    return
+  }
+
+  if (event.shiftKey && keyLower === 'd') {
+    event.preventDefault()
+    if (currentTaskDiffSupported.value) {
+      openTaskDiff('workspace')
+    }
   }
 }
 

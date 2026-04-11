@@ -37,19 +37,24 @@ const DIRECTORY_PICKER_HIDDEN_NAMES = new Set([
 
 const DEFAULT_TREE_LIMIT = 200
 const DEFAULT_SEARCH_LIMIT = 80
+const DEFAULT_CONTENT_SEARCH_LIMIT = 80
 const MAX_SEARCH_VISITS = 20000
 const DIRECTORY_PICKER_LIMIT = 240
 const DEFAULT_FILE_PREVIEW_LIMIT = 200 * 1024
 const MAX_IMAGE_PREVIEW_BYTES = 2 * 1024 * 1024
+const MAX_CONTENT_SEARCH_FILE_BYTES = 1024 * 1024
+const MAX_CONTENT_MATCHES_PER_FILE = 20
 
 const TEXT_FILE_EXTENSIONS = new Set([
   '.c',
   '.cc',
   '.conf',
   '.cpp',
+  '.csh',
   '.css',
   '.csv',
   '.env',
+  '.fish',
   '.gitignore',
   '.go',
   '.graphql',
@@ -63,6 +68,7 @@ const TEXT_FILE_EXTENSIONS = new Set([
   '.log',
   '.md',
   '.mjs',
+  '.ps1',
   '.py',
   '.rb',
   '.rs',
@@ -87,6 +93,7 @@ const IMAGE_MIME_TYPES = new Map([
   ['.jpeg', 'image/jpeg'],
   ['.jpg', 'image/jpeg'],
   ['.png', 'image/png'],
+  ['.svg', 'image/svg+xml'],
   ['.webp', 'image/webp'],
 ])
 
@@ -96,8 +103,10 @@ const LANGUAGE_BY_EXTENSION = new Map([
   ['.c', 'c'],
   ['.cc', 'cpp'],
   ['.cpp', 'cpp'],
+  ['.csh', 'bash'],
   ['.css', 'css'],
   ['.diff', 'diff'],
+  ['.fish', 'fish'],
   ['.go', 'go'],
   ['.h', 'c'],
   ['.html', 'html'],
@@ -107,6 +116,7 @@ const LANGUAGE_BY_EXTENSION = new Map([
   ['.jsx', 'react'],
   ['.md', 'markdown'],
   ['.mjs', 'javascript'],
+  ['.ps1', 'powershell'],
   ['.py', 'python'],
   ['.rs', 'rust'],
   ['.sh', 'bash'],
@@ -120,7 +130,17 @@ const LANGUAGE_BY_EXTENSION = new Map([
   ['.yaml', 'yaml'],
   ['.yml', 'yaml'],
   ['Dockerfile', 'dockerfile'],
+  ['pip', 'python'],
+  ['pip3', 'python'],
 ])
+
+const LANGUAGE_BY_SHEBANG_PATTERN = [
+  [/python(?:\d+(?:\.\d+)*)?$/, 'python'],
+  [/(?:ba|z|k|c|tc)?sh$/, 'bash'],
+  [/fish$/, 'fish'],
+  [/(?:pwsh|powershell)$/, 'powershell'],
+  [/node$/, 'javascript'],
+]
 
 function createHttpError(message, statusCode = 400) {
   return createApiError('', message, statusCode)
@@ -379,9 +399,44 @@ function getFileLanguage(relativePath = '', absolutePath = '') {
   return LANGUAGE_BY_EXTENSION.get(extension) || ''
 }
 
+function getShebangLanguage(buffer) {
+  if (!Buffer.isBuffer(buffer) || !buffer.length) {
+    return ''
+  }
+
+  const firstLine = buffer.toString('utf8', 0, Math.min(buffer.length, 200)).split(/\r?\n/, 1)[0] || ''
+  if (!firstLine.startsWith('#!')) {
+    return ''
+  }
+
+  const command = firstLine
+    .replace(/^#!\s*/, '')
+    .replace(/\s+-\S+/g, ' ')
+    .trim()
+    .split(/\s+/)
+    .pop() || ''
+  const executable = path.basename(command).toLowerCase()
+
+  for (const [pattern, language] of LANGUAGE_BY_SHEBANG_PATTERN) {
+    if (pattern.test(executable)) {
+      return language
+    }
+  }
+
+  return ''
+}
+
 function getImageMimeType(relativePath = '', absolutePath = '') {
   const extension = path.extname(String(relativePath || absolutePath || '')).toLowerCase()
   return IMAGE_MIME_TYPES.get(extension) || ''
+}
+
+function isKnownTextFilePath(relativePath = '', absolutePath = '') {
+  const targetName = path.basename(String(relativePath || absolutePath || '').trim())
+  const extension = path.extname(targetName).toLowerCase()
+
+  return TEXT_FILE_EXTENSIONS.has(targetName)
+    || TEXT_FILE_EXTENSIONS.has(extension)
 }
 
 function removeExtension(value = '') {
@@ -557,6 +612,45 @@ function scoreWorkspaceMatch(relativePath = '', query = '') {
   return Math.max(pathScore, nameScore, segmentScore)
 }
 
+function isSearchableTextFile(relativePath = '', absolutePath = '', stats = null) {
+  if (isKnownTextFilePath(relativePath, absolutePath)) {
+    return true
+  }
+
+  const sampleSize = Math.min(Number(stats?.size || 0), 8192)
+  if (sampleSize <= 0) {
+    return true
+  }
+
+  try {
+    const sample = readFileSlice(absolutePath, sampleSize)
+    return !isLikelyBinaryBuffer(sample)
+  } catch {
+    return false
+  }
+}
+
+function createContentSearchPreview(line = '', matchIndex = 0, matchLength = 0, maxLength = 180) {
+  const source = String(line || '')
+  if (!source) {
+    return ''
+  }
+
+  const safeMatchIndex = Math.max(0, Number(matchIndex) || 0)
+  const safeMatchLength = Math.max(1, Number(matchLength) || 1)
+  if (source.length <= maxLength) {
+    return source
+  }
+
+  const padding = Math.max(24, Math.floor((maxLength - safeMatchLength) / 2))
+  const start = Math.max(0, safeMatchIndex - padding)
+  const end = Math.min(source.length, safeMatchIndex + safeMatchLength + padding)
+  const prefix = start > 0 ? '…' : ''
+  const suffix = end < source.length ? '…' : ''
+
+  return `${prefix}${source.slice(start, end)}${suffix}`
+}
+
 export function listWorkspaceTree(workspacePath, options = {}) {
   const target = resolveWorkspaceTarget(workspacePath, options.path)
   const type = getPathType(target.absolutePath)
@@ -679,6 +773,142 @@ export function searchWorkspaceEntries(workspacePath, options = {}) {
   }
 }
 
+export function searchWorkspaceFileContent(workspacePath, options = {}) {
+  const root = path.resolve(String(workspacePath || ''))
+  const query = String(options.query || '').trim()
+  const limit = clampLimit(options.limit, DEFAULT_CONTENT_SEARCH_LIMIT, 200)
+
+  if (!query) {
+    return {
+      cwd: root,
+      query: '',
+      items: [],
+      truncated: false,
+    }
+  }
+
+  const normalizedQuery = query.toLowerCase()
+  const matches = []
+  let visited = 0
+  let truncated = false
+  const stack = ['']
+
+  while (stack.length) {
+    const currentRelativePath = stack.pop()
+    const currentAbsolutePath = currentRelativePath
+      ? path.join(root, currentRelativePath)
+      : root
+
+    let entries = []
+    try {
+      entries = fs.readdirSync(currentAbsolutePath, { withFileTypes: true })
+    } catch {
+      continue
+    }
+
+    entries.sort((left, right) => left.name.localeCompare(right.name, 'zh-CN'))
+
+    for (const entry of entries) {
+      if (shouldIgnoreDirectory(entry)) {
+        continue
+      }
+
+      visited += 1
+      if (visited > MAX_SEARCH_VISITS) {
+        truncated = true
+        stack.length = 0
+        break
+      }
+
+      const relativePath = currentRelativePath
+        ? `${toPosixPath(currentRelativePath)}/${entry.name}`
+        : entry.name
+      const absolutePath = path.join(currentAbsolutePath, entry.name)
+
+      if (entry.isDirectory()) {
+        stack.push(path.join(currentRelativePath, entry.name))
+        continue
+      }
+
+      let stats
+      try {
+        stats = fs.statSync(absolutePath)
+      } catch {
+        continue
+      }
+
+      if (!stats.isFile() || stats.size > MAX_CONTENT_SEARCH_FILE_BYTES) {
+        continue
+      }
+
+      if (!isSearchableTextFile(relativePath, absolutePath, stats)) {
+        continue
+      }
+
+      let content = ''
+      try {
+        content = fs.readFileSync(absolutePath, 'utf8').replace(/\r\n/g, '\n')
+      } catch {
+        continue
+      }
+
+      const lines = content.split('\n')
+      let fileMatchCount = 0
+
+      for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+        const line = String(lines[lineIndex] || '')
+        const normalizedLine = line.toLowerCase()
+        const matchIndex = normalizedLine.indexOf(normalizedQuery)
+        if (matchIndex < 0) {
+          continue
+        }
+
+        matches.push({
+          name: path.basename(relativePath),
+          path: toPosixPath(relativePath),
+          type: 'file',
+          line: lineIndex + 1,
+          column: matchIndex + 1,
+          preview: createContentSearchPreview(line, matchIndex, normalizedQuery.length),
+        })
+        fileMatchCount += 1
+
+        if (matches.length >= limit) {
+          truncated = true
+          stack.length = 0
+          break
+        }
+
+        if (fileMatchCount >= MAX_CONTENT_MATCHES_PER_FILE) {
+          truncated = true
+          break
+        }
+
+        if (truncated) {
+          break
+        }
+      }
+
+      if (truncated) {
+        break
+      }
+    }
+  }
+
+  matches.sort((left, right) => (
+    left.path.localeCompare(right.path, 'zh-CN')
+    || left.line - right.line
+    || left.column - right.column
+  ))
+
+  return {
+    cwd: root,
+    query,
+    items: matches.slice(0, limit),
+    truncated: truncated || matches.length > limit,
+  }
+}
+
 export function readWorkspaceFileContent(workspacePath, options = {}) {
   const target = resolveWorkspaceTarget(workspacePath, options.path)
   const previewLimit = clampLimit(options.limit, DEFAULT_FILE_PREVIEW_LIMIT, DEFAULT_FILE_PREVIEW_LIMIT)
@@ -695,7 +925,7 @@ export function readWorkspaceFileContent(workspacePath, options = {}) {
     throw createApiError('errors.fileOnly', '只能读取文件内容。')
   }
 
-  const language = getFileLanguage(target.relativePath, target.absolutePath)
+  let language = getFileLanguage(target.relativePath, target.absolutePath)
   const imageMimeType = getImageMimeType(target.relativePath, target.absolutePath)
   const basePayload = {
     cwd: target.root,
@@ -734,6 +964,7 @@ export function readWorkspaceFileContent(workspacePath, options = {}) {
   const extension = path.extname(fileName).toLowerCase()
   const isKnownTextFile = TEXT_FILE_EXTENSIONS.has(extension)
   const binary = !isKnownTextFile && isLikelyBinaryBuffer(buffer)
+  language = language || getShebangLanguage(buffer)
 
   if (binary) {
     return {
@@ -744,6 +975,7 @@ export function readWorkspaceFileContent(workspacePath, options = {}) {
 
   return {
     ...basePayload,
+    language,
     content: buffer.toString('utf8').replace(/\r\n/g, '\n'),
     truncated: stats.size > previewLimit,
     tooLarge: stats.size > previewLimit,

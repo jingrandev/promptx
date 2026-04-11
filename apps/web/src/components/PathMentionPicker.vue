@@ -5,7 +5,6 @@ import {
   File,
   FolderOpen,
   LoaderCircle,
-  Search,
   X,
 } from 'lucide-vue-next'
 import { useI18n } from '../composables/useI18n.js'
@@ -36,7 +35,6 @@ const { t } = useI18n()
 
 const {
   activeKey,
-  activeTab,
   closePicker,
   collapseActiveDirectory,
   confirmActive,
@@ -53,12 +51,9 @@ const {
   panelReady,
   panelStyle,
   recentSearchItems,
-  setActiveTab,
   setItemRef,
   showSearchEmptyState,
-  showSearchPromptState,
   showTreeEmptyState,
-  switchTab,
   toggleDirectory,
   treeItems,
   visibleItems,
@@ -74,7 +69,6 @@ defineExpose({
   moveActive,
   confirmActive,
   expandActiveDirectory,
-  switchTab,
 })
 </script>
 
@@ -86,31 +80,7 @@ defineExpose({
       class="theme-popover fixed z-40 flex flex-col overflow-hidden rounded-sm border shadow-lg"
       :style="panelStyle"
     >
-      <div class="theme-divider flex items-center justify-between gap-2 border-b border-dashed px-2.5 py-2">
-        <div class="flex items-center gap-1.5">
-          <button
-            type="button"
-            class="inline-flex h-7 items-center gap-1 rounded-sm border px-2 text-[11px] transition"
-            :class="activeTab === 'search'
-              ? 'tool-button-accent-subtle'
-              : 'theme-filter-idle border-dashed'"
-            @click="setActiveTab('search')"
-          >
-            <Search class="h-3.5 w-3.5" />
-            <span>{{ t('pathPicker.searchTab') }}</span>
-          </button>
-          <button
-            type="button"
-            class="inline-flex h-7 items-center gap-1 rounded-sm border px-2 text-[11px] transition"
-            :class="activeTab === 'tree'
-              ? 'tool-button-accent-subtle'
-              : 'theme-filter-idle border-dashed'"
-            @click="setActiveTab('tree')"
-          >
-            <FolderOpen class="h-3.5 w-3.5" />
-            <span>{{ t('pathPicker.treeTab') }}</span>
-          </button>
-        </div>
+      <div class="theme-divider flex items-center justify-end gap-2 border-b border-dashed px-2.5 py-2">
         <div class="flex shrink-0 items-center gap-2">
           <div
             class="theme-muted-text inline-flex h-7 w-7 items-center justify-center"
@@ -144,13 +114,6 @@ defineExpose({
         </div>
 
         <div
-          v-else-if="showSearchPromptState"
-          class="theme-empty-state px-3 py-4 text-xs"
-        >
-          {{ t('pathPicker.searchPrompt') }}
-        </div>
-
-        <div
           v-else-if="showSearchEmptyState"
           class="theme-empty-state px-3 py-4 text-xs"
         >
@@ -171,7 +134,7 @@ defineExpose({
           {{ t('pathPicker.loading') }}
         </div>
 
-        <div v-else-if="activeTab === 'search'" class="space-y-1">
+        <div v-else-if="normalizedQuery" class="space-y-1">
           <div
             v-if="recentSearchItems.length"
             class="theme-muted-text px-1 py-0.5 text-[10px] uppercase tracking-[0.12em]"
@@ -183,29 +146,28 @@ defineExpose({
             :key="item.path"
             :ref="(element) => setItemRef(item.path, element)"
             type="button"
-            class="flex w-full items-start gap-2 rounded-sm border border-transparent px-2.5 py-1.5 text-left transition"
+            class="theme-list-row focus:outline-none"
             :class="activeKey === item.path
               ? 'theme-list-item-active'
               : 'theme-list-item-hover'"
-            @mouseenter="activeKey = item.path"
             @click="emitSelect(item)"
-          >
-            <component
-              :is="item.type === 'directory' ? FolderOpen : File"
-              class="theme-muted-text mt-0.5 h-4 w-4 shrink-0"
-            />
-            <div class="min-w-0 flex-1">
-              <div>
-                <span
-                  class="truncate text-[13px] text-[var(--theme-textPrimary)]"
-                  v-html="getHighlightedName(item)"
+            >
+              <component
+                :is="item.type === 'directory' ? FolderOpen : File"
+                class="theme-list-item-icon"
+              />
+              <div class="min-w-0 flex-1">
+                <div>
+                  <span
+                    class="theme-list-item-title truncate"
+                    v-html="getHighlightedName(item)"
+                  />
+                </div>
+                <div
+                  class="theme-list-item-subtitle theme-list-item-subtitle--mono truncate"
+                  v-html="getHighlightedPath(item)"
                 />
               </div>
-              <div
-                class="theme-muted-text truncate font-mono text-[10px]"
-                v-html="getHighlightedPath(item)"
-              />
-            </div>
           </button>
           <div
             v-if="normalizedQuery && normalSearchItems.length"
@@ -218,29 +180,28 @@ defineExpose({
             :key="item.path"
             :ref="(element) => setItemRef(item.path, element)"
             type="button"
-            class="flex w-full items-start gap-2 rounded-sm border border-transparent px-2.5 py-1.5 text-left transition"
+            class="theme-list-row focus:outline-none"
             :class="activeKey === item.path
               ? 'theme-list-item-active'
               : 'theme-list-item-hover'"
-            @mouseenter="activeKey = item.path"
             @click="emitSelect(item)"
-          >
-            <component
-              :is="item.type === 'directory' ? FolderOpen : File"
-              class="theme-muted-text mt-0.5 h-4 w-4 shrink-0"
-            />
-            <div class="min-w-0 flex-1">
-              <div>
-                <span
-                  class="truncate text-[13px] text-[var(--theme-textPrimary)]"
-                  v-html="getHighlightedName(item)"
+            >
+              <component
+                :is="item.type === 'directory' ? FolderOpen : File"
+                class="theme-list-item-icon"
+              />
+              <div class="min-w-0 flex-1">
+                <div>
+                  <span
+                    class="theme-list-item-title truncate"
+                    v-html="getHighlightedName(item)"
+                  />
+                </div>
+                <div
+                  class="theme-list-item-subtitle theme-list-item-subtitle--mono truncate"
+                  v-html="getHighlightedPath(item)"
                 />
               </div>
-              <div
-                class="theme-muted-text truncate font-mono text-[10px]"
-                v-html="getHighlightedPath(item)"
-              />
-            </div>
           </button>
         </div>
 
@@ -249,14 +210,13 @@ defineExpose({
             v-for="item in treeItems"
             :key="item.path"
             :ref="(element) => setItemRef(item.path, element)"
-            class="rounded-sm border border-transparent px-1.5 py-1 transition"
+            class="theme-list-tree-item outline-none focus:outline-none focus-visible:outline-none"
             :class="activeKey === item.path
               ? 'theme-list-item-active'
               : item.type === 'directory' && item.expanded
                 ? 'theme-list-item-expanded'
                 : 'theme-list-item-hover'"
             :style="{ paddingLeft: `${item.depth * 16 + 6}px` }"
-            @mouseenter="activeKey = item.path"
           >
             <div class="flex items-start gap-1.5">
               <button
@@ -283,7 +243,7 @@ defineExpose({
                 <div class="min-w-0 flex-1">
                   <div class="flex items-center gap-1.5">
                     <span
-                      class="truncate text-[13px]"
+                      class="theme-list-item-title truncate"
                       :class="item.type === 'directory' ? 'font-medium text-[var(--theme-textPrimary)]' : 'text-[var(--theme-textPrimary)]'"
                     >
                       {{ getDisplayName(item) }}

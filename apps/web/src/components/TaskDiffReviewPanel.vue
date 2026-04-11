@@ -297,8 +297,10 @@ watch(diffScope, () => {
 
         <div v-show="mobilePanelTab === 'files'" class="theme-divider theme-muted-panel min-h-0 flex-1 overflow-y-auto p-3">
           <TaskDiffFileList
+            :auto-focus-selected="active && mobilePanelTab === 'files'"
             :diff-payload="diffPayload"
             :file-search="fileSearch"
+            :focus-token="focusToken"
             :filtered-files="filteredFiles"
             :get-filter-button-class="getFilterButtonClass"
             :get-filter-label="getFilterLabel"
@@ -334,8 +336,10 @@ watch(diffScope, () => {
       <div v-else class="grid min-h-0 flex-1 grid-cols-[320px_minmax(0,1fr)] overflow-hidden">
         <div class="theme-divider theme-muted-panel min-h-0 overflow-y-auto border-r p-3">
           <TaskDiffFileList
+            :auto-focus-selected="active"
             :diff-payload="diffPayload"
             :file-search="fileSearch"
+            :focus-token="focusToken"
             :filtered-files="filteredFiles"
             :get-filter-button-class="getFilterButtonClass"
             :get-filter-label="getFilterLabel"

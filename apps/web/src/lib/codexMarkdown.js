@@ -35,8 +35,16 @@ function getDisplayLanguage(value = '') {
     return 'TSX'
   }
 
-  if (['sh', 'shell', 'zsh', 'bash'].includes(normalized)) {
+  if (['sh', 'shell', 'zsh', 'bash', 'csh'].includes(normalized)) {
     return 'Bash'
+  }
+
+  if (normalized === 'fish') {
+    return 'Fish'
+  }
+
+  if (['ps1', 'pwsh', 'powershell'].includes(normalized)) {
+    return 'PowerShell'
   }
 
   if (normalized === 'md') {

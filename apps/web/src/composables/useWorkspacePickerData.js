@@ -3,12 +3,18 @@ import {
   listCodexSessionFiles,
   searchCodexSessionFiles,
 } from '../lib/api.js'
+import {
+  isAbortError,
+  WORKSPACE_PATH_SEARCH_DEBOUNCE_MS,
+  WORKSPACE_SEARCH_MIN_QUERY_LENGTH,
+} from '../lib/workspaceSearch.js'
 
 const RECENT_PATHS_STORAGE_KEY = 'promptx:codex-recent-paths'
 const MAX_RECENT_PATHS = 12
 
 export function useWorkspacePickerData(options) {
   const {
+    getMode,
     props,
     onSelect,
   } = options
@@ -21,7 +27,7 @@ export function useWorkspacePickerData(options) {
   const searchError = ref('')
   const recentPaths = ref([])
   const persistedExpandedPaths = ref([])
-  const activeTab = ref('tree')
+  const modeState = ref('tree')
   const activeKey = ref('')
 
   const itemRefs = new Map()
@@ -29,9 +35,20 @@ export function useWorkspacePickerData(options) {
   let searchTimer = null
   let searchRequestId = 0
   let pickerRefreshToken = 0
+  let searchAbortController = null
 
   const normalizedQuery = computed(() => String(props.query || '').trim())
-  const isSearchMode = computed(() => Boolean(normalizedQuery.value))
+  const minimumQueryLength = computed(() => Math.max(1, Number(options.minimumQueryLength) || WORKSPACE_SEARCH_MIN_QUERY_LENGTH))
+  const isQueryReady = computed(() => normalizedQuery.value.length >= minimumQueryLength.value)
+  const hasControlledMode = computed(() => typeof getMode === 'function')
+  const resolvedMode = computed(() => {
+    if (!hasControlledMode.value) {
+      return modeState.value
+    }
+
+    const nextMode = String(getMode?.() || '').trim()
+    return nextMode === 'search' ? 'search' : 'tree'
+  })
   const treeItems = computed(() => flattenTreeNodes(rootNodes.value))
   const storageSessionKey = computed(() => String(props.sessionId || '').trim())
   const treeExpandedStorageKey = computed(() => storageSessionKey.value ? `promptx:codex-tree-expanded:${storageSessionKey.value}` : '')
@@ -52,25 +69,27 @@ export function useWorkspacePickerData(options) {
       ? [...recentSearchItems.value, ...normalSearchItems.value]
       : recentPaths.value
   ))
-  const visibleItems = computed(() => (activeTab.value === 'search' ? searchItems.value : treeItems.value))
-  const currentLoading = computed(() => (activeTab.value === 'search' ? searchLoading.value : treeLoading.value))
-  const currentError = computed(() => (activeTab.value === 'search' ? searchError.value : treeError.value))
-  const showSearchPromptState = computed(() => (
-    activeTab.value === 'search'
-    && Boolean(props.sessionId)
-    && !normalizedQuery.value
-    && !recentPaths.value.length
-  ))
+  const visibleItems = computed(() => (resolvedMode.value === 'search' ? searchItems.value : treeItems.value))
+  const currentLoading = computed(() => (resolvedMode.value === 'search' ? searchLoading.value : treeLoading.value))
+  const currentError = computed(() => (resolvedMode.value === 'search' ? searchError.value : treeError.value))
   const showSearchEmptyState = computed(() => (
-    activeTab.value === 'search'
+    resolvedMode.value === 'search'
     && Boolean(props.sessionId)
-    && Boolean(normalizedQuery.value)
+    && isQueryReady.value
     && !searchLoading.value
     && !searchError.value
     && !searchItems.value.length
   ))
+  const showSearchPromptState = computed(() => (
+    resolvedMode.value === 'search'
+    && Boolean(props.sessionId)
+    && Boolean(normalizedQuery.value)
+    && !isQueryReady.value
+    && !searchLoading.value
+    && !searchError.value
+  ))
   const showTreeEmptyState = computed(() => (
-    activeTab.value === 'tree'
+    resolvedMode.value === 'tree'
     && Boolean(props.sessionId)
     && !treeLoading.value
     && !treeError.value
@@ -156,6 +175,17 @@ export function useWorkspacePickerData(options) {
     rootNodes.value = [...rootNodes.value]
   }
 
+  function clearSearchRequest() {
+    if (searchTimer) {
+      window.clearTimeout(searchTimer)
+      searchTimer = null
+    }
+    if (searchAbortController) {
+      searchAbortController.abort()
+      searchAbortController = null
+    }
+  }
+
   function getExpandedPathsSnapshot(nodes = rootNodes.value, output = []) {
     nodes.forEach((node) => {
       if (node.type === 'directory' && node.expanded) {
@@ -183,6 +213,22 @@ export function useWorkspacePickerData(options) {
     persistedExpandedPaths.value = treeExpandedStorageKey.value
       ? readStoredJson(treeExpandedStorageKey.value, []).filter(Boolean)
       : []
+  }
+
+  function isLegacyAutoExpandedSnapshot(nodes = rootNodes.value, expandedPathSet = new Set()) {
+    if (!expandedPathSet.size) {
+      return false
+    }
+
+    const expandableRootPaths = nodes
+      .filter((node) => node.type === 'directory' && node.hasChildren)
+      .map((node) => node.path)
+
+    if (!expandableRootPaths.length || expandableRootPaths.length !== expandedPathSet.size) {
+      return false
+    }
+
+    return expandableRootPaths.every((nodePath) => expandedPathSet.has(nodePath))
   }
 
   function loadRecentPaths() {
@@ -433,14 +479,21 @@ export function useWorkspacePickerData(options) {
   async function loadInitialTree(options = {}) {
     await loadTree('', options)
     const expandedPathSet = new Set(persistedExpandedPaths.value)
-    const hasPersistedPaths = expandedPathSet.size > 0
+    const hasLegacyAutoExpandedSnapshot = isLegacyAutoExpandedSnapshot(rootNodes.value, expandedPathSet)
+    const hasPersistedPaths = expandedPathSet.size > 0 && !hasLegacyAutoExpandedSnapshot
+
+    if (hasLegacyAutoExpandedSnapshot) {
+      persistedExpandedPaths.value = []
+      writeStoredJson(treeExpandedStorageKey.value, [])
+      expandedPathSet.clear()
+    }
 
     for (const node of rootNodes.value) {
       if (node.type !== 'directory' || !node.hasChildren) {
         continue
       }
 
-      node.expanded = hasPersistedPaths ? expandedPathSet.has(node.path) : true
+      node.expanded = hasPersistedPaths ? expandedPathSet.has(node.path) : false
     }
     refreshTreeView()
 
@@ -448,14 +501,10 @@ export function useWorkspacePickerData(options) {
       await restoreExpandedTree(rootNodes.value, expandedPathSet, options)
       return
     }
-
-    const expandableRoots = rootNodes.value.filter((node) => node.type === 'directory' && node.expanded && node.hasChildren)
-    await Promise.all(expandableRoots.map((node) => loadTree(node.path, options)))
-    persistExpandedPaths()
   }
 
   async function toggleDirectory(pathValue) {
-    if (activeTab.value !== 'tree') {
+    if (resolvedMode.value !== 'tree') {
       return
     }
 
@@ -492,20 +541,22 @@ export function useWorkspacePickerData(options) {
     searchRequestId += 1
     const requestId = searchRequestId
     const refreshToken = options.refreshToken || ''
+    clearSearchRequest()
 
-    if (!props.open || !props.sessionId || !query) {
+    if (!props.open || !props.sessionId || !query || !isQueryReady.value) {
       searchLoading.value = false
       searchError.value = ''
-      if (!query) {
-        searchResults.value = []
-      }
+      searchResults.value = []
       return
     }
+
+    searchAbortController = new AbortController()
 
     try {
       const payload = await searchCodexSessionFiles(props.sessionId, query, {
         limit: 80,
         refreshToken,
+        signal: searchAbortController.signal,
       })
       if (requestId !== searchRequestId) {
         return
@@ -513,6 +564,9 @@ export function useWorkspacePickerData(options) {
 
       searchResults.value = payload.items || []
     } catch (error) {
+      if (isAbortError(error)) {
+        return
+      }
       if (requestId !== searchRequestId) {
         return
       }
@@ -520,23 +574,21 @@ export function useWorkspacePickerData(options) {
       searchResults.value = []
     } finally {
       if (requestId === searchRequestId) {
+        searchAbortController = null
+      }
+      if (requestId === searchRequestId) {
         searchLoading.value = false
       }
     }
   }
 
   function scheduleSearch(options = {}) {
-    if (searchTimer) {
-      window.clearTimeout(searchTimer)
-      searchTimer = null
-    }
+    clearSearchRequest()
 
-    if (!props.open || !props.sessionId || !normalizedQuery.value) {
+    if (!props.open || !props.sessionId || !normalizedQuery.value || !isQueryReady.value) {
       searchLoading.value = false
       searchError.value = ''
-      if (!normalizedQuery.value) {
-        searchResults.value = []
-      }
+      searchResults.value = []
       return
     }
 
@@ -544,8 +596,9 @@ export function useWorkspacePickerData(options) {
     searchError.value = ''
 
     searchTimer = window.setTimeout(() => {
+      searchTimer = null
       refreshSearch(options)
-    }, 120)
+    }, WORKSPACE_PATH_SEARCH_DEBOUNCE_MS)
   }
 
   function refreshPickerData() {
@@ -573,32 +626,32 @@ export function useWorkspacePickerData(options) {
     })
   }
 
+  function syncModeFromQuery() {
+    if (hasControlledMode.value) {
+      return false
+    }
+
+    const nextMode = normalizedQuery.value ? 'search' : 'tree'
+    if (modeState.value === nextMode) {
+      return false
+    }
+
+    modeState.value = nextMode
+    return true
+  }
+
   function initializeData() {
     loadRecentPaths()
     loadPersistedExpandedPaths()
-    setActiveTab(isSearchMode.value ? 'search' : 'tree')
+    syncModeFromQuery()
     refreshPickerData()
   }
 
   function resetData() {
-    if (searchTimer) {
-      window.clearTimeout(searchTimer)
-      searchTimer = null
-    }
+    clearSearchRequest()
     searchResults.value = []
     searchError.value = ''
     searchLoading.value = false
-  }
-
-  function setActiveTab(nextTab) {
-    activeTab.value = nextTab
-    if (nextTab === 'tree' && props.sessionId && !treeLoading.value && !rootNodes.value.length) {
-      loadInitialTree({ force: true })
-    }
-    nextTick(() => {
-      syncActiveKey()
-      scrollActiveItemIntoView()
-    })
   }
 
   function moveActive(step) {
@@ -613,11 +666,12 @@ export function useWorkspacePickerData(options) {
       : (currentIndex + step + items.length) % items.length
 
     activeKey.value = items[nextIndex].path
+    nextTick(scrollActiveItemIntoView)
     return true
   }
 
   async function expandActiveDirectory() {
-    if (activeTab.value !== 'tree') {
+    if (resolvedMode.value !== 'tree') {
       return false
     }
 
@@ -644,7 +698,7 @@ export function useWorkspacePickerData(options) {
   }
 
   function collapseActiveDirectory() {
-    if (activeTab.value !== 'tree') {
+    if (resolvedMode.value !== 'tree') {
       return false
     }
 
@@ -682,17 +736,6 @@ export function useWorkspacePickerData(options) {
     return emitSelect(items[getCurrentActiveIndex()])
   }
 
-  function switchTab(step = 1) {
-    const tabs = ['search', 'tree']
-    const currentIndex = tabs.indexOf(activeTab.value)
-    const nextIndex = currentIndex < 0
-      ? 0
-      : (currentIndex + step + tabs.length) % tabs.length
-
-    setActiveTab(tabs[nextIndex])
-    return true
-  }
-
   function handleSessionChange() {
     rootNodes.value = []
     treeError.value = ''
@@ -715,7 +758,7 @@ export function useWorkspacePickerData(options) {
   }
 
   function handleQueryChange() {
-    setActiveTab(isSearchMode.value ? 'search' : 'tree')
+    syncModeFromQuery()
     scheduleSearch()
   }
 
@@ -725,14 +768,11 @@ export function useWorkspacePickerData(options) {
   }
 
   onBeforeUnmount(() => {
-    if (searchTimer) {
-      window.clearTimeout(searchTimer)
-    }
+    clearSearchRequest()
   })
 
   return {
     activeKey,
-    activeTab,
     collapseActiveDirectory,
     confirmActive,
     currentError,
@@ -751,12 +791,10 @@ export function useWorkspacePickerData(options) {
     normalizedQuery,
     recentSearchItems,
     resetData,
-    setActiveTab,
     setItemRef,
-    showSearchEmptyState,
     showSearchPromptState,
+    showSearchEmptyState,
     showTreeEmptyState,
-    switchTab,
     toggleDirectory,
     treeItems,
     visibleItems,

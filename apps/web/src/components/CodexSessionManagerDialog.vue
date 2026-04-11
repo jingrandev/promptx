@@ -17,7 +17,6 @@ import DialogShell from './DialogShell.vue'
 import CodexSessionManagerForm from './CodexSessionManagerForm.vue'
 import CodexSessionManagerList from './CodexSessionManagerList.vue'
 import CodexSessionManagerStatus from './CodexSessionManagerStatus.vue'
-import CodexSessionSourceBrowserDialog from './CodexSessionSourceBrowserDialog.vue'
 import {
   fetchEnabledAgentEngineOptions,
   getEnabledAgentEngineOptions,
@@ -79,7 +78,7 @@ const props = defineProps({
   },
 })
 
-const emit = defineEmits(['close', 'project-created', 'select-session'])
+const emit = defineEmits(['close', 'project-created', 'select-session', 'open-source-browser'])
 const { locale, t } = useI18n()
 
 const mode = ref('edit')
@@ -98,7 +97,6 @@ const resetting = ref(false)
 const showDeleteDialog = ref(false)
 const showResetDialog = ref(false)
 const showDirectoryPicker = ref(false)
-const showSourceBrowser = ref(false)
 const threadIdCopied = ref(false)
 const { matches: isMobileLayout } = useMediaQuery('(max-width: 767px)')
 const mobileView = ref('list')
@@ -353,6 +351,54 @@ function handleDirectoryPicked(pathValue) {
   form.cwd = String(pathValue || '').trim()
 }
 
+async function requestOpenSourceBrowser() {
+  const preferredSessionId = activeSession.value?.id || getPreferredSessionId()
+  if (!preferredSessionId) {
+    return false
+  }
+
+  if (!activeSession.value || activeSession.value.id !== preferredSessionId) {
+    openEditMode(preferredSessionId)
+    await nextTick()
+  }
+
+  if (!activeSession.value?.cwd) {
+    return false
+  }
+
+  if (isMobileLayout.value) {
+    enterMobileDetail('basic')
+  }
+
+  emit('open-source-browser', activeSession.value)
+  emit('close')
+  return true
+}
+
+function closeTopDialog() {
+  if (showDeleteDialog.value) {
+    showDeleteDialog.value = false
+    return true
+  }
+
+  if (showResetDialog.value) {
+    showResetDialog.value = false
+    return true
+  }
+
+  if (showDirectoryPicker.value) {
+    showDirectoryPicker.value = false
+    return true
+  }
+
+  if (props.open) {
+    emit('close')
+    return true
+  }
+
+  return false
+}
+
 function updateFormTitle(value) {
   form.title = String(value || '')
 }
@@ -373,7 +419,6 @@ function initializeDialog() {
   error.value = ''
   showDeleteDialog.value = false
   showResetDialog.value = false
-  showSourceBrowser.value = false
   threadIdCopied.value = false
   mobileDetailTab.value = 'basic'
   mobileView.value = isMobileLayout.value ? 'list' : 'detail'
@@ -619,7 +664,6 @@ watch(
     showDirectoryPicker.value = false
     showDeleteDialog.value = false
     showResetDialog.value = false
-    showSourceBrowser.value = false
     threadIdCopied.value = false
     error.value = ''
   },
@@ -679,6 +723,10 @@ onBeforeUnmount(() => {
   }
 })
 
+defineExpose({
+  closeTopDialog,
+})
+
 </script>
 
 <template>
@@ -713,11 +761,6 @@ onBeforeUnmount(() => {
     :suggestions="workspaceSuggestions"
     @close="showDirectoryPicker = false"
     @select="handleDirectoryPicked"
-  />
-  <CodexSessionSourceBrowserDialog
-    :open="showSourceBrowser"
-    :session="activeSession"
-    @close="showSourceBrowser = false"
   />
   <DialogShell
     :open="open"
@@ -805,7 +848,7 @@ onBeforeUnmount(() => {
                   type="button"
                   class="tool-button inline-flex items-center gap-2 px-3 py-2 text-xs"
                   :disabled="busy || !activeSession?.cwd"
-                  @click="showSourceBrowser = true"
+                  @click="requestOpenSourceBrowser"
                 >
                   <Eye class="h-4 w-4" />
                   <span>{{ t('projectManager.viewSource') }}</span>
@@ -971,11 +1014,11 @@ onBeforeUnmount(() => {
                     {{ desktopSubmitLabel }}
                   </button>
                   <button
-                    v-if="mode === 'edit' && activeSession"
-                    type="button"
-                    class="tool-button w-full px-3 py-2 text-sm"
-                    :disabled="busy || !activeSession?.cwd"
-                    @click="showSourceBrowser = true"
+                  v-if="mode === 'edit' && activeSession"
+                  type="button"
+                  class="tool-button w-full px-3 py-2 text-sm"
+                  :disabled="busy || !activeSession?.cwd"
+                    @click="requestOpenSourceBrowser"
                   >
                     {{ t('projectManager.viewSource') }}
                   </button>

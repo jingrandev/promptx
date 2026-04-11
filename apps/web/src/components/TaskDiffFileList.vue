@@ -1,5 +1,5 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { Search } from 'lucide-vue-next'
 import { useI18n } from '../composables/useI18n.js'
 
@@ -12,9 +12,17 @@ const props = defineProps({
     type: String,
     default: '',
   },
+  autoFocusSelected: {
+    type: Boolean,
+    default: false,
+  },
   filteredFiles: {
     type: Array,
     default: () => [],
+  },
+  focusToken: {
+    type: Number,
+    default: 0,
   },
   getFilterButtonClass: {
     type: Function,
@@ -56,6 +64,9 @@ const emit = defineEmits([
   'update:statusFilter',
 ])
 const { t } = useI18n()
+const fileItemRefs = new Map()
+const pendingAutoFocusToken = ref(0)
+const lastAutoFocusedToken = ref(0)
 
 const fileSearchModel = computed({
   get: () => props.fileSearch,
@@ -68,6 +79,91 @@ const statusFilterModel = computed({
 })
 
 const hasDiffFiles = computed(() => Array.isArray(props.diffPayload?.files) && props.diffPayload.files.length > 0)
+
+function setFileItemRef(path, element) {
+  if (element) {
+    fileItemRefs.set(path, element)
+    return
+  }
+
+  fileItemRefs.delete(path)
+}
+
+function focusFileItem(path) {
+  nextTick(() => {
+    const element = fileItemRefs.get(path)
+    element?.focus?.()
+    element?.scrollIntoView?.({
+      block: 'nearest',
+      inline: 'nearest',
+    })
+  })
+}
+
+function focusSelectedFileWhenReady() {
+  if (!props.autoFocusSelected || !props.selectedFilePath || pendingAutoFocusToken.value === lastAutoFocusedToken.value) {
+    return
+  }
+
+  lastAutoFocusedToken.value = pendingAutoFocusToken.value
+  focusFileItem(props.selectedFilePath)
+}
+
+function moveSelectedFile(step = 1, currentPath = '') {
+  const files = Array.isArray(props.filteredFiles) ? props.filteredFiles : []
+  if (!files.length) {
+    return
+  }
+
+  const focusedIndex = files.findIndex((file) => file.path === currentPath)
+  const selectedIndex = files.findIndex((file) => file.path === props.selectedFilePath)
+  const currentIndex = Math.max(0, focusedIndex >= 0 ? focusedIndex : selectedIndex)
+  const nextIndex = (currentIndex + step + files.length) % files.length
+  const nextFile = files[nextIndex]
+
+  if (!nextFile?.path) {
+    return
+  }
+
+  emit('select-file', nextFile.path)
+  focusFileItem(nextFile.path)
+}
+
+function handleFileKeydown(event, path) {
+  const key = String(event?.key || '')
+  if (key === 'ArrowDown') {
+    event.preventDefault()
+    moveSelectedFile(1, path)
+    return
+  }
+
+  if (key === 'ArrowUp') {
+    event.preventDefault()
+    moveSelectedFile(-1, path)
+    return
+  }
+
+  if ((key === 'Enter' || key === ' ') && path) {
+    event.preventDefault()
+    emit('select-file', path)
+  }
+}
+
+watch(
+  () => props.focusToken,
+  (token) => {
+    pendingAutoFocusToken.value = token
+    focusSelectedFileWhenReady()
+  },
+  { immediate: true }
+)
+
+watch(
+  () => props.selectedFilePath,
+  () => {
+    focusSelectedFileWhenReady()
+  }
+)
 </script>
 
 <template>
@@ -108,24 +204,24 @@ const hasDiffFiles = computed(() => Array.isArray(props.diffPayload?.files) && p
     {{ t('diffReview.noMatches') }}
   </div>
 
-  <div v-else class="space-y-2">
+  <div v-else class="space-y-1">
     <button
       v-for="file in filteredFiles"
       :key="file.path"
+      :ref="(element) => setFileItemRef(file.path, element)"
       type="button"
-      class="w-full rounded-sm border px-3 py-2 text-left transition"
-      :class="file.path === selectedFilePath ? 'theme-filter-active' : 'theme-filter-idle'"
+      class="theme-list-row focus:outline-none"
+      :class="file.path === selectedFilePath ? 'theme-list-item-active' : 'theme-list-item-hover'"
       @click="emit('select-file', file.path)"
+      @keydown="handleFileKeydown($event, file.path)"
     >
-      <div class="flex items-start gap-2">
-        <span class="inline-flex shrink-0 rounded-sm border px-1.5 py-0.5 text-[10px]" :class="getStatusClass(file.status)">
-          {{ getStatusLabel(file.status) }}
-        </span>
-        <div class="min-w-0 flex-1">
-          <div class="break-all text-xs font-medium">{{ file.path }}</div>
-          <div class="mt-1 text-[11px] opacity-75">
-            {{ file.statsLoaded ? `+${file.additions} / -${file.deletions}` : t('diffReview.statsOnDemand') }}
-          </div>
+      <span class="theme-list-item-badge" :class="getStatusClass(file.status)">
+        {{ getStatusLabel(file.status) }}
+      </span>
+      <div class="min-w-0 flex-1">
+        <div class="theme-list-item-title break-all">{{ file.path }}</div>
+        <div class="theme-list-item-meta mt-1">
+          {{ file.statsLoaded ? `+${file.additions} / -${file.deletions}` : t('diffReview.statsOnDemand') }}
         </div>
       </div>
     </button>
