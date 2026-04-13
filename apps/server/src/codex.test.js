@@ -4,6 +4,7 @@ import path from 'node:path'
 import { createRequire } from 'node:module'
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import Database from 'better-sqlite3'
 import initSqlJs from 'sql.js'
 
 const require = createRequire(import.meta.url)
@@ -236,6 +237,46 @@ test('listKnownCodexWorkspaces dedupes cwd values', async () => {
       assert.deepEqual(listKnownCodexWorkspaces(), ['D:\\code\\yuyang-web', 'D:\\code\\promptx'])
     }
   )
+})
+
+test('listKnownCodexSessions reads latest rows from WAL-backed sqlite', async () => {
+  const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-codex-wal-'))
+  const dbPath = path.join(tempHome, 'state_5.sqlite')
+  const writer = new Database(dbPath)
+
+  try {
+    writer.pragma('journal_mode = WAL')
+    writer.exec(`
+      CREATE TABLE threads (
+        id TEXT NOT NULL,
+        cwd TEXT,
+        title TEXT,
+        updated_at INTEGER
+      );
+    `)
+
+    const insert = writer.prepare('INSERT INTO threads (id, cwd, title, updated_at) VALUES (?, ?, ?, ?)')
+    insert.run('thread-old', '/tmp/demo', 'old', 100)
+    insert.run('thread-new-1', '/tmp/demo', 'new-1', 300)
+    insert.run('thread-new-2', '/tmp/demo', 'new-2', 200)
+
+    await withEnv(
+      {
+        CODEX_HOME: tempHome,
+        CODEX_BIN: undefined,
+      },
+      async () => {
+        const { listKnownCodexSessions } = await importFreshCodexModule()
+        const items = listKnownCodexSessions({ cwd: '/tmp/demo', limit: 3 })
+        assert.deepEqual(
+          items.map((item) => item.id),
+          ['thread-new-1', 'thread-new-2', 'thread-old']
+        )
+      }
+    )
+  } finally {
+    writer.close()
+  }
 })
 
 test('streamPromptToCodexSession handles a tail event without newline', async () => {

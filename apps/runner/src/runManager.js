@@ -48,6 +48,34 @@ function normalizeSession(payload = {}) {
   }
 }
 
+function applyThreadIdentity(session = {}, threadId = '') {
+  const value = String(threadId || '').trim()
+  if (!value) {
+    return session
+  }
+
+  const engine = String(session?.engine || '').trim() || 'codex'
+  if (engine === 'codex') {
+    return {
+      ...session,
+      codexThreadId: value,
+      engineThreadId: value,
+      running: true,
+      started: true,
+      updatedAt: nowIso(),
+    }
+  }
+
+  return {
+    ...session,
+    engineSessionId: value,
+    engineThreadId: value,
+    running: true,
+    started: true,
+    updatedAt: nowIso(),
+  }
+}
+
 function createRunSnapshot(context = {}) {
   const stopControl = getChildStopDiagnostics(context.child)
   return {
@@ -418,6 +446,15 @@ export function createRunManager(options = {}) {
   }
 
   async function handleStreamCompletion(context, result = {}) {
+    const completedThreadId = String(result?.threadId || '').trim()
+    if (completedThreadId) {
+      const nextSession = applyThreadIdentity(context.session, completedThreadId)
+      if (nextSession !== context.session) {
+        context.session = nextSession
+        queueEvent(context, createSessionUpdatedEnvelopeEvent(context.session))
+      }
+    }
+
     if (context.stopRequestedAt) {
       await finalizeRun(context, 'stopped', {
         responseMessage: String(result?.message || '').trim(),
@@ -476,14 +513,7 @@ export function createRunManager(options = {}) {
             return
           }
 
-          context.session = {
-            ...context.session,
-            codexThreadId: value,
-            engineThreadId: value,
-            running: true,
-            started: true,
-            updatedAt: nowIso(),
-          }
+          context.session = applyThreadIdentity(context.session, value)
           queueEvent(context, createSessionUpdatedEnvelopeEvent(context.session))
         },
       })

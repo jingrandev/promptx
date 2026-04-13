@@ -45,3 +45,11 @@ export function listKnownWorkspacesByEngine(engine = AGENT_ENGINES.CODEX, limit)
   }
   return runner.listKnownWorkspaces(limit)
 }
+
+export function listKnownSessionsByEngine(engine = AGENT_ENGINES.CODEX, options = {}) {
+  const runner = getAgentRunner(engine)
+  if (!runner?.listKnownSessions) {
+    return []
+  }
+  return runner.listKnownSessions(options)
+}

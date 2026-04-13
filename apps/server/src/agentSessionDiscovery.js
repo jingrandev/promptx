@@ -1,0 +1,588 @@
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import Database from 'better-sqlite3'
+import { AGENT_ENGINES, normalizeComparablePath } from '../../../packages/shared/src/index.js'
+
+const DEFAULT_LIMIT = 80
+const MAX_SCAN_FILES = 800
+const MAX_DAT_FILE_SIZE = 8 * 1024 * 1024
+const MAX_PREVIEW_LENGTH = 80
+
+function normalizeLimit(value, fallback = DEFAULT_LIMIT) {
+  const limit = Math.max(1, Number(value) || fallback)
+  return Math.min(200, limit)
+}
+
+function normalizeText(value = '') {
+  return String(value || '').trim()
+}
+
+function safeStat(filePath = '') {
+  try {
+    return fs.statSync(filePath)
+  } catch {
+    return null
+  }
+}
+
+function safeReadFile(filePath = '', maxBytes = MAX_DAT_FILE_SIZE) {
+  const stat = safeStat(filePath)
+  if (!stat?.isFile() || stat.size > maxBytes) {
+    return ''
+  }
+
+  try {
+    return fs.readFileSync(filePath, 'utf8')
+  } catch {
+    return ''
+  }
+}
+
+function parseJson(value) {
+  const text = normalizeText(value)
+  if (!text) {
+    return null
+  }
+
+  try {
+    return JSON.parse(text)
+  } catch {
+    return null
+  }
+}
+
+function parseMaybeJson(value) {
+  if (!value) {
+    return null
+  }
+
+  if (typeof value === 'object') {
+    return value
+  }
+
+  return parseJson(value)
+}
+
+function extractOpenCodePromptText(value) {
+  const parsed = parseMaybeJson(value)
+  if (!parsed || typeof parsed !== 'object') {
+    return normalizeText(value)
+  }
+
+  if (Array.isArray(parsed.prompt)) {
+    const parts = parsed.prompt
+      .map((item) => {
+        if (!item || typeof item !== 'object') {
+          return ''
+        }
+        return normalizeText(item.content || item.text || '')
+      })
+      .filter(Boolean)
+    return parts.join(' ').trim()
+  }
+
+  return extractMessageText(parsed)
+}
+
+function sanitizeOpenCodeSessionLabel(value = '', cwd = '', sessionId = '') {
+  const text = normalizeText(value).replace(/\s+/g, ' ').trim()
+  if (text.length >= 2) {
+    return text
+  }
+
+  return path.basename(normalizeText(cwd)) || normalizeText(sessionId)
+}
+
+function toIsoDate(value) {
+  if (value === null || value === undefined || value === '') {
+    return ''
+  }
+
+  if (value instanceof Date && Number.isFinite(value.getTime())) {
+    return value.toISOString()
+  }
+
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    const timestamp = value > 1e12 ? value : value * 1000
+    const date = new Date(timestamp)
+    return Number.isFinite(date.getTime()) ? date.toISOString() : ''
+  }
+
+  const text = normalizeText(value)
+  if (!text) {
+    return ''
+  }
+
+  if (/^\d+$/.test(text)) {
+    return toIsoDate(Number(text))
+  }
+
+  const date = new Date(text)
+  return Number.isFinite(date.getTime()) ? date.toISOString() : ''
+}
+
+function getSortTime(value = '') {
+  const time = Date.parse(normalizeText(value))
+  return Number.isFinite(time) ? time : 0
+}
+
+function createSessionCandidate(input = {}) {
+  const id = normalizeText(input.id)
+  if (!id) {
+    return null
+  }
+
+  const cwd = normalizeText(input.cwd)
+  const label = normalizeText(input.label) || path.basename(cwd) || id
+  return {
+    id,
+    engine: input.engine,
+    label: label.length > MAX_PREVIEW_LENGTH ? `${label.slice(0, MAX_PREVIEW_LENGTH - 1)}…` : label,
+    cwd,
+    updatedAt: toIsoDate(input.updatedAt),
+    source: normalizeText(input.source),
+    summary: normalizeText(input.summary),
+  }
+}
+
+function sortAndLimitCandidates(items = [], options = {}) {
+  const limit = normalizeLimit(options.limit)
+  const targetCwd = normalizeComparablePath(options.cwd)
+  const deduped = new Map()
+
+  items.forEach((item) => {
+    const candidate = createSessionCandidate(item)
+    if (!candidate) {
+      return
+    }
+
+    const key = `${candidate.engine}:${candidate.id}`
+    const current = deduped.get(key)
+    if (!current) {
+      deduped.set(key, candidate)
+      return
+    }
+
+    const nextScore = Number(Boolean(candidate.cwd)) + Number(Boolean(candidate.label && candidate.label !== candidate.id))
+    const currentScore = Number(Boolean(current.cwd)) + Number(Boolean(current.label && current.label !== current.id))
+    if (getSortTime(candidate.updatedAt) > getSortTime(current.updatedAt) || nextScore > currentScore) {
+      deduped.set(key, {
+        ...current,
+        ...candidate,
+        cwd: candidate.cwd || current.cwd,
+        label: candidate.label || current.label,
+        summary: candidate.summary || current.summary,
+        updatedAt: candidate.updatedAt || current.updatedAt,
+      })
+    }
+  })
+
+  return [...deduped.values()]
+    .map((item) => ({
+      ...item,
+      matchedCwd: Boolean(targetCwd && normalizeComparablePath(item.cwd) === targetCwd),
+    }))
+    .sort((left, right) => (
+      Number(right.matchedCwd) - Number(left.matchedCwd)
+      || getSortTime(right.updatedAt) - getSortTime(left.updatedAt)
+      || String(left.label || left.id).localeCompare(String(right.label || right.id), 'zh-CN')
+    ))
+    .slice(0, limit)
+}
+
+function collectFiles(rootDir = '', options = {}) {
+  const root = normalizeText(rootDir)
+  if (!root || !safeStat(root)?.isDirectory()) {
+    return []
+  }
+
+  const maxDepth = Math.max(0, Number(options.maxDepth) || 0)
+  const maxFiles = Math.max(1, Number(options.maxFiles) || MAX_SCAN_FILES)
+  const match = typeof options.match === 'function' ? options.match : () => true
+  const files = []
+
+  function visit(dir, depth) {
+    if (files.length >= maxFiles) {
+      return
+    }
+
+    let entries = []
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true })
+    } catch {
+      return
+    }
+
+    for (const entry of entries) {
+      if (files.length >= maxFiles || entry.name.startsWith('.')) {
+        continue
+      }
+
+      const entryPath = path.join(dir, entry.name)
+      if (entry.isDirectory()) {
+        if (depth < maxDepth) {
+          visit(entryPath, depth + 1)
+        }
+        continue
+      }
+
+      if (entry.isFile() && match(entryPath, entry.name)) {
+        files.push(entryPath)
+      }
+    }
+  }
+
+  visit(root, 0)
+  return files
+}
+
+function extractMessageText(value, depth = 0) {
+  if (!value || depth > 4) {
+    return ''
+  }
+
+  if (typeof value === 'string') {
+    return normalizeText(value)
+  }
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const text = extractMessageText(item, depth + 1)
+      if (text) {
+        return text
+      }
+    }
+    return ''
+  }
+
+  if (typeof value !== 'object') {
+    return ''
+  }
+
+  for (const key of ['text', 'content', 'message', 'prompt', 'summary']) {
+    if (!Object.prototype.hasOwnProperty.call(value, key)) {
+      continue
+    }
+
+    const text = extractMessageText(value[key], depth + 1)
+    if (text) {
+      return text
+    }
+  }
+
+  return ''
+}
+
+function readJsonlPreview(filePath = '') {
+  const content = safeReadFile(filePath, 256 * 1024)
+  if (!content) {
+    return ''
+  }
+
+  const lines = content.replace(/\r\n/g, '\n').split('\n').slice(0, 30)
+  for (const line of lines) {
+    const event = parseJson(line)
+    if (!event) {
+      continue
+    }
+
+    const type = normalizeText(event.type).toLowerCase()
+    if (type && type !== 'user') {
+      continue
+    }
+
+    const text = extractMessageText(event)
+    if (text) {
+      return text.replace(/\s+/g, ' ').slice(0, MAX_PREVIEW_LENGTH)
+    }
+  }
+
+  return ''
+}
+
+export function decodeClaudeProjectPath(projectKey = '') {
+  const key = normalizeText(projectKey)
+  if (!key) {
+    return ''
+  }
+
+  if (key.startsWith('-')) {
+    return key.replace(/-/g, '/')
+  }
+
+  const driveMatch = key.match(/^([A-Za-z])-+/)
+  if (driveMatch) {
+    return `${driveMatch[1]}:${key.slice(driveMatch[0].length - 1).replace(/-/g, '\\')}`
+  }
+
+  return ''
+}
+
+export function listKnownClaudeCodeSessions(options = {}) {
+  const claudeHome = normalizeText(options.claudeHome || process.env.CLAUDE_HOME)
+    || path.join(os.homedir(), '.claude')
+  const transcriptDir = path.join(claudeHome, 'transcripts')
+  const projectsDir = path.join(claudeHome, 'projects')
+  const items = []
+
+  collectFiles(transcriptDir, {
+    maxDepth: 0,
+    maxFiles: MAX_SCAN_FILES,
+    match: (filePath) => filePath.endsWith('.jsonl'),
+  }).forEach((filePath) => {
+    const stat = safeStat(filePath)
+    const id = path.basename(filePath, '.jsonl')
+    items.push({
+      id,
+      engine: AGENT_ENGINES.CLAUDE_CODE,
+      label: readJsonlPreview(filePath) || id,
+      updatedAt: stat?.mtime,
+      source: 'claude_transcripts',
+    })
+  })
+
+  collectFiles(projectsDir, {
+    maxDepth: 3,
+    maxFiles: MAX_SCAN_FILES,
+    match: (filePath) => filePath.endsWith('.jsonl'),
+  }).forEach((filePath) => {
+    const stat = safeStat(filePath)
+    const relativeParts = path.relative(projectsDir, filePath).split(path.sep).filter(Boolean)
+    const projectKey = relativeParts[0] || ''
+    const cwd = decodeClaudeProjectPath(projectKey)
+    const id = path.basename(filePath, '.jsonl')
+    items.push({
+      id,
+      engine: AGENT_ENGINES.CLAUDE_CODE,
+      label: readJsonlPreview(filePath) || path.basename(cwd) || id,
+      cwd,
+      updatedAt: stat?.mtime,
+      source: 'claude_projects',
+    })
+  })
+
+  return sortAndLimitCandidates(items, options)
+}
+
+function getOpenCodeDataDirs(options = {}) {
+  if (options.openCodeDataDir) {
+    return [options.openCodeDataDir]
+  }
+
+  if (process.env.OPENCODE_DATA_DIR) {
+    return [process.env.OPENCODE_DATA_DIR]
+  }
+
+  const dirs = []
+  const home = os.homedir()
+  if (process.platform === 'darwin') {
+    dirs.push(path.join(home, 'Library', 'Application Support', 'ai.opencode.desktop'))
+  } else if (process.platform === 'win32') {
+    const appData = process.env.APPDATA || path.join(home, 'AppData', 'Roaming')
+    dirs.push(path.join(appData, 'ai.opencode.desktop'))
+  } else {
+    dirs.push(path.join(home, '.config', 'ai.opencode.desktop'))
+  }
+  dirs.push(path.join(home, '.opencode'))
+  return dirs
+}
+
+function getOpenCodeDbPaths(options = {}) {
+  const home = os.homedir()
+
+  if (options.openCodeDbPath) {
+    return [normalizeText(options.openCodeDbPath)].filter(Boolean)
+  }
+
+  const paths = []
+  if (process.env.OPENCODE_DB_PATH) {
+    paths.push(process.env.OPENCODE_DB_PATH)
+  }
+
+  if (process.platform === 'win32') {
+    const localAppData = process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local')
+    paths.push(path.join(localAppData, 'opencode', 'opencode.db'))
+  } else {
+    paths.push(path.join(home, '.local', 'share', 'opencode', 'opencode.db'))
+  }
+
+  paths.push(path.join(home, '.opencode', 'opencode.db'))
+
+  return [...new Set(paths.map((item) => normalizeText(item)).filter(Boolean))]
+}
+
+function decodeOpenCodeWorkspacePath(fileName = '') {
+  const name = normalizeText(fileName)
+  const match = name.match(/^opencode\.workspace\.([^.]+)(?:\..*)?\.dat$/)
+  if (!match) {
+    return ''
+  }
+
+  const token = match[1]
+  if (token.startsWith('/') || /^[a-z]:[\\/]/i.test(token)) {
+    return token
+  }
+
+  try {
+    const decoded = Buffer.from(token, 'base64').toString('utf8')
+    if (
+      (decoded.startsWith('/') && decoded.split('/').filter(Boolean).length >= 3)
+      || /^[a-z]:[\\/]/i.test(decoded)
+    ) {
+      return decoded
+    }
+  } catch {
+    return ''
+  }
+
+  return ''
+}
+
+function readOpenCodeDat(filePath = '') {
+  return parseJson(safeReadFile(filePath)) || {}
+}
+
+function loadOpenCodeSessionsFromDb(options = {}) {
+  const dbPath = getOpenCodeDbPaths(options).find((candidate) => safeStat(candidate)?.isFile())
+  if (!dbPath) {
+    return []
+  }
+
+  let db
+  try {
+    db = new Database(dbPath, { readonly: true, fileMustExist: true })
+    const rows = db.prepare(`
+      select
+        id,
+        title,
+        directory,
+        time_updated,
+        time_created,
+        time_archived
+      from session
+      where time_archived is null
+      order by time_updated desc
+      limit ?
+    `).all(Math.max(50, normalizeLimit(options.limit) * 4))
+
+    return rows.map((row) => ({
+      id: normalizeText(row.id),
+      engine: AGENT_ENGINES.OPENCODE,
+      label: sanitizeOpenCodeSessionLabel(row.title, row.directory, row.id),
+      cwd: normalizeText(row.directory),
+      updatedAt: row.time_updated || row.time_created,
+      source: 'opencode_db',
+      summary: '',
+    }))
+  } catch {
+    return []
+  } finally {
+    try {
+      db?.close()
+    } catch {
+      // ignore close errors
+    }
+  }
+}
+
+function addOpenCodeLayoutSessions(dat = {}, sourceFile = '', items = [], idToCwd = new Map()) {
+  const layout = parseMaybeJson(dat['layout.page'])
+  if (!layout || typeof layout !== 'object') {
+    return
+  }
+
+  const lastProjectSession = layout.lastProjectSession && typeof layout.lastProjectSession === 'object'
+    ? layout.lastProjectSession
+    : {}
+  Object.entries(lastProjectSession).forEach(([projectPath, value]) => {
+    const item = value && typeof value === 'object' ? value : {}
+    const id = normalizeText(item.id)
+    const cwd = normalizeText(item.directory || projectPath)
+    if (!id) {
+      return
+    }
+    idToCwd.set(id, cwd)
+    items.push({
+      id,
+      engine: AGENT_ENGINES.OPENCODE,
+      label: path.basename(cwd) || id,
+      cwd,
+      updatedAt: item.at,
+      source: 'opencode_desktop',
+    })
+  })
+
+  const lastSession = layout.lastSession && typeof layout.lastSession === 'object'
+    ? layout.lastSession
+    : {}
+  Object.entries(lastSession).forEach(([projectPath, idValue]) => {
+    const id = normalizeText(idValue)
+    const cwd = normalizeText(projectPath)
+    if (!id) {
+      return
+    }
+    idToCwd.set(id, cwd)
+    items.push({
+      id,
+      engine: AGENT_ENGINES.OPENCODE,
+      label: path.basename(cwd) || id,
+      cwd,
+      updatedAt: safeStat(sourceFile)?.mtime,
+      source: 'opencode_desktop',
+    })
+  })
+}
+
+export function listKnownOpenCodeSessions(options = {}) {
+  const sqliteItems = loadOpenCodeSessionsFromDb(options)
+  if (sqliteItems.length) {
+    return sortAndLimitCandidates(sqliteItems, options)
+  }
+
+  const items = []
+  const idToCwd = new Map()
+
+  getOpenCodeDataDirs(options).forEach((dataDir) => {
+    collectFiles(dataDir, {
+      maxDepth: 0,
+      maxFiles: MAX_SCAN_FILES,
+      match: (filePath) => filePath.endsWith('.dat'),
+    }).forEach((filePath) => {
+      const stat = safeStat(filePath)
+      const dat = readOpenCodeDat(filePath)
+      const fileCwd = decodeOpenCodeWorkspacePath(path.basename(filePath))
+
+      addOpenCodeLayoutSessions(dat, filePath, items, idToCwd)
+
+      const fileSessionIds = [...new Set(
+        Object.keys(dat)
+          .map((key) => String(key || '').match(/^session:([^:]+):/)?.[1] || '')
+          .filter(Boolean)
+      )]
+      const mappedFileCwds = [...new Set(fileSessionIds.map((id) => idToCwd.get(id)).filter(Boolean))]
+      const workspaceCwd = mappedFileCwds.length === 1 ? mappedFileCwds[0] : fileCwd
+
+      Object.entries(dat).forEach(([key, value]) => {
+        const match = String(key || '').match(/^session:([^:]+):([^:]+)$/)
+        if (!match) {
+          return
+        }
+
+        const [, id, field] = match
+        const cwd = idToCwd.get(id) || workspaceCwd
+        const text = field === 'prompt' ? extractOpenCodePromptText(value) : ''
+        items.push({
+          id,
+          engine: AGENT_ENGINES.OPENCODE,
+          label: sanitizeOpenCodeSessionLabel(text, cwd, id),
+          cwd,
+          updatedAt: stat?.mtime,
+          source: 'opencode_desktop',
+        })
+      })
+    })
+  })
+
+  return sortAndLimitCandidates(items, options)
+}
