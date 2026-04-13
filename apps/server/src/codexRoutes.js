@@ -69,6 +69,7 @@ function registerCodexRoutes(app, options = {}) {
     isActiveRunStatus,
     listCodexRunEvents,
     listDirectoryPickerTree,
+    listKnownSessionsByEngine = () => [],
     listPromptxCodexSessions,
     listTaskSlugsByCodexSessionId = () => [],
     listWorkspaceSuggestions,
@@ -88,6 +89,13 @@ function registerCodexRoutes(app, options = {}) {
 
   app.get('/api/codex/workspaces', async (request) => ({
     items: listWorkspaceSuggestions(24, request.query?.engine),
+  }))
+
+  app.get('/api/codex/session-candidates', async (request) => ({
+    items: listKnownSessionsByEngine(request.query?.engine, {
+      cwd: request.query?.cwd,
+      limit: request.query?.limit,
+    }),
   }))
 
   app.get('/api/codex/directories/tree', async (request) => (

@@ -1,10 +1,9 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { createRequire } from 'node:module'
 import { execFileSync, spawn } from 'node:child_process'
+import Database from 'better-sqlite3'
 import iconv from 'iconv-lite'
-import initSqlJs from 'sql.js'
 import {
   AGENT_RUN_EVENT_TYPES,
   createAgentEventEnvelopeEvent,
@@ -12,6 +11,7 @@ import {
   createStatusEnvelopeEvent,
   createStderrEnvelopeEvent,
   createStdoutEnvelopeEvent,
+  normalizeComparablePath,
 } from '../../../packages/shared/src/index.js'
 import { createManagedSpawnOptions, forceStopChildProcess } from './processControl.js'
 
@@ -23,11 +23,6 @@ const MAX_THREAD_COUNT = 120
 const MAX_OUTPUT_TAIL_LENGTH = 64 * 1024
 const CODEX_DEFAULT_ARGS = ['--dangerously-bypass-approvals-and-sandbox', '--skip-git-repo-check']
 const RESOLVED_CODEX_BIN = resolveCodexBinary()
-const require = createRequire(import.meta.url)
-const sqlWasmPath = require.resolve('sql.js/dist/sql-wasm.wasm')
-const SQL = await initSqlJs({
-  locateFile: () => sqlWasmPath,
-})
 
 function ensureCodexHome() {
   fs.mkdirSync(TMP_DIR, { recursive: true })
@@ -358,28 +353,33 @@ function loadCodexThreads(limit = MAX_THREAD_COUNT) {
   }
 
   try {
-    const sql = `select id, cwd, title, updated_at from threads order by updated_at desc limit ${Math.max(1, Number(limit) || MAX_THREAD_COUNT)};`
-    const db = new SQL.Database(new Uint8Array(fs.readFileSync(STATE_DB_PATH)))
+    const db = new Database(STATE_DB_PATH, {
+      readonly: true,
+      fileMustExist: true,
+    })
 
     try {
-      const statement = db.prepare(sql)
-      const rows = []
-
-      try {
-        while (statement.step()) {
-          rows.push(statement.getAsObject())
-        }
-      } finally {
-        statement.free()
-      }
-
-      return rows
+      return db.prepare(`
+        select id, cwd, title, updated_at
+        from threads
+        order by updated_at desc
+        limit ?
+      `).all(Math.max(1, Number(limit) || MAX_THREAD_COUNT))
     } finally {
       db.close()
     }
   } catch {
     return []
   }
+}
+
+function normalizeCodexSessionTimestamp(value) {
+  const timestamp = Number(value || 0)
+  if (!Number.isFinite(timestamp) || timestamp <= 0) {
+    return ''
+  }
+
+  return new Date(timestamp > 1e12 ? timestamp : timestamp * 1000).toISOString()
 }
 
 export function listKnownCodexWorkspaces(limit = MAX_THREAD_COUNT) {
@@ -396,6 +396,34 @@ export function listKnownCodexWorkspaces(limit = MAX_THREAD_COUNT) {
   })
 
   return items
+}
+
+export function listKnownCodexSessions(options = {}) {
+  const limit = Math.max(1, Math.min(200, Number(options.limit) || 80))
+  const targetCwd = normalizeComparablePath(options.cwd)
+
+  return loadCodexThreads(Math.max(limit * 3, MAX_THREAD_COUNT))
+    .map((thread) => {
+      const cwd = String(thread.cwd || '').trim()
+      const title = String(thread.title || '').trim()
+      return {
+        id: String(thread.id || '').trim(),
+        engine: 'codex',
+        label: title || path.basename(cwd) || String(thread.id || '').trim(),
+        cwd,
+        updatedAt: normalizeCodexSessionTimestamp(thread.updated_at),
+        source: 'codex_state',
+        summary: '',
+        matchedCwd: Boolean(targetCwd && normalizeComparablePath(cwd) === targetCwd),
+      }
+    })
+    .filter((item) => item.id)
+    .sort((left, right) => (
+      Number(right.matchedCwd) - Number(left.matchedCwd)
+      || Date.parse(right.updatedAt || '') - Date.parse(left.updatedAt || '')
+      || String(left.label || left.id).localeCompare(String(right.label || right.id), 'zh-CN')
+    ))
+    .slice(0, limit)
 }
 
 export function streamPromptToCodexSession(sessionInput, prompt, callbacks = {}) {

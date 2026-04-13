@@ -16,6 +16,7 @@ import {
   createTurnCompletedEvent,
   getAgentEngineLabel,
 } from '../../../../packages/shared/src/index.js'
+import { listKnownOpenCodeSessions } from '../agentSessionDiscovery.js'
 import { createManagedSpawnOptions, forceStopChildProcess } from '../processControl.js'
 
 const OPENCODE_BIN = process.env.OPENCODE_BIN || 'opencode'
@@ -638,6 +639,9 @@ export const openCodeRunner = {
   supportsWorkspaceHistory: false,
   listKnownWorkspaces() {
     return []
+  },
+  listKnownSessions(options = {}) {
+    return listKnownOpenCodeSessions(options)
   },
   streamSessionPrompt(session, prompt, callbacks = {}) {
     return streamPromptToOpenCodeSession(session, prompt, callbacks)

@@ -1,5 +1,6 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue'
+import { normalizeComparablePath } from '../../../../packages/shared/src/index.js'
 import {
   ArrowLeft,
   Bot,
@@ -22,6 +23,49 @@ import {
   getEnabledAgentEngineOptions,
   normalizeAgentEngine,
 } from '../lib/agentEngines.js'
+import { listAgentSessionCandidates } from '../lib/codexApi.js'
+
+const SESSION_CANDIDATE_CACHE_TTL_MS = 3000
+const sessionCandidateCache = new Map()
+
+function getSessionCandidateCacheKey(engine = '', cwd = '') {
+  const normalizedEngine = normalizeAgentEngine(engine)
+  const normalizedCwd = normalizeComparablePath(cwd)
+  if (!normalizedEngine || !normalizedCwd) {
+    return ''
+  }
+
+  return `${normalizedEngine}\n${normalizedCwd}`
+}
+
+function readSessionCandidateCache(key = '') {
+  if (!key) {
+    return null
+  }
+
+  const cached = sessionCandidateCache.get(key)
+  if (!cached) {
+    return null
+  }
+
+  if (cached.expiresAt <= Date.now()) {
+    sessionCandidateCache.delete(key)
+    return null
+  }
+
+  return Array.isArray(cached.items) ? cached.items : []
+}
+
+function writeSessionCandidateCache(key = '', items = []) {
+  if (!key) {
+    return
+  }
+
+  sessionCandidateCache.set(key, {
+    expiresAt: Date.now() + SESSION_CANDIDATE_CACHE_TTL_MS,
+    items: Array.isArray(items) ? items : [],
+  })
+}
 
 const props = defineProps({
   open: {
@@ -102,7 +146,12 @@ const { matches: isMobileLayout } = useMediaQuery('(max-width: 767px)')
 const mobileView = ref('list')
 const mobileDetailTab = ref('basic')
 const loadedEngineOptions = ref(getEnabledAgentEngineOptions())
+const sessionCandidates = ref([])
+const sessionCandidatesLoading = ref(false)
 let threadIdCopyTimer = null
+let sessionCandidateTimer = null
+let sessionCandidateController = null
+let sessionCandidateRequestSeq = 0
 
 const sortedSessions = computed(() => sortSessions(props.sessions))
 const activeSession = computed(() => props.sessions.find((session) => session.id === editingSessionId.value) || null)
@@ -136,8 +185,12 @@ const workspaceSuggestions = computed(() => {
   return items.slice(0, 12)
 })
 const engineOptions = computed(() => loadedEngineOptions.value)
+const decoratedSessionCandidates = computed(() => sessionCandidates.value.map((item) => ({
+  ...item,
+  updatedAtLabel: item.updatedAt ? formatUpdatedAt(item.updatedAt) : '',
+})))
 const duplicateCwdSessions = computed(() => {
-  const target = normalizeCwdForCompare(form.cwd)
+  const target = normalizeComparablePath(form.cwd)
   if (!target) {
     return []
   }
@@ -146,7 +199,7 @@ const duplicateCwdSessions = computed(() => {
     if (session.id === activeSession.value?.id) {
       return false
     }
-    return normalizeCwdForCompare(session.cwd) === target
+    return normalizeComparablePath(session.cwd) === target
   })
 })
 const duplicateCwdMessage = computed(() => {
@@ -194,22 +247,6 @@ const mobileTitle = computed(() => (mode.value === 'create' ? t('projectManager.
 function getDateOrderValue(value = '') {
   const timestamp = Date.parse(String(value || ''))
   return Number.isFinite(timestamp) ? timestamp : 0
-}
-
-function normalizeCwdForCompare(value = '') {
-  const raw = String(value || '').trim()
-  if (!raw) {
-    return ''
-  }
-
-  const isWindowsPath = /^[a-z]:[\\/]/i.test(raw) || raw.includes('\\')
-  let normalized = raw.replace(/\\/g, '/')
-
-  if (normalized.length > 1 && !/^[a-z]:\/$/i.test(normalized)) {
-    normalized = normalized.replace(/\/+$/, '')
-  }
-
-  return isWindowsPath ? normalized.toLowerCase() : normalized
 }
 
 function isSessionRunning(sessionId) {
@@ -415,6 +452,10 @@ function updateFormSessionId(value) {
   form.sessionId = String(value || '')
 }
 
+function selectSessionCandidate(candidate) {
+  form.sessionId = String(candidate?.id || '').trim()
+}
+
 function initializeDialog() {
   error.value = ''
   showDeleteDialog.value = false
@@ -455,6 +496,87 @@ async function loadEngineOptions() {
   } catch {
     loadedEngineOptions.value = getEnabledAgentEngineOptions()
   }
+}
+
+function clearSessionCandidateTimer() {
+  if (sessionCandidateTimer) {
+    clearTimeout(sessionCandidateTimer)
+    sessionCandidateTimer = null
+  }
+}
+
+function abortSessionCandidateRequest() {
+  if (sessionCandidateController) {
+    sessionCandidateController.abort()
+    sessionCandidateController = null
+  }
+}
+
+async function loadSessionCandidates() {
+  const cwd = String(form.cwd || '').trim()
+  if (!props.open || !canEditSessionId.value || !cwd) {
+    sessionCandidates.value = []
+    sessionCandidatesLoading.value = false
+    abortSessionCandidateRequest()
+    return
+  }
+
+  const requestSeq = ++sessionCandidateRequestSeq
+  abortSessionCandidateRequest()
+  const cacheKey = getSessionCandidateCacheKey(form.engine, cwd)
+  const cachedItems = readSessionCandidateCache(cacheKey)
+  if (cachedItems) {
+    sessionCandidates.value = cachedItems
+    sessionCandidatesLoading.value = false
+    return
+  }
+
+  sessionCandidateController = new AbortController()
+  sessionCandidatesLoading.value = true
+
+  try {
+    const payload = await listAgentSessionCandidates({
+      engine: form.engine,
+      cwd,
+      limit: 50,
+      signal: sessionCandidateController.signal,
+    })
+
+    if (requestSeq !== sessionCandidateRequestSeq) {
+      return
+    }
+
+    const items = Array.isArray(payload?.items) ? payload.items : []
+    sessionCandidates.value = items
+    writeSessionCandidateCache(cacheKey, items)
+  } catch (err) {
+    if (err?.name === 'AbortError') {
+      return
+    }
+    if (requestSeq === sessionCandidateRequestSeq) {
+      sessionCandidates.value = []
+    }
+  } finally {
+    if (requestSeq === sessionCandidateRequestSeq) {
+      sessionCandidatesLoading.value = false
+      sessionCandidateController = null
+    }
+  }
+}
+
+function scheduleSessionCandidatesLoad(delay = 250) {
+  clearSessionCandidateTimer()
+  if (!props.open || !canEditSessionId.value || !String(form.cwd || '').trim()) {
+    sessionCandidates.value = []
+    sessionCandidatesLoading.value = false
+    abortSessionCandidateRequest()
+    return
+  }
+
+  sessionCandidateTimer = setTimeout(() => {
+    sessionCandidateTimer = null
+    loadSessionCandidates().catch(() => {})
+  }, delay)
 }
 
 async function copyText(text) {
@@ -666,6 +788,10 @@ watch(
     showResetDialog.value = false
     threadIdCopied.value = false
     error.value = ''
+    clearSessionCandidateTimer()
+    abortSessionCandidateRequest()
+    sessionCandidates.value = []
+    sessionCandidatesLoading.value = false
   },
   { immediate: true }
 )
@@ -716,11 +842,34 @@ watch(
   }
 )
 
+watch(
+  () => [
+    props.open,
+    mode.value,
+    form.engine,
+    form.cwd,
+    canEditSessionId.value,
+  ].join('\n'),
+  () => {
+    scheduleSessionCandidatesLoad(250)
+  },
+  { immediate: true }
+)
+
+watch(
+  () => activeSession.value?.id || '',
+  () => {
+    scheduleSessionCandidatesLoad(0)
+  }
+)
+
 onBeforeUnmount(() => {
   if (threadIdCopyTimer) {
     clearTimeout(threadIdCopyTimer)
     threadIdCopyTimer = null
   }
+  clearSessionCandidateTimer()
+  abortSessionCandidateRequest()
 })
 
 defineExpose({
@@ -822,6 +971,8 @@ defineExpose({
                 :engine="form.engine"
                 :engine-options="engineOptions"
                 :engine-readonly-message="engineReadonlyMessage"
+                :session-candidates="decoratedSessionCandidates"
+                :session-candidates-loading="sessionCandidatesLoading"
                 :session-id="form.sessionId"
                 :session-id-copied="threadIdCopied"
                 :session-id-readonly-message="sessionIdReadonlyMessage"
@@ -829,6 +980,7 @@ defineExpose({
                 :workspace-suggestions="workspaceSuggestions"
                 @copy-session-id="handleCopyThreadId"
                 @open-directory-picker="showDirectoryPicker = true"
+                @select-session-candidate="selectSessionCandidate"
                 @update:cwd="updateFormCwd"
                 @update:engine="updateFormEngine"
                 @update:session-id="updateFormSessionId"
@@ -986,6 +1138,8 @@ defineExpose({
                   :engine="form.engine"
                   :engine-options="engineOptions"
                   :engine-readonly-message="engineReadonlyMessage"
+                  :session-candidates="decoratedSessionCandidates"
+                  :session-candidates-loading="sessionCandidatesLoading"
                   :session-id="form.sessionId"
                   :session-id-copied="threadIdCopied"
                   :session-id-readonly-message="sessionIdReadonlyMessage"
@@ -993,6 +1147,7 @@ defineExpose({
                   :workspace-suggestions="workspaceSuggestions"
                   @copy-session-id="handleCopyThreadId"
                   @open-directory-picker="showDirectoryPicker = true"
+                  @select-session-candidate="selectSessionCandidate"
                   @update:cwd="updateFormCwd"
                   @update:engine="updateFormEngine"
                   @update:session-id="updateFormSessionId"

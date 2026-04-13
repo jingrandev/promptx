@@ -50,7 +50,7 @@ import {
   listTaskCodexRunsWithOptions,
   updateCodexRunFromRunnerStatus,
 } from './codexRuns.js'
-import { listKnownWorkspacesByEngine } from './agents/index.js'
+import { listKnownSessionsByEngine, listKnownWorkspacesByEngine } from './agents/index.js'
 import {
   listDirectoryPickerTree,
   readWorkspaceFileContent,
@@ -416,6 +416,7 @@ registerCodexRoutes(app, {
   isActiveRunStatus,
   listCodexRunEvents,
   listDirectoryPickerTree,
+  listKnownSessionsByEngine,
   listPromptxCodexSessions,
   listTaskSlugsByCodexSessionId,
   listWorkspaceSuggestions: workspaceSuggestionService.listWorkspaceSuggestions,

@@ -16,6 +16,7 @@ import {
   createTurnCompletedEvent,
   getAgentEngineLabel,
 } from '../../../../packages/shared/src/index.js'
+import { listKnownClaudeCodeSessions } from '../agentSessionDiscovery.js'
 import { createManagedSpawnOptions, forceStopChildProcess } from '../processControl.js'
 
 const CLAUDE_CODE_BIN = process.env.CLAUDE_CODE_BIN || 'claude'
@@ -841,6 +842,9 @@ export const claudeCodeRunner = {
   supportsWorkspaceHistory: false,
   listKnownWorkspaces() {
     return []
+  },
+  listKnownSessions(options = {}) {
+    return listKnownClaudeCodeSessions(options)
   },
   streamSessionPrompt(session, prompt, callbacks = {}) {
     return streamPromptToClaudeCodeSession(session, prompt, callbacks)

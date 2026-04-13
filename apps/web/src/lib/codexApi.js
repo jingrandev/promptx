@@ -20,6 +20,29 @@ export function listCodexWorkspaces(options = {}) {
   return request(`/api/codex/workspaces${query ? `?${query}` : ''}`)
 }
 
+export function listAgentSessionCandidates(options = {}) {
+  const params = new URLSearchParams()
+  const engine = String(options.engine || '').trim()
+  const cwd = String(options.cwd || '').trim()
+  const limit = Number(options.limit || 0)
+
+  if (engine) {
+    params.set('engine', engine)
+  }
+  if (cwd) {
+    params.set('cwd', cwd)
+  }
+  if (Number.isFinite(limit) && limit > 0) {
+    params.set('limit', String(limit))
+  }
+
+  const query = params.toString()
+  return request(`/api/codex/session-candidates${query ? `?${query}` : ''}`, {
+    cache: 'no-store',
+    signal: options.signal,
+  })
+}
+
 export function listCodexDirectoryTree(options = {}) {
   const params = new URLSearchParams()
   const targetPath = String(options.path || '').trim()

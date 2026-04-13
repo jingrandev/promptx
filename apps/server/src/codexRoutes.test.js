@@ -113,6 +113,64 @@ test('codex routes return stop acceptance and event history', async () => {
   }
 })
 
+test('codex routes expose local session candidates by engine', async () => {
+  const app = Fastify()
+  registerCodexRoutes(app, {
+    broadcastServerEvent: () => {},
+    clearTaskCodexSessionReferences: () => [],
+    createPromptxCodexSession: () => ({ id: 'session-1' }),
+    decorateCodexSession: (session) => session,
+    decorateCodexSessionList: (items) => items,
+    deletePromptxCodexSession: () => null,
+    getCodexRunById: () => null,
+    getPromptxCodexSessionById: () => null,
+    getRunningCodexRunBySessionId: () => null,
+    isActiveRunStatus: () => false,
+    listCodexRunEvents: () => [],
+    listDirectoryPickerTree: () => ({}),
+    listKnownSessionsByEngine(engine, options) {
+      return [{
+        id: `${engine}-session-1`,
+        engine,
+        cwd: options.cwd,
+        updatedAt: '2026-04-13T08:00:00.000Z',
+      }]
+    },
+    listPromptxCodexSessions: () => [],
+    listWorkspaceSuggestions: () => [],
+    listWorkspaceTree: () => ({}),
+    runDispatchService: {
+      async requestRunStop() {
+        return null
+      },
+    },
+    searchDirectoryPickerEntries: () => ({}),
+    searchWorkspaceFileContent: () => ({}),
+    searchWorkspaceEntries: () => ({}),
+    updatePromptxCodexSession: () => null,
+  })
+  await app.ready()
+
+  try {
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/codex/session-candidates?engine=claude-code&cwd=%2Ftmp%2Fproject&limit=20',
+    })
+
+    assert.equal(response.statusCode, 200)
+    assert.deepEqual(response.json(), {
+      items: [{
+        id: 'claude-code-session-1',
+        engine: 'claude-code',
+        cwd: '/tmp/project',
+        updatedAt: '2026-04-13T08:00:00.000Z',
+      }],
+    })
+  } finally {
+    await app.close()
+  }
+})
+
 test('codex routes broadcast task updates when deleting a session with references', async () => {
   const broadcasts = []
   const app = Fastify()

@@ -189,6 +189,22 @@ export function clampText(value = '', max = 20000) {
   return String(value).slice(0, max)
 }
 
+export function normalizeComparablePath(value = '') {
+  const raw = String(value || '').trim()
+  if (!raw) {
+    return ''
+  }
+
+  const isWindowsPath = /^[a-z]:[\\/]/i.test(raw) || raw.includes('\\')
+  let normalized = raw.replace(/\\/g, '/')
+
+  if (normalized.length > 1 && !/^[a-z]:\/$/i.test(normalized)) {
+    normalized = normalized.replace(/\/+$/, '')
+  }
+
+  return isWindowsPath ? normalized.toLowerCase() : normalized
+}
+
 export function slugifyTitle(title = '') {
   const base = String(title)
     .toLowerCase()
