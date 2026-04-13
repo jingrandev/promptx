@@ -6,6 +6,9 @@
   color-scheme: light;
   --theme-fontSans: "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", "Source Han Sans SC", Roboto, "Helvetica Neue", Arial, system-ui, sans-serif;
   --theme-fontMono: "Geist Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, Monaco, monospace;
+  --theme-codeViewFontSize: 12px;
+  --theme-codeViewLineHeight: 1.5;
+  --theme-codeViewGutterFontSize: 12px;
   --theme-processDetailRadius: 0;
   --theme-processDetailBadgeRadius: 0;
   --theme-appBg: #f1eee8;

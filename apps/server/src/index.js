@@ -27,6 +27,7 @@ import {
 import {
   getGitDiffWorkerDiagnostics,
   getTaskGitDiffReviewInSubprocess,
+  stopGitDiffWorker,
 } from './gitDiffClient.js'
 import {
   createPromptxCodexSession,
@@ -442,6 +443,37 @@ app.setErrorHandler((error, request, reply) => {
 })
 
 purgeExpiredContent(true)
+
+let shutdownPromise = null
+
+async function shutdown() {
+  if (shutdownPromise) {
+    return shutdownPromise
+  }
+
+  shutdownPromise = (async () => {
+    relayClient.stop()
+    taskAutomationService.stop()
+    runRecoveryService.stop()
+    maintenanceService.stop()
+    stopGitDiffWorker()
+    await app.close().catch(() => {})
+  })()
+
+  return shutdownPromise
+}
+
+process.once('SIGINT', () => {
+  shutdown().finally(() => process.exit(0))
+})
+process.once('SIGTERM', () => {
+  shutdown().finally(() => process.exit(0))
+})
+if (process.platform === 'win32') {
+  process.once('SIGBREAK', () => {
+    shutdown().finally(() => process.exit(0))
+  })
+}
 
 app.listen({ port, host }).then(() => {
   app.log.info(`server running at http://${host}:${port}`)

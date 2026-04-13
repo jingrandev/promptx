@@ -1149,7 +1149,7 @@ onBeforeUnmount(() => {
       </div>
     </template>
 
-    <div class="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[21rem_minmax(0,1fr)]">
+    <div class="source-browser-layout grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[21rem_minmax(0,1fr)]">
       <aside
         class="theme-divider flex min-h-0 flex-col border-b md:border-b-0 md:border-r"
         @keydown="handleSidebarKeydown"
@@ -1163,7 +1163,7 @@ onBeforeUnmount(() => {
                   ref="searchInputRef"
                   v-model="searchInput"
                   type="text"
-                  class="tool-input w-full pl-9 pr-18 text-sm"
+                  class="tool-input w-full pl-9 pr-18 text-[12px]"
                   :placeholder="currentSearchPlaceholder"
                   @keydown.esc="handleEscapeIntent"
                   @keydown.tab.prevent="handleSearchInputTab"
@@ -1188,77 +1188,77 @@ onBeforeUnmount(() => {
         <div class="min-h-0 flex-1 overflow-y-auto p-2">
           <div
             v-if="!sessionId"
-            class="theme-empty-state px-3 py-4 text-xs"
+            class="theme-empty-state px-3 py-4 text-[12px]"
           >
             {{ t('sourceBrowser.noProject') }}
           </div>
 
           <div
             v-else-if="hasSearchKeyword && isContentSearchMode && contentSearchError"
-            class="theme-status-danger rounded-sm border px-3 py-3 text-xs"
+            class="theme-status-danger rounded-sm border px-3 py-3 text-[12px]"
           >
             {{ contentSearchError }}
           </div>
 
           <div
             v-else-if="currentError"
-            class="theme-status-danger rounded-sm border px-3 py-3 text-xs"
+            class="theme-status-danger rounded-sm border px-3 py-3 text-[12px]"
           >
             {{ currentError }}
           </div>
 
           <div
             v-else-if="showPathSearchPromptState"
-            class="theme-empty-state px-3 py-4 text-xs"
+            class="theme-empty-state px-3 py-4 text-[12px]"
           >
             {{ t('sourceBrowser.searchMinKeywordHint', { count: WORKSPACE_SEARCH_MIN_QUERY_LENGTH }) }}
           </div>
 
           <div
             v-else-if="showPathSearchEmptyState"
-            class="theme-empty-state px-3 py-4 text-xs"
+            class="theme-empty-state px-3 py-4 text-[12px]"
           >
             {{ t('sourceBrowser.searchEmpty') }}
           </div>
 
           <div
             v-else-if="showContentSearchPromptState"
-            class="theme-empty-state px-3 py-4 text-xs"
+            class="theme-empty-state px-3 py-4 text-[12px]"
           >
             {{ t('sourceBrowser.searchMinKeywordHint', { count: WORKSPACE_SEARCH_MIN_QUERY_LENGTH }) }}
           </div>
 
           <div
             v-else-if="showContentSearchIdleState"
-            class="theme-empty-state px-3 py-4 text-xs"
+            class="theme-empty-state px-3 py-4 text-[12px]"
           >
             {{ t('sourceBrowser.contentSearchPrompt') }}
           </div>
 
           <div
             v-else-if="showContentSearchEmptyState"
-            class="theme-empty-state px-3 py-4 text-xs"
+            class="theme-empty-state px-3 py-4 text-[12px]"
           >
             {{ t('sourceBrowser.contentSearchEmpty') }}
           </div>
 
           <div
             v-else-if="showTreeEmptyState"
-            class="theme-empty-state px-3 py-4 text-xs"
+            class="theme-empty-state px-3 py-4 text-[12px]"
           >
             {{ t('sourceBrowser.treeEmpty') }}
           </div>
 
           <div
             v-else-if="hasSearchKeyword && isContentSearchMode && contentSearchLoading && !contentSearchResults.length"
-            class="theme-empty-state px-3 py-4 text-xs"
+            class="theme-empty-state px-3 py-4 text-[12px]"
           >
             {{ t('sourceBrowser.contentSearching') }}
           </div>
 
           <div
             v-else-if="currentLoading && !visibleItems.length"
-            class="theme-empty-state px-3 py-4 text-xs"
+            class="theme-empty-state px-3 py-4 text-[12px]"
           >
             {{ t('sourceBrowser.loadingFiles') }}
           </div>
@@ -1266,7 +1266,7 @@ onBeforeUnmount(() => {
           <div v-else-if="hasSearchKeyword && isPathSearchMode" class="space-y-1">
             <div
               v-if="recentSearchItems.length"
-              class="theme-muted-text px-1 py-0.5 text-[10px] uppercase tracking-[0.12em]"
+              class="theme-muted-text px-1 py-0.5 text-[12px] tracking-[0.08em]"
             >
               {{ t('sourceBrowser.recent') }}
             </div>
@@ -1299,7 +1299,7 @@ onBeforeUnmount(() => {
 
             <div
               v-if="pickerProps.query.trim() && normalSearchItems.length"
-              class="theme-muted-text px-1 py-0.5 text-[10px] uppercase tracking-[0.12em]"
+              class="theme-muted-text px-1 py-0.5 text-[12px] tracking-[0.08em]"
             >
               {{ t('sourceBrowser.results') }}
             </div>
@@ -1375,7 +1375,7 @@ onBeforeUnmount(() => {
 
             <div
               v-if="contentSearchTruncated"
-              class="theme-muted-text px-1 text-[11px]"
+              class="theme-muted-text px-1 text-[12px]"
             >
               {{ t('sourceBrowser.contentSearchTruncated') }}
             </div>
@@ -1433,7 +1433,7 @@ onBeforeUnmount(() => {
 
       <section class="flex min-h-0 flex-col overflow-hidden">
         <div class="theme-divider border-b px-4 py-2">
-          <p v-if="previewMetaLabel" class="theme-muted-text truncate text-[11px]">
+          <p v-if="previewMetaLabel" class="theme-muted-text truncate text-[12px]">
             {{ previewMetaLabel }}
           </p>
         </div>
@@ -1441,28 +1441,28 @@ onBeforeUnmount(() => {
         <div class="min-h-0 flex-1 overflow-auto px-4 py-3">
           <div
             v-if="previewLoading"
-            class="theme-empty-state flex h-full min-h-[12rem] items-center justify-center text-sm"
+            class="theme-empty-state flex h-full min-h-[12rem] items-center justify-center text-[12px]"
           >
             <span>{{ t('sourceBrowser.previewLoading') }}</span>
           </div>
 
           <div
             v-else-if="previewError"
-            class="theme-status-danger rounded-sm border px-4 py-3 text-sm"
+            class="theme-status-danger rounded-sm border px-4 py-3 text-[12px]"
           >
             {{ previewError }}
           </div>
 
           <div
             v-else-if="selectedItemType === 'directory'"
-            class="theme-empty-state flex h-full min-h-[12rem] items-center justify-center text-sm"
+            class="theme-empty-state flex h-full min-h-[12rem] items-center justify-center text-[12px]"
           >
             {{ t('sourceBrowser.selectFileHint') }}
           </div>
 
           <div
             v-else-if="!selectedPath"
-            class="theme-empty-state flex h-full min-h-[12rem] items-center justify-center text-sm"
+            class="theme-empty-state flex h-full min-h-[12rem] items-center justify-center text-[12px]"
           >
             {{ t('sourceBrowser.selectFile') }}
           </div>
@@ -1480,7 +1480,7 @@ onBeforeUnmount(() => {
 
           <div
             v-else-if="showBinaryState"
-            class="theme-empty-state flex h-full min-h-[12rem] flex-col items-center justify-center gap-3 text-sm"
+            class="theme-empty-state flex h-full min-h-[12rem] flex-col items-center justify-center gap-3 text-[12px]"
           >
             <FileImage class="h-8 w-8" />
             <span>{{ previewPayload?.tooLarge ? t('sourceBrowser.binaryTooLarge') : t('sourceBrowser.binaryUnsupported') }}</span>
@@ -1530,6 +1530,13 @@ onBeforeUnmount(() => {
   overflow: auto;
 }
 
+.source-browser-layout .theme-list-item-title,
+.source-browser-layout .theme-list-item-subtitle,
+.source-browser-layout .theme-list-item-meta {
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .source-code-view {
   min-width: max-content;
 }
@@ -1539,8 +1546,8 @@ onBeforeUnmount(() => {
   border-spacing: 0;
   color: inherit;
   font-family: var(--theme-fontMono);
-  font-size: 0.82rem;
-  line-height: 1.56;
+  font-size: var(--theme-codeViewFontSize);
+  line-height: 1.6;
   min-width: 100%;
   width: max-content;
 }
@@ -1549,7 +1556,7 @@ onBeforeUnmount(() => {
   border-right: 1px solid color-mix(in srgb, var(--theme-borderDefault) 82%, transparent);
   color: color-mix(in srgb, var(--source-code-fg) 50%, transparent);
   font-family: var(--theme-fontMono);
-  font-size: 0.7rem;
+  font-size: var(--theme-codeViewGutterFontSize);
   width: var(--source-code-gutter-width);
   min-width: var(--source-code-gutter-width);
   max-width: var(--source-code-gutter-width);

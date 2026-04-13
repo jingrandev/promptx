@@ -172,10 +172,10 @@ watch(
 
 <template>
   <div v-if="selectedFile" class="flex h-full min-h-0 flex-col overflow-hidden">
-    <div class="theme-divider theme-secondary-text border-b px-4 py-3 text-xs">
+    <div class="theme-divider theme-secondary-text border-b px-4 py-3 text-[12px]">
       <div class="space-y-3 sm:hidden">
         <div class="flex items-start gap-2">
-          <span class="inline-flex shrink-0 rounded-sm border px-1.5 py-0.5 text-[10px]" :class="getStatusClass(selectedFile.status)">
+          <span class="inline-flex shrink-0 rounded-sm border px-1.5 py-0.5 text-[12px]" :class="getStatusClass(selectedFile.status)">
             {{ getStatusLabel(selectedFile.status) }}
           </span>
           <span class="min-w-0 break-all font-medium text-[var(--theme-textPrimary)]">{{ selectedFile.path }}</span>
@@ -198,7 +198,7 @@ watch(
             >
               <ChevronUp class="h-4 w-4" />
             </button>
-            <span class="min-w-[64px] text-center text-[11px] text-[var(--theme-textSecondary)]">
+            <span class="min-w-[64px] text-center text-[12px] text-[var(--theme-textSecondary)]">
               {{ t('diffReview.changeIndex', { current: Math.min(activeHunkIndex + 1, selectedPatchHunks.length), total: selectedPatchHunks.length }) }}
             </span>
             <button
@@ -215,7 +215,7 @@ watch(
 
       <div class="hidden items-center gap-3 sm:flex">
         <div class="flex min-w-0 flex-1 flex-wrap items-center gap-2">
-          <span class="inline-flex rounded-sm border px-1.5 py-0.5 text-[10px]" :class="getStatusClass(selectedFile.status)">
+          <span class="inline-flex rounded-sm border px-1.5 py-0.5 text-[12px]" :class="getStatusClass(selectedFile.status)">
             {{ getStatusLabel(selectedFile.status) }}
           </span>
           <span class="break-all font-medium text-[var(--theme-textPrimary)]">{{ selectedFile.path }}</span>
@@ -237,7 +237,7 @@ watch(
           >
             <ChevronUp class="h-4 w-4" />
           </button>
-          <span class="min-w-[64px] text-center text-[11px] text-[var(--theme-textSecondary)]">
+          <span class="min-w-[64px] text-center text-[12px] text-[var(--theme-textSecondary)]">
             {{ t('diffReview.changeIndex', { current: Math.min(activeHunkIndex + 1, selectedPatchHunks.length), total: selectedPatchHunks.length }) }}
           </span>
           <button
@@ -252,14 +252,14 @@ watch(
       </div>
     </div>
 
-    <div v-if="selectedFile.message" class="theme-secondary-text flex-1 overflow-y-auto px-4 py-4 text-sm">
+    <div v-if="selectedFile.message" class="theme-secondary-text flex-1 overflow-y-auto px-4 py-4 text-[12px]">
       <div class="theme-empty-state px-4 py-4">
         {{ selectedFile.message }}
       </div>
     </div>
-    <div v-else-if="patchLoading && !selectedFile.patchLoaded" class="theme-muted-text flex-1 overflow-y-auto px-4 py-4 text-sm">{{ t('diffReview.loadingFileDiff') }}</div>
+    <div v-else-if="patchLoading && !selectedFile.patchLoaded" class="theme-muted-text flex-1 overflow-y-auto px-4 py-4 text-[12px]">{{ t('diffReview.loadingFileDiff') }}</div>
     <div v-else-if="selectedPatchLines.length" :ref="setPatchViewportRef" class="flex-1 overflow-auto">
-      <div class="min-w-max px-4 py-4 font-mono text-[11px] leading-5">
+      <div class="task-diff-view min-w-max px-4 py-4 font-mono">
         <div
           v-for="line in renderedPatchLines"
           :key="line.id"
@@ -286,14 +286,14 @@ watch(
         </div>
       </div>
     </div>
-    <div v-else class="theme-secondary-text flex-1 overflow-y-auto px-4 py-4 text-sm">
+    <div v-else class="theme-secondary-text flex-1 overflow-y-auto px-4 py-4 text-[12px]">
       <div class="theme-empty-state px-4 py-4">
         {{ t('diffReview.noFileDiffContent') }}
       </div>
     </div>
   </div>
 
-  <div v-else class="theme-muted-text flex h-full items-center justify-center px-5 text-sm">
+  <div v-else class="theme-muted-text flex h-full items-center justify-center px-5 text-[12px]">
     {{ t('diffReview.selectFile') }}
   </div>
 </template>
@@ -303,9 +303,15 @@ watch(
   grid-template-columns: 3.1rem 3.1rem minmax(0, 1fr);
 }
 
+.task-diff-view {
+  font-size: var(--theme-codeViewFontSize);
+  line-height: var(--theme-codeViewLineHeight);
+}
+
 .task-diff-row__number {
   border-right: 1px solid var(--theme-borderMuted);
   color: color-mix(in srgb, var(--theme-textPrimary) 52%, transparent);
+  font-size: var(--theme-codeViewGutterFontSize);
   font-variant-numeric: tabular-nums;
   padding: 0.125rem 0.5rem;
   text-align: right;

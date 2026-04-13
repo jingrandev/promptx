@@ -114,6 +114,11 @@ process.once('SIGINT', () => {
 process.once('SIGTERM', () => {
   shutdown().finally(() => process.exit(0))
 })
+if (process.platform === 'win32') {
+  process.once('SIGBREAK', () => {
+    shutdown().finally(() => process.exit(0))
+  })
+}
 
 async function syncConfigFromServer() {
   try {

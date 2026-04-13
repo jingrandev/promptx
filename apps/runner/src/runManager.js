@@ -20,6 +20,7 @@ const DEFAULT_STOP_TIMEOUT_MS = Math.max(1000, Number(process.env.PROMPTX_RUNNER
 const STOP_TIMEOUT_BUFFER_MS = Math.max(500, Number(process.env.PROMPTX_RUNNER_STOP_TIMEOUT_BUFFER_MS) || 2000)
 const DEFAULT_MAX_CONCURRENT_RUNS = Math.max(1, Number(process.env.PROMPTX_RUNNER_MAX_CONCURRENT_RUNS) || 3)
 const RUNNER_ID = String(process.env.PROMPTX_RUNNER_ID || 'local-runner').trim() || 'local-runner'
+const DISPOSE_POLL_INTERVAL_MS = Math.max(50, Number(process.env.PROMPTX_RUNNER_DISPOSE_POLL_MS) || 100)
 
 function nowIso() {
   return new Date().toISOString()
@@ -109,6 +110,13 @@ function classifyStoppedErrorReason(context = {}) {
   }
 
   return 'user_requested_after_error'
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, Math.max(0, Number(ms) || 0))
+    timer.unref?.()
+  })
 }
 
 export function createRunManager(options = {}) {
@@ -743,6 +751,18 @@ export function createRunManager(options = {}) {
           this.stopRun(context.runId, { forceAfterMs: 1000 }).catch(() => null)
         )
       )
+
+      const deadline = Date.now() + DEFAULT_STOP_TIMEOUT_MS + STOP_TIMEOUT_BUFFER_MS
+      while (activeRuns.size && Date.now() < deadline) {
+        await sleep(DISPOSE_POLL_INTERVAL_MS)
+      }
+
+      if (activeRuns.size) {
+        logger.warn?.({
+          activeRunCount: activeRuns.size,
+          runIds: [...activeRuns.keys()],
+        }, 'runner dispose timed out before all active runs settled')
+      }
     },
   }
 }

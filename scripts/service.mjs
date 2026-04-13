@@ -1,7 +1,7 @@
 ﻿import fs from 'node:fs'
 import path from 'node:path'
 import process from 'node:process'
-import { spawn } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
 import { setTimeout as delay } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
 
@@ -154,32 +154,108 @@ function spawnDetached(entryPath, env, logFile) {
   return child
 }
 
-async function stopPid(pid) {
+function terminateWindowsProcessTree(pid, force = false) {
+  const normalizedPid = Number(pid) || 0
+  if (!normalizedPid) {
+    return
+  }
+
+  execFileSync('taskkill.exe', ['/PID', String(normalizedPid), '/T', ...(force ? ['/F'] : [])], {
+    stdio: 'ignore',
+    windowsHide: true,
+  })
+}
+
+async function waitForPidExit(pid, timeoutMs = STOP_TIMEOUT_MS) {
+  const normalizedPid = Number(pid) || 0
+  if (!normalizedPid) {
+    return true
+  }
+
+  const deadline = Date.now() + Math.max(0, Number(timeoutMs) || 0)
+  while (Date.now() < deadline) {
+    if (!isProcessAlive(normalizedPid)) {
+      return true
+    }
+    await delay(POLL_INTERVAL_MS)
+  }
+
+  return !isProcessAlive(normalizedPid)
+}
+
+async function stopPid(pid, label = '服务进程') {
+  const normalizedPid = Number(pid) || 0
+  if (!normalizedPid || !isProcessAlive(normalizedPid)) {
+    return
+  }
+
+  if (process.platform === 'win32') {
+    try {
+      process.kill(normalizedPid, 'SIGTERM')
+    } catch (error) {
+      if (error?.code !== 'ESRCH') {
+        // Ignore and fall back to taskkill tree.
+      }
+    }
+
+    if (await waitForPidExit(normalizedPid, Math.min(1500, STOP_TIMEOUT_MS))) {
+      return
+    }
+
+    try {
+      terminateWindowsProcessTree(normalizedPid, false)
+    } catch (error) {
+      if (error?.code !== 'ESRCH' && isProcessAlive(normalizedPid)) {
+        // Ignore and continue to forced tree kill.
+      }
+    }
+
+    if (await waitForPidExit(normalizedPid, STOP_TIMEOUT_MS)) {
+      return
+    }
+
+    try {
+      terminateWindowsProcessTree(normalizedPid, true)
+    } catch (error) {
+      if (error?.code !== 'ESRCH' && isProcessAlive(normalizedPid)) {
+        throw error
+      }
+    }
+
+    if (await waitForPidExit(normalizedPid, Math.max(2000, STOP_TIMEOUT_MS))) {
+      return
+    }
+
+    throw new Error(`${label}（PID ${normalizedPid}）在 Windows 上停止超时。`)
+  }
+
   if (!isProcessAlive(pid)) {
     return
   }
 
   try {
-    process.kill(pid, 'SIGTERM')
+    process.kill(normalizedPid, 'SIGTERM')
   } catch (error) {
     if (error?.code !== 'ESRCH') {
       throw error
     }
   }
 
-  const deadline = Date.now() + STOP_TIMEOUT_MS
-  while (Date.now() < deadline) {
-    if (!isProcessAlive(pid)) {
-      return
-    }
-    await delay(POLL_INTERVAL_MS)
+  if (await waitForPidExit(normalizedPid, STOP_TIMEOUT_MS)) {
+    return
   }
 
   try {
-    process.kill(pid, 'SIGKILL')
+    process.kill(normalizedPid, 'SIGKILL')
   } catch {
     // Ignore when process already exited.
   }
+
+  if (await waitForPidExit(normalizedPid, Math.max(2000, STOP_TIMEOUT_MS))) {
+    return
+  }
+
+  throw new Error(`${label}（PID ${normalizedPid}）停止超时。`)
 }
 
 async function startService() {
@@ -286,10 +362,27 @@ async function stopService() {
     return
   }
 
-  await Promise.all([
-    current.server?.pid ? stopPid(current.server.pid) : Promise.resolve(),
-    current.runner?.pid ? stopPid(current.runner.pid) : Promise.resolve(),
-  ])
+  const errors = []
+
+  if (current.runner?.pid) {
+    try {
+      await stopPid(current.runner.pid, 'Runner')
+    } catch (error) {
+      errors.push(error)
+    }
+  }
+
+  if (current.server?.pid) {
+    try {
+      await stopPid(current.server.pid, 'Server')
+    } catch (error) {
+      errors.push(error)
+    }
+  }
+
+  if (errors.length) {
+    throw new Error(errors.map((error) => error?.message || String(error || '')).filter(Boolean).join('\n'))
+  }
 
   removeRuntimeFiles()
   console.log('[promptx] Server 和 runner 已停止。')
