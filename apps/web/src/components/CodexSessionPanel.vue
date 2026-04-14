@@ -241,6 +241,24 @@ function openPromptImage(url) {
   previewPromptImageUrl.value = String(url || '').trim()
 }
 
+async function copyText(text) {
+  if (navigator.clipboard?.writeText && window.isSecureContext) {
+    await navigator.clipboard.writeText(text)
+    return
+  }
+
+  const textarea = document.createElement('textarea')
+  textarea.value = text
+  textarea.setAttribute('readonly', 'true')
+  textarea.style.position = 'fixed'
+  textarea.style.opacity = '0'
+  textarea.style.pointerEvents = 'none'
+  document.body.appendChild(textarea)
+  textarea.select()
+  document.execCommand('copy')
+  document.body.removeChild(textarea)
+}
+
 async function copyResponseCode(event) {
   const button = event?.target?.closest?.('[data-copy-code="1"]')
   if (!button) {
@@ -258,7 +276,7 @@ async function copyResponseCode(event) {
   event.stopPropagation?.()
 
   try {
-    await navigator.clipboard.writeText(text)
+    await copyText(text)
     emit('toast', {
       message: t('sessionPanel.codeCopied'),
       type: 'success',
