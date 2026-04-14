@@ -141,9 +141,14 @@ function createSessionCandidate(input = {}) {
     label: label.length > MAX_PREVIEW_LENGTH ? `${label.slice(0, MAX_PREVIEW_LENGTH - 1)}…` : label,
     cwd,
     updatedAt: toIsoDate(input.updatedAt),
+    updatedAtSource: normalizeText(input.updatedAtSource),
     source: normalizeText(input.source),
     summary: normalizeText(input.summary),
   }
+}
+
+function getUpdatedAtPriority(value = '') {
+  return value === 'explicit' ? 1 : 0
 }
 
 function sortAndLimitCandidates(items = [], options = {}) {
@@ -166,7 +171,13 @@ function sortAndLimitCandidates(items = [], options = {}) {
 
     const nextScore = Number(Boolean(candidate.cwd)) + Number(Boolean(candidate.label && candidate.label !== candidate.id))
     const currentScore = Number(Boolean(current.cwd)) + Number(Boolean(current.label && current.label !== current.id))
-    if (getSortTime(candidate.updatedAt) > getSortTime(current.updatedAt) || nextScore > currentScore) {
+    const nextTimePriority = getUpdatedAtPriority(candidate.updatedAtSource)
+    const currentTimePriority = getUpdatedAtPriority(current.updatedAtSource)
+    if (
+      nextTimePriority > currentTimePriority
+      || (nextTimePriority === currentTimePriority && getSortTime(candidate.updatedAt) > getSortTime(current.updatedAt))
+      || nextScore > currentScore
+    ) {
       deduped.set(key, {
         ...current,
         ...candidate,
@@ -174,6 +185,7 @@ function sortAndLimitCandidates(items = [], options = {}) {
         label: candidate.label || current.label,
         summary: candidate.summary || current.summary,
         updatedAt: candidate.updatedAt || current.updatedAt,
+        updatedAtSource: candidate.updatedAtSource || current.updatedAtSource,
       })
     }
   })
@@ -185,6 +197,7 @@ function sortAndLimitCandidates(items = [], options = {}) {
     }))
     .sort((left, right) => (
       Number(right.matchedCwd) - Number(left.matchedCwd)
+      || getUpdatedAtPriority(right.updatedAtSource) - getUpdatedAtPriority(left.updatedAtSource)
       || getSortTime(right.updatedAt) - getSortTime(left.updatedAt)
       || String(left.label || left.id).localeCompare(String(right.label || right.id), 'zh-CN')
     ))
@@ -509,6 +522,7 @@ function addOpenCodeLayoutSessions(dat = {}, sourceFile = '', items = [], idToCw
       label: path.basename(cwd) || id,
       cwd,
       updatedAt: item.at,
+      updatedAtSource: item.at ? 'explicit' : 'inferred',
       source: 'opencode_desktop',
     })
   })
@@ -529,6 +543,7 @@ function addOpenCodeLayoutSessions(dat = {}, sourceFile = '', items = [], idToCw
       label: path.basename(cwd) || id,
       cwd,
       updatedAt: safeStat(sourceFile)?.mtime,
+      updatedAtSource: 'inferred',
       source: 'opencode_desktop',
     })
   })
@@ -578,6 +593,7 @@ export function listKnownOpenCodeSessions(options = {}) {
           label: sanitizeOpenCodeSessionLabel(text, cwd, id),
           cwd,
           updatedAt: stat?.mtime,
+          updatedAtSource: 'inferred',
           source: 'opencode_desktop',
         })
       })
