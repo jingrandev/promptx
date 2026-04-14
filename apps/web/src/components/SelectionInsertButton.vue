@@ -1,4 +1,14 @@
 <script setup>
+function handleActivate(event) {
+  if (typeof event?.button === 'number' && event.button !== 0) {
+    return
+  }
+
+  event?.preventDefault?.()
+  event?.stopPropagation?.()
+  emit('click')
+}
+
 const props = defineProps({
   label: {
     type: String,
@@ -22,8 +32,9 @@ const emit = defineEmits(['click'])
     type="button"
     class="tool-button tool-button-primary absolute z-20 inline-flex items-center gap-2 px-3 py-1.5 text-xs shadow-sm"
     :style="{ top: `${top}px`, left: `${left}px` }"
-    @mousedown.prevent
-    @click="emit('click')"
+    @pointerdown="handleActivate"
+    @keydown.enter.prevent="emit('click')"
+    @keydown.space.prevent="emit('click')"
   >
     {{ label }}
   </button>
