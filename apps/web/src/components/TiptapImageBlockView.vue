@@ -7,7 +7,7 @@ import { restoreTiptapNodeViewEditorFocus } from './tiptapNodeViewFocus.js'
 
 const props = defineProps(nodeViewProps)
 const { t } = useI18n()
-const compactDangerButtonClass = 'tool-button tool-button-danger-subtle inline-flex min-w-0 items-center justify-center gap-1 whitespace-nowrap px-2 py-1 text-[11px]'
+const compactDangerButtonClass = 'tool-button tool-button-danger-subtle inline-flex min-w-0 items-center justify-center gap-1 whitespace-nowrap px-2 py-1 text-[12px]'
 
 function openPreview() {
   if (typeof window === 'undefined') {

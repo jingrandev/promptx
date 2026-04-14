@@ -57,7 +57,7 @@ const previewState = computed(() => {
   }
 })
 
-const compactButtonClass = 'tool-button inline-flex min-w-0 items-center justify-center gap-1 whitespace-nowrap px-2 py-1 text-[11px]'
+const compactButtonClass = 'tool-button inline-flex min-w-0 items-center justify-center gap-1 whitespace-nowrap px-2 py-1 text-[12px]'
 const compactDangerButtonClass = `${compactButtonClass} tool-button-danger-subtle`
 
 function handleToggleKeydown(event) {
@@ -157,14 +157,14 @@ function removeNode() {
             @click="toggleCollapsed"
             @keydown="handleToggleKeydown"
           >
-            <p class="mt-0.5 break-all text-[11px] leading-4 text-[var(--theme-textSecondary)]">{{ fileSummaryText }}</p>
+            <p class="mt-0.5 break-all text-[12px] leading-4 text-[var(--theme-textSecondary)]">{{ fileSummaryText }}</p>
           </div>
         </div>
       </template>
 
       <div
         v-show="node.attrs?.collapsed"
-        class="theme-secondary-text relative cursor-pointer px-4 py-3 text-sm font-mono"
+        class="theme-secondary-text relative cursor-pointer px-4 py-3 text-[12px] font-mono"
         data-promptx-imported-preview
         role="button"
         tabindex="0"
