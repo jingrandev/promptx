@@ -10,6 +10,8 @@ import {
   Search,
 } from 'lucide-vue-next'
 import DialogShell from './DialogShell.vue'
+import SelectionInsertButton from './SelectionInsertButton.vue'
+import { useCodeSelectionAction } from '../composables/useCodeSelectionAction.js'
 import { useI18n } from '../composables/useI18n.js'
 import { useTheme } from '../composables/useTheme.js'
 import { useWorkspacePickerData } from '../composables/useWorkspacePickerData.js'
@@ -40,7 +42,7 @@ const props = defineProps({
   },
 })
 
-const emit = defineEmits(['close'])
+const emit = defineEmits(['close', 'insert-code-context'])
 const { t } = useI18n()
 const { isDark } = useTheme()
 
@@ -113,6 +115,49 @@ const previewCodeHtml = ref('')
 const previewCodeBg = ref('')
 const previewCodeFg = ref('')
 const previewGutterWidth = ref('2.6rem')
+const {
+  selectedRows: selectedPreviewRows,
+  selectionAction: previewSelectionAction,
+  clearSelectionState: clearPreviewLineSelection,
+  handleSelectionMouseUp: handlePreviewMouseUp,
+  updateSelectionActionFromDom: updatePreviewSelectionActionFromDom,
+} = useCodeSelectionAction({
+  getContainer: () => previewContainerRef.value,
+  isActive: () => props.open && showTextPreview.value,
+  rowSelector: '.source-code-view__line',
+  mapRowElement: (rowElement) => {
+    const lineNumber = Number(rowElement?.getAttribute?.('data-line') || 0)
+    return lineNumber > 0 ? lineNumber : null
+  },
+  getCodeLeft: (rowElement) => {
+    const codeElement = rowElement?.querySelector?.('.source-code-view__code')
+    if (!codeElement) {
+      return 0
+    }
+
+    const rect = codeElement.getBoundingClientRect?.()
+    const styles = window.getComputedStyle?.(codeElement)
+    const paddingLeft = Number.parseFloat(styles?.paddingLeft || '0') || 0
+    return (rect?.left || 0) + paddingLeft
+  },
+  debounceMs: 72,
+})
+const selectedPreviewLines = computed(() => [...new Set(selectedPreviewRows.value)]
+  .map((value) => Number(value) || 0)
+  .filter((lineNumber) => lineNumber > 0)
+  .sort((left, right) => left - right))
+const selectedPreviewLineItems = computed(() => {
+  const content = String(previewPayload.value?.content || '').replace(/\r\n/g, '\n')
+  const lines = content ? content.split('\n') : []
+  return [...selectedPreviewLines.value]
+    .sort((left, right) => left - right)
+    .map((lineNumber) => ({
+      lineNumber,
+      content: String(lines[lineNumber - 1] || ''),
+    }))
+    .filter((item) => item.lineNumber > 0)
+})
+const canInsertPreviewSelection = computed(() => selectedPreviewLineItems.value.length > 0)
 const currentSearchPlaceholder = computed(() => (
   isContentSearchMode.value
     ? t('sourceBrowser.contentSearchPlaceholder')
@@ -436,6 +481,89 @@ function clearPreviewFocusStyles() {
     ?.forEach?.((element) => element.classList.remove('is-match', 'is-focus-match'))
 }
 
+function clearPreviewSelectionStyles() {
+  const container = previewContainerRef.value
+  if (!container) {
+    return
+  }
+
+  container
+    .querySelectorAll?.('.source-code-view__line.is-selected')
+    ?.forEach?.((element) => element.classList.remove('is-selected'))
+}
+
+function applyPreviewSelectionStyles() {
+  clearPreviewSelectionStyles()
+
+  const container = previewContainerRef.value
+  if (!container || !selectedPreviewLines.value.length) {
+    return
+  }
+
+  selectedPreviewLines.value.forEach((lineNumber) => {
+    const gutter = container.querySelector(`.source-code-view__gutter[data-line="${lineNumber}"]`)
+    const row = gutter?.closest?.('tr')
+    row?.classList?.add('is-selected')
+  })
+}
+
+function getPreviewSelectedRangeLabel() {
+  if (!selectedPreviewLines.value.length) {
+    return ''
+  }
+
+  const numbers = [...selectedPreviewLines.value].sort((left, right) => left - right)
+  return numbers[0] === numbers[numbers.length - 1]
+    ? `L${numbers[0]}`
+    : `L${numbers[0]}-${numbers[numbers.length - 1]}`
+}
+
+function insertSelectedPreviewCodeContext() {
+  if (!previewPayload.value || !canInsertPreviewSelection.value) {
+    return
+  }
+
+  const numbers = selectedPreviewLineItems.value.map((item) => item.lineNumber)
+  emit('insert-code-context', {
+    source: 'source',
+    filePath: previewPath.value,
+    language: String(previewPayload.value?.language || ''),
+    rangeLabel: getPreviewSelectedRangeLabel(),
+    lineStart: Math.min(...numbers),
+    lineEnd: Math.max(...numbers),
+    content: String(previewSelectionAction.value.content || '').trim()
+      || selectedPreviewLineItems.value.map((item) => item.content).join('\n'),
+  })
+
+  window.getSelection?.()?.removeAllRanges?.()
+  clearPreviewLineSelection()
+  emit('close')
+}
+
+function handlePreviewCopy(event) {
+  const selection = window.getSelection?.()
+  const container = previewContainerRef.value
+  if (!selection || selection.rangeCount < 1 || selection.isCollapsed || !container) {
+    return
+  }
+
+  updatePreviewSelectionActionFromDom()
+
+  const range = selection.getRangeAt(0)
+  const commonAncestor = range.commonAncestorContainer
+  if (!container.contains(commonAncestor?.nodeType === 1 ? commonAncestor : commonAncestor?.parentNode)) {
+    return
+  }
+
+  const content = String(selection.toString() || '').replace(/\u200b/g, '')
+  if (!content) {
+    return
+  }
+
+  event?.clipboardData?.setData?.('text/plain', content)
+  event?.preventDefault?.()
+}
+
 function clearScheduledPreviewLoad() {
   if (previewSelectionTimer) {
     window.clearTimeout(previewSelectionTimer)
@@ -520,6 +648,7 @@ function resetPreviewState() {
   previewFocusLine.value = 0
   previewMatchLines.value = []
   previewSearchQuery.value = ''
+  clearPreviewLineSelection()
   clearPreviewFocusStyles()
 }
 
@@ -781,6 +910,7 @@ async function applyPreviewFocusLine() {
   applyPreviewSearchHighlights()
 
   if (!focusLineNumber) {
+    applyPreviewSelectionStyles()
     return
   }
 
@@ -788,6 +918,7 @@ async function applyPreviewFocusLine() {
   const gutter = previewContainerRef.value.querySelector(`.source-code-view__gutter[data-line="${lineNumber}"]`)
   const row = gutter?.closest?.('tr')
   if (!row) {
+    applyPreviewSelectionStyles()
     return
   }
 
@@ -797,6 +928,7 @@ async function applyPreviewFocusLine() {
     block: 'center',
     inline: 'nearest',
   })
+  applyPreviewSelectionStyles()
 }
 
 async function renderPreviewCode() {
@@ -827,6 +959,8 @@ async function renderPreviewCode() {
   previewCodeBg.value = isLargePreview ? '' : (rendered.bg || '')
   previewCodeFg.value = isLargePreview ? '' : (rendered.fg || '')
   previewGutterWidth.value = rendered.gutterWidth || '2.6rem'
+  await nextTick()
+  applyPreviewSelectionStyles()
 }
 
 async function loadPreview(pathValue = '', options = {}) {
@@ -836,6 +970,7 @@ async function loadPreview(pathValue = '', options = {}) {
   }
 
   previewFocusLine.value = Math.max(0, Number(options.focusLine) || 0)
+  clearPreviewLineSelection()
 
   const currentPreviewPath = String(previewPayload.value?.path || '').trim()
   if (!options.forceReload && currentPreviewPath === nextPath && !previewLoading.value && !previewError.value) {
@@ -1035,6 +1170,7 @@ watch(
     pickerProps.open = open
 
     if (open) {
+      window.getSelection?.()?.removeAllRanges?.()
       pickerProps.sessionId = sessionId.value
       searchInput.value = ''
       searchMode.value = 'path'
@@ -1046,6 +1182,7 @@ watch(
       return
     }
 
+    window.getSelection?.()?.removeAllRanges?.()
     searchInput.value = ''
     searchMode.value = 'path'
     resetPreviewState()
@@ -1129,7 +1266,13 @@ watch(
   }
 )
 
+watch(selectedPreviewLines, () => {
+  applyPreviewSelectionStyles()
+})
+
 onBeforeUnmount(() => {
+  window.getSelection?.()?.removeAllRanges?.()
+  clearPreviewLineSelection({ clearBrowserSelection: true })
   clearScheduledPreviewLoad()
 })
 </script>
@@ -1433,9 +1576,16 @@ onBeforeUnmount(() => {
 
       <section class="flex min-h-0 flex-col overflow-hidden">
         <div class="theme-divider border-b px-4 py-2">
-          <p v-if="previewMetaLabel" class="theme-muted-text truncate text-[12px]">
-            {{ previewMetaLabel }}
-          </p>
+          <div class="flex items-center justify-between gap-3">
+            <div class="min-w-0">
+              <p v-if="previewMetaLabel" class="theme-muted-text truncate text-[12px]">
+                {{ previewMetaLabel }}
+              </p>
+              <p v-if="showTextPreview" class="theme-muted-text mt-1 text-[11px]">
+                {{ t('sourceBrowser.selectCodeLineHint') }}
+              </p>
+            </div>
+          </div>
         </div>
 
         <div class="min-h-0 flex-1 overflow-auto px-4 py-3">
@@ -1489,18 +1639,27 @@ onBeforeUnmount(() => {
           <div
             v-else-if="showTextPreview"
             ref="previewContainerRef"
-            class="source-browser-code rounded-sm border"
+            class="source-browser-code relative rounded-sm border"
             :style="{
               '--source-code-bg': previewCodeBg || 'var(--theme-panel)',
               '--source-code-fg': previewCodeFg || 'var(--theme-textPrimary)',
               '--source-code-gutter-width': previewGutterWidth,
             }"
+            @copy="handlePreviewCopy"
+            @mouseup="handlePreviewMouseUp"
           >
             <div class="source-code-view">
               <table class="source-code-view__table">
                 <tbody v-html="previewCodeHtml" />
               </table>
             </div>
+            <SelectionInsertButton
+              v-if="open && previewSelectionAction.visible"
+              :top="previewSelectionAction.top"
+              :left="previewSelectionAction.left"
+              :label="t('sourceBrowser.insertSelection')"
+              @click="insertSelectedPreviewCodeContext"
+            />
           </div>
         </div>
       </section>
@@ -1572,14 +1731,23 @@ onBeforeUnmount(() => {
   padding: 0 0.8rem;
   vertical-align: top;
   white-space: pre;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .source-code-view :deep(.source-code-view__line-inner) {
   display: block;
   min-height: 1.46em;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .source-code-view :deep(.source-code-view__line.is-match) {
+  background: var(--theme-accentSoft);
+  box-shadow: inset 3px 0 0 var(--theme-accent);
+}
+
+.source-code-view :deep(.source-code-view__line.is-selected) {
   background: var(--theme-accentSoft);
   box-shadow: inset 3px 0 0 var(--theme-accent);
 }

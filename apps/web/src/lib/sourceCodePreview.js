@@ -293,7 +293,7 @@ function renderLines(lines = [], options = {}) {
   const startLine = Math.max(1, Number(options.startLine) || 1)
   return {
     html: lines.map((line, index) => (
-      `<tr class="source-code-view__line">`
+      `<tr class="source-code-view__line" data-line="${startLine + index}">`
       + `<td class="source-code-view__gutter" data-line="${startLine + index}">${startLine + index}</td>`
       + `<td class="source-code-view__code"><span class="source-code-view__line-inner">${line}</span></td>`
       + `</tr>`

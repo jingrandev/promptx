@@ -32,13 +32,18 @@ const props = defineProps({
   },
 })
 
-const emit = defineEmits(['close'])
+const emit = defineEmits(['close', 'insert-code-context'])
 const { t } = useI18n()
 
 const titleText = computed(() => {
   const taskTitle = String(props.taskTitle || '').trim()
   return taskTitle ? t('diffReview.dialogTitleWithTask', { title: taskTitle }) : t('diffReview.dialogTitle')
 })
+
+function handleInsertCodeContext(payload) {
+  emit('insert-code-context', payload)
+  emit('close')
+}
 </script>
 
 <template>
@@ -63,6 +68,7 @@ const titleText = computed(() => {
       :preferred-scope="preferredScope"
       :preferred-run-id="preferredRunId"
       :focus-token="focusToken"
+      @insert-code-context="handleInsertCodeContext"
     />
   </DialogShell>
 </template>
