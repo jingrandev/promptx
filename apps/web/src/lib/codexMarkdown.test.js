@@ -18,6 +18,7 @@ test('renderCodexMarkdown renders fenced code blocks and lists', async () => {
   assert.match(html, /<ul>/)
   assert.match(html, /class="codex-code-block codex-code-block--labeled"/)
   assert.match(html, /class="codex-code-block__language">JavaScript</)
+  assert.match(html, /class="codex-code-block__copy" data-copy-code="1"/)
   assert.match(html, /<pre><code class="language-js">/)
   assert.match(html, /style="color:[^"]+"/)
   assert.match(html, />console\.</)
@@ -76,6 +77,20 @@ test('renderCodexMarkdown renders common config and style language badges', asyn
   assert.match(html, /class="codex-code-block__language">SCSS</)
   assert.match(html, /class="codex-code-block__language">TOML</)
   assert.match(html, /class="codex-code-block__language">C#</)
+})
+
+test('renderCodexMarkdown renders copy button for unlabeled fenced block', async () => {
+  const html = await renderCodexMarkdown([
+    '```',
+    'plain text block',
+    '```',
+  ].join('\n'), {
+    copyLabel: '复制',
+    copyAriaLabel: '复制代码',
+  })
+
+  assert.match(html, /class="codex-code-block__language-placeholder"/)
+  assert.match(html, /class="codex-code-block__copy" data-copy-code="1" aria-label="复制代码">复制</)
 })
 
 test('renderCodexMarkdown keeps multiple fenced blocks in order', async () => {

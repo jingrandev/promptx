@@ -182,14 +182,17 @@ async function renderHighlightedFence(content = '', language = '', options = {})
     ? ` class="language-${escapeHtml(normalizedLanguage)}"`
     : ''
   const languageLabel = getDisplayLanguage(language)
+  const copyLabel = escapeHtml(String(options.copyLabel || 'Copy'))
+  const copyAriaLabel = escapeHtml(String(options.copyAriaLabel || copyLabel))
   const languageBadge = languageLabel
-    ? `<div class="codex-code-block__header"><span class="codex-code-block__language">${escapeHtml(languageLabel)}</span></div>`
-    : ''
+    ? `<span class="codex-code-block__language">${escapeHtml(languageLabel)}</span>`
+    : '<span class="codex-code-block__language-placeholder" aria-hidden="true"></span>'
+  const header = `<div class="codex-code-block__header">${languageBadge}<button type="button" class="codex-code-block__copy" data-copy-code="1" aria-label="${copyAriaLabel}">${copyLabel}</button></div>`
   const blockClass = languageLabel
     ? 'codex-code-block codex-code-block--labeled'
     : 'codex-code-block'
 
-  return `<div class="${blockClass}">${languageBadge}<pre><code${codeClassAttr}>${highlighted}</code></pre></div>`
+  return `<div class="${blockClass}">${header}<pre><code${codeClassAttr}>${highlighted}</code></pre></div>`
 }
 
 async function resolveFencePlaceholders(html = '', fenceEntries = [], options = {}) {

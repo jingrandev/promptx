@@ -42,6 +42,7 @@ const props = defineProps({
 })
 
 const emit = defineEmits([
+  'insert-code-context',
   'sending-change',
   'project-created',
   'selected-session-change',
@@ -98,6 +99,7 @@ defineExpose({
       :session-selection-lock-reason="sessionSelectionLockReason"
       :diff-supported="diffSupported"
       :task-running="taskRunning"
+      @insert-code-context="emit('insert-code-context', $event)"
       @project-created="emit('project-created', $event)"
       @sending-change="emit('sending-change', $event)"
       @selected-session-change="emit('selected-session-change', $event)"

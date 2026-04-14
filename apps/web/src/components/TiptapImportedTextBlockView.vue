@@ -164,7 +164,7 @@ function removeNode() {
 
       <div
         v-show="node.attrs?.collapsed"
-        class="theme-secondary-text relative cursor-pointer px-4 py-3 text-sm"
+        class="theme-secondary-text relative cursor-pointer px-4 py-3 text-sm font-mono"
         data-promptx-imported-preview
         role="button"
         tabindex="0"
@@ -186,7 +186,7 @@ function removeNode() {
         v-show="!node.attrs?.collapsed"
         as="div"
         data-promptx-node-content="imported_text"
-        class="min-h-[56px] whitespace-pre-wrap break-words px-4 py-4 text-[15px] leading-8 text-[var(--theme-textPrimary)] outline-none"
+        class="min-h-[56px] whitespace-pre-wrap break-words px-4 py-4 font-mono text-[12px] leading-7 text-[var(--theme-textPrimary)] outline-none"
       />
     </TiptapSpecialBlockFrame>
   </NodeViewWrapper>

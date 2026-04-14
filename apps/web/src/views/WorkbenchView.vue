@@ -1,4 +1,5 @@
 <script setup>
+import { BLOCK_TYPES } from '@promptx/shared'
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import EditTaskDialog from '../components/EditTaskDialog.vue'
@@ -14,6 +15,7 @@ import { usePageTitle } from '../composables/usePageTitle.js'
 import { useToast } from '../composables/useToast.js'
 import { useWorkbenchTasks } from '../composables/useWorkbenchTasks.js'
 import { useWorkbenchPreferences } from '../lib/workbenchPreferences.js'
+import { createTextBlock } from '../components/tiptapBlockEditorModel.js'
 
 const showClearDialog = ref(false)
 const showDeleteDialog = ref(false)
@@ -383,6 +385,106 @@ async function handleAddTodo() {
   addCurrentDraftToTodo()
 }
 
+function getCodeContextRangeLabel(context = {}) {
+  const explicit = String(context?.rangeLabel || '').trim()
+  if (explicit) {
+    return explicit
+  }
+
+  const start = Math.max(0, Number(context?.lineStart) || 0)
+  const end = Math.max(0, Number(context?.lineEnd) || 0)
+  if (start && end && start !== end) {
+    return `L${start}-L${end}`
+  }
+  if (start || end) {
+    return `L${start || end}`
+  }
+  return ''
+}
+
+function getCodeContextFileName(filePath = '') {
+  const name = String(filePath || '').trim().split('/').filter(Boolean).pop() || 'code'
+  return `code-context-${name}.md`
+}
+
+function buildCodeContextBlock(context = {}) {
+  const filePath = String(context?.filePath || '').trim()
+  const code = String(context?.content || '').replace(/\r\n/g, '\n').trimEnd()
+  if (!filePath || !code.trim()) {
+    return null
+  }
+
+  const language = String(context?.language || '').trim()
+  const rangeLabel = getCodeContextRangeLabel(context)
+  const sourceLabel = String(context?.source || '').trim() === 'diff'
+    ? t('workbench.codeContextSourceDiff')
+    : t('workbench.codeContextSourceFile')
+  const fence = language ? `\`\`\`${language}` : '```'
+  const lines = [
+    t('workbench.codeContextTitle'),
+    t('workbench.codeContextFile', { path: filePath }),
+    rangeLabel ? t('workbench.codeContextRange', { range: rangeLabel }) : '',
+    t('workbench.codeContextSource', { source: sourceLabel }),
+    '',
+    fence,
+    code,
+    '```',
+  ].filter((line) => line !== '')
+
+  return {
+    type: BLOCK_TYPES.IMPORTED_TEXT,
+    content: lines.join('\n'),
+    meta: {
+      fileName: getCodeContextFileName(filePath),
+      collapsed: false,
+    },
+  }
+}
+
+async function insertBlocksIntoEditor(blocks = [], method = 'insertBlocks') {
+  const normalizedBlocks = Array.isArray(blocks) ? blocks.filter(Boolean) : []
+  if (!normalizedBlocks.length) {
+    return false
+  }
+
+  await flushCurrentEditorInput()
+  editorRef.value?.[method]?.(normalizedBlocks)
+  await nextTick()
+  editorRef.value?.focusEditor?.()
+
+  if (isMobileLayout.value && currentTaskSlug.value) {
+    mobileDetailTab.value = 'input'
+  }
+
+  flashToast({
+    message: t('taskActions.insertedToEditor'),
+    type: 'success',
+  })
+
+  return true
+}
+
+async function handleInsertCodeContext(context = {}) {
+  const source = String(context?.source || '').trim()
+  const responseContent = String(context?.content || '').replace(/\r\n/g, '\n').trim()
+
+  if (source === 'response') {
+    if (!responseContent) {
+      return
+    }
+
+    await insertBlocksIntoEditor([createTextBlock(responseContent)], 'insertBlocks')
+    return
+  }
+
+  const block = buildCodeContextBlock(context)
+  if (!block) {
+    return
+  }
+
+  await insertBlocksIntoEditor([block], 'insertImportedBlocks')
+}
+
 function handleDeleteTodo(todoId) {
   pendingTodoDeleteId.value = String(todoId || '').trim()
   showTodoDeleteConfirm.value = Boolean(pendingTodoDeleteId.value)
@@ -616,6 +718,7 @@ const taskListPanelListeners = {
 }
 
 const activityPanelListeners = {
+  'insert-code-context': handleInsertCodeContext,
   'open-diff': ({ scope, runId }) => openTaskDiff(scope, runId),
   'project-created': () => flashToast({ message: t('workbench.projectCreated'), type: 'success' }),
   'selected-session-change': handleCurrentTaskSessionChange,
@@ -703,6 +806,7 @@ const mobileDetailHeaderListeners = {
       :preferred-scope="preferredDiffScope"
       :preferred-run-id="preferredDiffRunId"
       :focus-token="diffFocusToken"
+      @insert-code-context="handleInsertCodeContext"
       @close="closeTaskDiff"
     />
     <WorkbenchSettingsDialog :open="showSettingsDialog" @close="closeSettingsDialog" />

@@ -30,6 +30,7 @@ const props = defineProps({
     default: false,
   },
 })
+const emit = defineEmits(['insert-code-context'])
 
 const {
   activeHunkIndex,
@@ -329,6 +330,7 @@ watch(diffScope, () => {
             :selected-patch-lines="selectedPatchLines"
             :set-patch-line-ref="setPatchLineRef"
             :set-patch-viewport-ref="setPatchViewportElement"
+            @insert-code-context="emit('insert-code-context', $event)"
           />
         </div>
       </div>
@@ -368,6 +370,7 @@ watch(diffScope, () => {
             :selected-patch-lines="selectedPatchLines"
             :set-patch-line-ref="setPatchLineRef"
             :set-patch-viewport-ref="setPatchViewportElement"
+            @insert-code-context="emit('insert-code-context', $event)"
           />
         </div>
       </div>

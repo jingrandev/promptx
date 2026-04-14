@@ -1,6 +1,8 @@
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { ChevronDown, ChevronUp } from 'lucide-vue-next'
+import SelectionInsertButton from './SelectionInsertButton.vue'
+import { useCodeSelectionAction } from '../composables/useCodeSelectionAction.js'
 import { useI18n } from '../composables/useI18n.js'
 import { useTheme } from '../composables/useTheme.js'
 import {
@@ -57,10 +59,153 @@ const props = defineProps({
     default: () => {},
   },
 })
+const emit = defineEmits(['insert-code-context'])
 const { t } = useI18n()
 const { isDark } = useTheme()
 const renderedPatchLines = ref([])
 const selectedLanguage = computed(() => inferPreviewLanguageFromPath(props.selectedFile?.path || ''))
+const patchViewportElement = ref(null)
+const patchRowElements = new Map()
+
+function isSelectableLine(line = {}) {
+  return ['add', 'delete', 'context'].includes(String(line?.kind || '').trim())
+}
+
+function resolveRenderedPatchLineById(lineId = '') {
+  const normalizedLineId = String(lineId || '').trim()
+  if (!normalizedLineId) {
+    return null
+  }
+
+  return renderedPatchLines.value.find((line) => line.id === normalizedLineId) || null
+}
+
+const {
+  selectedRows: selectedDiffRows,
+  selectionAction,
+  clearSelectionState: clearSelectionAction,
+  handleSelectionMouseUp: handleViewportMouseUp,
+  updateSelectionActionFromDom,
+} = useCodeSelectionAction({
+  getContainer: () => patchViewportElement.value,
+  isActive: () => Boolean(props.selectedFile && props.selectedPatchLines.length),
+  rowSelector: '.task-diff-row[data-line-id]',
+  getOrderedRowElements: (container) => [...container.querySelectorAll('.task-diff-row[data-line-id]')]
+    .filter((rowElement) => isSelectableLine(resolveRenderedPatchLineById(rowElement.getAttribute('data-line-id')))),
+  mapRowElement: (rowElement) => resolveRenderedPatchLineById(rowElement?.getAttribute?.('data-line-id') || ''),
+  getCodeLeft: (rowElement) => {
+    const codeElement = rowElement?.querySelector?.('.task-diff-line')
+    if (!codeElement) {
+      return 0
+    }
+
+    const rect = codeElement.getBoundingClientRect?.()
+    const styles = window.getComputedStyle?.(codeElement)
+    const paddingLeft = Number.parseFloat(styles?.paddingLeft || '0') || 0
+    return (rect?.left || 0) + paddingLeft
+  },
+  debounceMs: 72,
+})
+
+function getSelectedRangeMetrics(rows = []) {
+  const numbers = rows.flatMap((line) => [
+    Number(line?.oldNumber || 0),
+    Number(line?.newNumber || 0),
+  ]).filter((line) => line > 0)
+  if (!numbers.length) {
+    return {
+      start: 0,
+      end: 0,
+      label: '',
+    }
+  }
+
+  const start = Math.min(...numbers)
+  const end = Math.max(...numbers)
+  return {
+    start,
+    end,
+    label: start === end ? `L${start}` : `L${start}-L${end}`,
+  }
+}
+
+function getSelectedRowsText(rows = []) {
+  return rows
+    .map((line) => String(line?.content || ''))
+    .join('\n')
+    .replace(/\u200b/g, '')
+    .trim()
+}
+
+function insertSelectedCodeContext() {
+  if (!props.selectedFile || !selectionAction.value.visible || !selectedDiffRows.value.length) {
+    return
+  }
+
+  const range = getSelectedRangeMetrics(selectedDiffRows.value)
+  emit('insert-code-context', {
+    source: 'diff',
+    filePath: String(props.selectedFile.path || ''),
+    language: 'diff',
+    rangeLabel: range.label,
+    lineStart: range.start,
+    lineEnd: range.end,
+    content: getSelectedRowsText(selectedDiffRows.value)
+      || String(selectionAction.value.content || '').trim(),
+  })
+
+  window.getSelection?.()?.removeAllRanges?.()
+  clearSelectionAction()
+}
+
+function setCombinedPatchLineRef(lineId, element) {
+  props.setPatchLineRef(lineId, element)
+
+  if (!lineId) {
+    return
+  }
+
+  if (element) {
+    patchRowElements.set(lineId, element)
+    return
+  }
+
+  patchRowElements.delete(lineId)
+}
+
+function setPatchViewportElement(element) {
+  patchViewportElement.value = element || null
+  props.setPatchViewportRef(element)
+}
+
+function handleViewportCopy(event) {
+  const selection = window.getSelection?.()
+  const container = patchViewportElement.value
+  if (!selection || selection.rangeCount < 1 || selection.isCollapsed || !container) {
+    return
+  }
+
+  updateSelectionActionFromDom()
+
+  const range = selection.getRangeAt(0)
+  const commonAncestor = range.commonAncestorContainer
+  if (!container.contains(commonAncestor?.nodeType === 1 ? commonAncestor : commonAncestor?.parentNode)) {
+    return
+  }
+
+  const rows = selectedDiffRows.value
+  if (!rows.length) {
+    return
+  }
+
+  const text = getSelectedRowsText(rows)
+  if (!text) {
+    return
+  }
+
+  event?.clipboardData?.setData?.('text/plain', text)
+  event?.preventDefault?.()
+}
 
 function getLinePrefix(line) {
   if (line?.kind === 'add') {
@@ -164,10 +309,17 @@ async function renderPatchLines() {
 watch(
   () => [props.selectedPatchLines, props.selectedFile?.path, isDark.value],
   () => {
+    clearSelectionAction()
     renderPatchLines()
   },
   { immediate: true, deep: true }
 )
+
+onBeforeUnmount(() => {
+  window.getSelection?.()?.removeAllRanges?.()
+  clearSelectionAction({ clearBrowserSelection: true })
+  patchRowElements.clear()
+})
 </script>
 
 <template>
@@ -181,9 +333,12 @@ watch(
           <span class="min-w-0 break-all font-medium text-[var(--theme-textPrimary)]">{{ selectedFile.path }}</span>
         </div>
         <div class="flex items-center justify-between gap-3">
-          <span class="opacity-75">
-            {{ selectedFile.statsLoaded ? `+${selectedFile.additions} / -${selectedFile.deletions}` : t('diffReview.statsOnDemand') }}
-          </span>
+          <div class="min-w-0">
+            <div class="opacity-75">
+              {{ selectedFile.statsLoaded ? `+${selectedFile.additions} / -${selectedFile.deletions}` : t('diffReview.statsOnDemand') }}
+            </div>
+            <div class="theme-muted-text mt-1 text-[11px]">{{ t('diffReview.selectCodeLineHint') }}</div>
+          </div>
           <div
             class="inline-flex h-8 shrink-0 items-center gap-1 rounded-sm border px-1.5 py-1"
             :class="selectedPatchHunks.length
@@ -222,6 +377,7 @@ watch(
           <span class="opacity-75">
             {{ selectedFile.statsLoaded ? `+${selectedFile.additions} / -${selectedFile.deletions}` : t('diffReview.statsOnDemand') }}
           </span>
+          <span class="theme-muted-text text-[11px]">{{ t('diffReview.selectCodeLineHint') }}</span>
         </div>
         <div
           class="inline-flex h-8 w-[132px] shrink-0 items-center gap-1 rounded-sm border px-1.5 py-1"
@@ -258,13 +414,21 @@ watch(
       </div>
     </div>
     <div v-else-if="patchLoading && !selectedFile.patchLoaded" class="theme-muted-text flex-1 overflow-y-auto px-4 py-4 text-[12px]">{{ t('diffReview.loadingFileDiff') }}</div>
-    <div v-else-if="selectedPatchLines.length" :ref="setPatchViewportRef" class="flex-1 overflow-auto">
+    <div
+      v-else-if="selectedPatchLines.length"
+      :ref="setPatchViewportElement"
+      class="relative flex-1 overflow-auto"
+      @copy="handleViewportCopy"
+      @mouseup="handleViewportMouseUp"
+    >
       <div class="task-diff-view min-w-max px-4 py-4 font-mono">
         <div
           v-for="line in renderedPatchLines"
           :key="line.id"
-          :ref="(element) => setPatchLineRef(line.id, element)"
+          :ref="(element) => setCombinedPatchLineRef(line.id, element)"
           class="task-diff-row grid"
+          :data-line-id="line.id"
+          :data-line-kind="line.kind"
           :class="[
             getPatchLineClass(line.kind),
             line.kind === 'hunk' && selectedPatchHunks[activeHunkIndex]?.id === line.id
@@ -285,6 +449,13 @@ watch(
           />
         </div>
       </div>
+      <SelectionInsertButton
+        v-if="selectionAction.visible"
+        :top="selectionAction.top"
+        :left="selectionAction.left"
+        :label="t('diffReview.insertSelection')"
+        @click="insertSelectedCodeContext"
+      />
     </div>
     <div v-else class="theme-secondary-text flex-1 overflow-y-auto px-4 py-4 text-[12px]">
       <div class="theme-empty-state px-4 py-4">
@@ -319,6 +490,8 @@ watch(
 
 .task-diff-line {
   color: inherit;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .task-diff-line :deep(.task-diff-line__prefix) {

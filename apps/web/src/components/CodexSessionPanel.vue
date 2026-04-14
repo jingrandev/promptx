@@ -16,8 +16,10 @@ import CodexSessionSelect from './CodexSessionSelect.vue'
 import ImagePreviewOverlay from './ImagePreviewOverlay.vue'
 import ProcessDetailRenderer from './ProcessDetailRenderer.vue'
 import CodexSessionSourceBrowserDialog from './CodexSessionSourceBrowserDialog.vue'
+import SelectionInsertButton from './SelectionInsertButton.vue'
 import { useI18n } from '../composables/useI18n.js'
 import { useAsyncRenderedMarkdown } from '../composables/useAsyncRenderedMarkdown.js'
+import { useCodeSelectionAction } from '../composables/useCodeSelectionAction.js'
 import { useCodexSessionPanel } from '../composables/useCodexSessionPanel.js'
 import { useCodexTranscriptCollapse } from '../composables/useCodexTranscriptCollapse.js'
 import { useTheme } from '../composables/useTheme.js'
@@ -26,7 +28,7 @@ import { aggregateProcessEvents } from '../lib/processEventGrouping.js'
 
 const CodexSessionManagerDialog = defineAsyncComponent(() => import('./CodexSessionManagerDialog.vue'))
 
-const emit = defineEmits(['project-created', 'selected-session-change', 'sending-change', 'open-diff', 'toast'])
+const emit = defineEmits(['insert-code-context', 'project-created', 'selected-session-change', 'sending-change', 'open-diff', 'toast'])
 
 const props = defineProps({
   prompt: {
@@ -135,6 +137,19 @@ const { t } = useI18n()
 const { isDark } = useTheme()
 const responseThemeKey = computed(() => (isDark.value ? 'dark' : 'light'))
 
+const {
+  selectionAction: responseSelectionAction,
+  clearSelectionState: clearResponseSelectionAction,
+  handleSelectionMouseUp: handleResponseMouseUp,
+} = useCodeSelectionAction({
+  getContainer: () => transcriptRef.value,
+  isActive: () => Boolean(props.active && turns.value.length),
+  rowSelector: '[data-response-selection-root]',
+  getOrderedRowElements: (container) => [...container.querySelectorAll('[data-response-selection-root]')],
+  getCodeLeft: (rowElement) => rowElement?.getBoundingClientRect?.()?.left || 0,
+  debounceMs: 72,
+})
+
 function shouldHideSystemEvent(item = {}) {
   if (item?.kind === 'reasoning') {
     return true
@@ -208,6 +223,8 @@ const { getRenderedHtml: renderResponseBody } = useAsyncRenderedMarkdown({
   shouldRender: (turn) => Boolean(turn?.responseMessage) && !turn?.errorMessage,
   renderAsync: (source) => renderCodexMarkdown(source, {
     isDark: isDark.value,
+    copyLabel: t('sessionPanel.copyCode'),
+    copyAriaLabel: t('sessionPanel.copyCodeAria'),
   }),
   renderFallback: (source) => renderPlainCodexMarkdown(source),
   onRendered: (turn) => {
@@ -222,6 +239,55 @@ const { getRenderedHtml: renderResponseBody } = useAsyncRenderedMarkdown({
 
 function openPromptImage(url) {
   previewPromptImageUrl.value = String(url || '').trim()
+}
+
+async function copyResponseCode(event) {
+  const button = event?.target?.closest?.('[data-copy-code="1"]')
+  if (!button) {
+    return
+  }
+
+  const block = button.closest('.codex-code-block')
+  const codeElement = block?.querySelector?.('pre code')
+  const text = String(codeElement?.textContent || '').replace(/\u200b/g, '')
+  if (!text) {
+    return
+  }
+
+  event.preventDefault?.()
+  event.stopPropagation?.()
+
+  try {
+    await navigator.clipboard.writeText(text)
+    emit('toast', {
+      message: t('sessionPanel.codeCopied'),
+      type: 'success',
+    })
+  } catch {
+    emit('toast', {
+      message: t('errors.requestFailed'),
+      type: 'warning',
+    })
+  }
+}
+
+function insertSelectedResponseContext() {
+  if (!responseSelectionAction.value.visible) {
+    return
+  }
+
+  const content = String(responseSelectionAction.value.content || '').replace(/\u200b/g, '').trim()
+  if (!content) {
+    clearResponseSelectionAction({ clearBrowserSelection: true })
+    return
+  }
+
+  emit('insert-code-context', {
+    source: 'response',
+    content,
+  })
+
+  clearResponseSelectionAction({ clearBrowserSelection: true })
 }
 
 const promptPreviewImages = computed(() => (
@@ -335,6 +401,7 @@ defineExpose({
     <CodexSessionSourceBrowserDialog
       :open="showSourceBrowser"
       :session="sessions.find((item) => item.id === sourceBrowserSessionId) || null"
+      @insert-code-context="emit('insert-code-context', $event)"
       @close="showSourceBrowser = false"
     />
     <CodexSessionManagerDialog
@@ -418,7 +485,7 @@ defineExpose({
     <div class="min-h-0 flex-1">
       <div
         ref="transcriptRef"
-        class="workbench-transcript flex h-full flex-col gap-3 overflow-x-hidden overflow-y-auto px-4 py-4"
+        class="workbench-transcript relative flex h-full flex-col gap-3 overflow-x-hidden overflow-y-auto px-4 py-4"
         @scroll="handleTranscriptScroll"
         @touchstart.passive="handleTranscriptTouchStart"
         @touchmove.passive="handleTranscriptTouchMove"
@@ -576,6 +643,9 @@ defineExpose({
                 <div
                   v-else
                   class="prose-like codex-markdown"
+                  :data-response-selection-root="'1'"
+                  @mouseup="handleResponseMouseUp"
+                  @click="copyResponseCode"
                   v-html="renderResponseBody(turn)"
                 />
               </div>
@@ -583,6 +653,13 @@ defineExpose({
           </div>
         </div>
 
+        <SelectionInsertButton
+          v-if="responseSelectionAction.visible"
+          :top="responseSelectionAction.top"
+          :left="responseSelectionAction.left"
+          :label="t('sourceBrowser.insertSelection')"
+          @click="insertSelectedResponseContext"
+        />
       </div>
 
       <div class="pointer-events-none absolute bottom-1 right-1 z-10 flex flex-col items-end gap-1.5 sm:bottom-3 sm:right-3">
