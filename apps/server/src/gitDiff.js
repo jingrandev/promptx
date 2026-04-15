@@ -787,6 +787,185 @@ function parseNumstat(output = '') {
   }
 }
 
+function parseGitEntryMode(output = '') {
+  const line = String(output || '')
+    .split('\0')
+    .find(Boolean)
+    || ''
+  const match = line.match(/^(\d{6})\s+/)
+  return match?.[1] ? match[1] : ''
+}
+
+function isGitSubmodulePath(repoRoot = '', filePath = '', headOid = '') {
+  const normalizedPath = String(filePath || '').trim()
+  if (!repoRoot || !normalizedPath) {
+    return false
+  }
+
+  if (headOid) {
+    const result = runGit(repoRoot, ['ls-tree', '-z', headOid, '--', normalizedPath])
+    return parseGitEntryMode(result.stdout) === '160000'
+  }
+
+  const result = runGit(repoRoot, ['ls-files', '-z', '-s', '--', normalizedPath])
+  return parseGitEntryMode(result.stdout) === '160000'
+}
+
+function resolveSubmoduleRootForNestedPath(repoRoot = '', filePath = '', headOid = '') {
+  const normalizedPath = String(filePath || '').trim().replace(/^\/+|\/+$/g, '')
+  if (!repoRoot || !normalizedPath || !normalizedPath.includes('/')) {
+    return ''
+  }
+
+  const segments = normalizedPath.split('/')
+  for (let index = segments.length - 1; index >= 1; index -= 1) {
+    const candidate = segments.slice(0, index).join('/')
+    if (isGitSubmodulePath(repoRoot, candidate, headOid) || isGitSubmodulePath(repoRoot, candidate)) {
+      return candidate
+    }
+  }
+
+  return ''
+}
+
+function buildSubmoduleDiffPayload(repoRoot = '', filePath = '', options = {}) {
+  const normalizedPath = String(filePath || '').trim()
+  const fromHeadOid = String(options.fromHeadOid || '').trim()
+  const toHeadOid = String(options.toHeadOid || '').trim()
+  const workspaceMode = Boolean(options.workspaceMode)
+  const includePatch = Boolean(options.includePatch)
+  const includeStats = includePatch || Boolean(options.includeStats)
+
+  if (!repoRoot || !normalizedPath) {
+    return {
+      binary: false,
+      tooLarge: false,
+      patch: '',
+      patchLoaded: false,
+      additions: 0,
+      deletions: 0,
+      statsLoaded: false,
+      message: '',
+    }
+  }
+
+  const diffArgs = ['diff', '--submodule=diff', '--no-color', '--unified=3']
+  if (!workspaceMode && fromHeadOid && toHeadOid) {
+    diffArgs.push(`${fromHeadOid}..${toHeadOid}`)
+  } else {
+    diffArgs.push('HEAD')
+  }
+  diffArgs.push('--', normalizedPath)
+
+  const result = runGit(repoRoot, diffArgs)
+  const patch = String(result.stdout || '').trim()
+  const stats = includeStats ? parsePatchStats(patch) : { additions: null, deletions: null }
+
+  if (!includePatch) {
+    return {
+      binary: false,
+      tooLarge: false,
+      patch: '',
+      patchLoaded: false,
+      additions: stats.additions,
+      deletions: stats.deletions,
+      statsLoaded: includeStats,
+      message: '',
+    }
+  }
+
+  if (patch.length > MAX_PATCH_TEXT_BYTES) {
+    return {
+      binary: false,
+      tooLarge: true,
+      patch: '',
+      patchLoaded: true,
+      additions: stats.additions,
+      deletions: stats.deletions,
+      statsLoaded: includeStats,
+      message: 'diff 内容较长，暂不在页面内完整展示。',
+    }
+  }
+
+  return {
+    binary: false,
+    tooLarge: false,
+    patch,
+    patchLoaded: true,
+    additions: stats.additions,
+    deletions: stats.deletions,
+    statsLoaded: includeStats,
+    message: '',
+  }
+}
+
+function parseSubmodulePatchEntries(submodulePath = '', patch = '') {
+  const normalizedSubmodulePath = String(submodulePath || '').trim().replace(/\/+$/, '')
+  const text = String(patch || '').trim()
+  if (!normalizedSubmodulePath || !text) {
+    return []
+  }
+
+  const lines = text.split('\n')
+  const sections = []
+  let currentSection = []
+
+  lines.forEach((line) => {
+    if (line.startsWith('diff --git a/')) {
+      if (currentSection.length) {
+        sections.push(currentSection.join('\n').trim())
+      }
+      currentSection = [line]
+      return
+    }
+
+    if (currentSection.length) {
+      currentSection.push(line)
+    }
+  })
+
+  if (currentSection.length) {
+    sections.push(currentSection.join('\n').trim())
+  }
+
+  return sections
+    .map((section) => {
+      const header = section.split('\n', 1)[0] || ''
+      const matched = header.match(/^diff --git a\/(.+?) b\/(.+)$/)
+      const rawPath = matched?.[2] || matched?.[1] || ''
+      let nestedPath = String(rawPath || '').trim()
+      if (!nestedPath) {
+        return null
+      }
+
+      const duplicatedPrefix = `${normalizedSubmodulePath}/`
+      if (nestedPath === normalizedSubmodulePath) {
+        nestedPath = ''
+      } else if (nestedPath.startsWith(duplicatedPrefix)) {
+        nestedPath = nestedPath.slice(duplicatedPrefix.length)
+      }
+
+      if (!nestedPath) {
+        return null
+      }
+
+      const stats = parsePatchStats(section)
+      return {
+        path: `${normalizedSubmodulePath}/${nestedPath}`,
+        status: 'M',
+        additions: stats.additions,
+        deletions: stats.deletions,
+        statsLoaded: true,
+        binary: false,
+        tooLarge: false,
+        patch: section,
+        patchLoaded: true,
+        message: '',
+      }
+    })
+    .filter(Boolean)
+}
+
 function buildDiffPayloadForFile(filePath = '', previousState = null, nextState = null, options = {}) {
   const includePatch = Boolean(options.includePatch)
   const includeStats = includePatch || Boolean(options.includeStats)
@@ -1057,7 +1236,24 @@ function createDiffFileEntry(filePath = '', previousState = null, nextState = nu
     return null
   }
 
-  const patchPayload = buildDiffPayloadForFile(filePath, previousState, nextState, options)
+  const repoRoot = String(options.repoRoot || '').trim()
+  const fromHeadOid = String(options.fromHeadOid || '').trim()
+  const toHeadOid = String(options.toHeadOid || '').trim()
+  const isSubmodule = repoRoot && (
+    isGitSubmodulePath(repoRoot, filePath, fromHeadOid)
+    || isGitSubmodulePath(repoRoot, filePath, toHeadOid)
+    || isGitSubmodulePath(repoRoot, filePath)
+  )
+
+  const patchPayload = isSubmodule
+    ? buildSubmoduleDiffPayload(repoRoot, filePath, {
+      includePatch: Boolean(options.includePatch),
+      includeStats: Boolean(options.includeStats),
+      fromHeadOid,
+      toHeadOid,
+      workspaceMode: Boolean(options.workspaceMode),
+    })
+    : buildDiffPayloadForFile(filePath, previousState, nextState, options)
   return {
     path: filePath,
     status: deriveFileStatus(previousState, nextState),
@@ -1070,6 +1266,61 @@ function createDiffFileEntry(filePath = '', previousState = null, nextState = nu
     patchLoaded: patchPayload.patchLoaded,
     message: patchPayload.message,
   }
+}
+
+function createDiffEntriesForPath(filePath = '', previousState = null, nextState = null, options = {}) {
+  if (areFileStatesEqual(previousState, nextState)) {
+    return []
+  }
+
+  const repoRoot = String(options.repoRoot || '').trim()
+  const fromHeadOid = String(options.fromHeadOid || '').trim()
+  const toHeadOid = String(options.toHeadOid || '').trim()
+  const submoduleRoot = repoRoot && (
+    isGitSubmodulePath(repoRoot, filePath, fromHeadOid)
+    || isGitSubmodulePath(repoRoot, filePath, toHeadOid)
+    || isGitSubmodulePath(repoRoot, filePath)
+      ? filePath
+      : resolveSubmoduleRootForNestedPath(repoRoot, filePath, fromHeadOid)
+        || resolveSubmoduleRootForNestedPath(repoRoot, filePath, toHeadOid)
+        || resolveSubmoduleRootForNestedPath(repoRoot, filePath)
+  )
+
+  if (!submoduleRoot) {
+    const entry = createDiffFileEntry(filePath, previousState, nextState, options)
+    return entry ? [entry] : []
+  }
+
+  const payload = buildSubmoduleDiffPayload(repoRoot, submoduleRoot, {
+    includePatch: true,
+    includeStats: Boolean(options.includeStats),
+    fromHeadOid,
+    toHeadOid,
+    workspaceMode: Boolean(options.workspaceMode),
+  })
+
+  const nestedEntries = payload.patchLoaded
+    ? parseSubmodulePatchEntries(submoduleRoot, payload.patch)
+    : []
+
+  if (nestedEntries.length) {
+    const normalizedPath = String(filePath || '').trim()
+    const matchedEntry = nestedEntries.find((entry) => entry.path === normalizedPath)
+    return matchedEntry ? [matchedEntry] : nestedEntries
+  }
+
+  return [{
+    path: filePath,
+    status: deriveFileStatus(previousState, nextState),
+    additions: payload.additions,
+    deletions: payload.deletions,
+    statsLoaded: payload.statsLoaded,
+    binary: payload.binary,
+    tooLarge: payload.tooLarge,
+    patch: payload.patch,
+    patchLoaded: payload.patchLoaded,
+    message: payload.message,
+  }]
 }
 
 function createUnsupportedResult(reason = '', repoRoot = '', branch = '') {
@@ -1141,20 +1392,26 @@ export function getWorkspaceGitDiffReviewByCwd(cwd = '', options = {}) {
   candidatePaths.forEach((filePath) => {
     const previousState = baselineStateForPath(filePath)
     const nextState = readFileState(repoRoot, filePath)
-    const diffEntry = createDiffFileEntry(filePath, previousState, nextState, {
+    const diffEntries = createDiffEntriesForPath(filePath, previousState, nextState, {
       includePatch: Boolean(targetFilePath),
       includeStats,
+      repoRoot,
+      fromHeadOid: headOid,
+      toHeadOid: currentHeadOid,
+      workspaceMode: true,
     })
-    if (!diffEntry) {
+    if (!diffEntries.length) {
       return
     }
 
-    fileCount += 1
-    additions += Math.max(0, Number(diffEntry.additions) || 0)
-    deletions += Math.max(0, Number(diffEntry.deletions) || 0)
-    if (includeFiles) {
-      files.push(diffEntry)
-    }
+    diffEntries.forEach((diffEntry) => {
+      fileCount += 1
+      additions += Math.max(0, Number(diffEntry.additions) || 0)
+      deletions += Math.max(0, Number(diffEntry.deletions) || 0)
+      if (includeFiles) {
+        files.push(diffEntry)
+      }
+    })
   })
 
   const payload = {
@@ -1400,20 +1657,25 @@ export function getTaskGitDiffReview(taskSlug = '', options = {}) {
   candidatePaths.forEach((filePath) => {
     const previousState = baselineStateForPath(filePath)
     const nextState = nextStateForPath(filePath)
-    const diffEntry = createDiffFileEntry(filePath, previousState, nextState, {
+    const diffEntries = createDiffEntriesForPath(filePath, previousState, nextState, {
       includePatch: Boolean(targetFilePath),
       includeStats,
+      repoRoot,
+      fromHeadOid: baseline.headOid,
+      toHeadOid: currentHeadOid,
     })
-    if (!diffEntry) {
+    if (!diffEntries.length) {
       return
     }
 
-    fileCount += 1
-    additions += Math.max(0, Number(diffEntry.additions) || 0)
-    deletions += Math.max(0, Number(diffEntry.deletions) || 0)
-    if (includeFiles) {
-      files.push(diffEntry)
-    }
+    diffEntries.forEach((diffEntry) => {
+      fileCount += 1
+      additions += Math.max(0, Number(diffEntry.additions) || 0)
+      deletions += Math.max(0, Number(diffEntry.deletions) || 0)
+      if (includeFiles) {
+        files.push(diffEntry)
+      }
+    })
   })
 
   const payload = {

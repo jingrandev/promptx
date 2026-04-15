@@ -276,3 +276,89 @@ test('run scoped diff stays pinned to each round snapshot', async () => {
     }
   }
 })
+
+test('submodule diff expands nested file entries and resolves nested file detail', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-git-diff-submodule-'))
+  const submoduleSourceDir = path.join(tempDir, 'submodule-source')
+  const repoDir = path.join(tempDir, 'repo')
+  fs.mkdirSync(submoduleSourceDir, { recursive: true })
+  fs.mkdirSync(repoDir, { recursive: true })
+
+  git(submoduleSourceDir, ['init'])
+  git(submoduleSourceDir, ['config', 'user.email', 'promptx@example.com'])
+  git(submoduleSourceDir, ['config', 'user.name', 'PromptX'])
+  fs.mkdirSync(path.join(submoduleSourceDir, 'apps', 'web-antd', 'src', 'views', 'dashboard', 'import-fee'), { recursive: true })
+  fs.writeFileSync(
+    path.join(submoduleSourceDir, 'apps', 'web-antd', 'src', 'views', 'dashboard', 'import-fee', 'index.vue'),
+    'line-1\nline-2\nline-3\n',
+    'utf8'
+  )
+  git(submoduleSourceDir, ['add', '.'])
+  git(submoduleSourceDir, ['commit', '-m', 'init submodule'])
+
+  git(repoDir, ['init'])
+  git(repoDir, ['config', 'user.email', 'promptx@example.com'])
+  git(repoDir, ['config', 'user.name', 'PromptX'])
+  git(repoDir, ['-c', 'protocol.file.allow=always', 'submodule', 'add', submoduleSourceDir, 'web'])
+  git(repoDir, ['commit', '-m', 'add submodule'])
+
+  const nestedFilePath = 'web/apps/web-antd/src/views/dashboard/import-fee/index.vue'
+
+  const originalCwd = process.cwd()
+  const originalDataDir = process.env.PROMPTX_DATA_DIR
+  const dataDir = path.join(tempDir, 'data')
+  fs.mkdirSync(dataDir, { recursive: true })
+  process.chdir(tempDir)
+  process.env.PROMPTX_DATA_DIR = dataDir
+
+  try {
+    const { run } = await import('./db.js')
+    const {
+      captureTaskGitBaseline,
+      getTaskGitDiffReview,
+    } = await import(`./gitDiff.js?submodule=${Date.now()}`)
+
+    const now = new Date().toISOString()
+    run(
+      `INSERT INTO tasks (slug, edit_token, title, auto_title, last_prompt_preview, codex_session_id, visibility, expires_at, created_at, updated_at)
+       VALUES (?, ?, '', '', '', ?, 'private', NULL, ?, ?)`,
+      ['task-submodule', 'token-submodule', 'session-submodule', now, now]
+    )
+    run(
+      `INSERT INTO codex_sessions (id, title, cwd, codex_thread_id, created_at, updated_at)
+       VALUES (?, ?, ?, '', ?, ?)`,
+      ['session-submodule', 'Repo Session', repoDir, now, now]
+    )
+
+    captureTaskGitBaseline('task-submodule', repoDir)
+
+    fs.writeFileSync(
+      path.join(repoDir, nestedFilePath),
+      'line-1\nline-2 changed\nline-3\nline-4 added\n',
+      'utf8'
+    )
+
+    const workspaceDiff = getTaskGitDiffReview('task-submodule', { scope: 'workspace' })
+    assert.ok(workspaceDiff.files.some((file) => file.path === nestedFilePath))
+
+    const nestedFile = workspaceDiff.files.find((file) => file.path === nestedFilePath)
+    assert.ok(nestedFile)
+    assert.match(nestedFile.patch || '', /line-2 changed/)
+    assert.match(nestedFile.patch || '', /line-4 added/)
+
+    const nestedDetail = getTaskGitDiffReview('task-submodule', {
+      scope: 'workspace',
+      filePath: nestedFilePath,
+    })
+    assert.deepEqual(nestedDetail.files.map((file) => file.path), [nestedFilePath])
+    assert.match(nestedDetail.files[0]?.patch || '', /line-2 changed/)
+    assert.match(nestedDetail.files[0]?.patch || '', /line-4 added/)
+  } finally {
+    process.chdir(originalCwd)
+    if (typeof originalDataDir === 'string') {
+      process.env.PROMPTX_DATA_DIR = originalDataDir
+    } else {
+      delete process.env.PROMPTX_DATA_DIR
+    }
+  }
+})
