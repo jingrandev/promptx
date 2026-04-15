@@ -811,6 +811,23 @@ function isGitSubmodulePath(repoRoot = '', filePath = '', headOid = '') {
   return parseGitEntryMode(result.stdout) === '160000'
 }
 
+function resolveSubmoduleRootForNestedPath(repoRoot = '', filePath = '', headOid = '') {
+  const normalizedPath = String(filePath || '').trim().replace(/^\/+|\/+$/g, '')
+  if (!repoRoot || !normalizedPath || !normalizedPath.includes('/')) {
+    return ''
+  }
+
+  const segments = normalizedPath.split('/')
+  for (let index = segments.length - 1; index >= 1; index -= 1) {
+    const candidate = segments.slice(0, index).join('/')
+    if (isGitSubmodulePath(repoRoot, candidate, headOid) || isGitSubmodulePath(repoRoot, candidate)) {
+      return candidate
+    }
+  }
+
+  return ''
+}
+
 function buildSubmoduleDiffPayload(repoRoot = '', filePath = '', options = {}) {
   const normalizedPath = String(filePath || '').trim()
   const fromHeadOid = String(options.fromHeadOid || '').trim()
@@ -1259,18 +1276,22 @@ function createDiffEntriesForPath(filePath = '', previousState = null, nextState
   const repoRoot = String(options.repoRoot || '').trim()
   const fromHeadOid = String(options.fromHeadOid || '').trim()
   const toHeadOid = String(options.toHeadOid || '').trim()
-  const isSubmodule = repoRoot && (
+  const submoduleRoot = repoRoot && (
     isGitSubmodulePath(repoRoot, filePath, fromHeadOid)
     || isGitSubmodulePath(repoRoot, filePath, toHeadOid)
     || isGitSubmodulePath(repoRoot, filePath)
+      ? filePath
+      : resolveSubmoduleRootForNestedPath(repoRoot, filePath, fromHeadOid)
+        || resolveSubmoduleRootForNestedPath(repoRoot, filePath, toHeadOid)
+        || resolveSubmoduleRootForNestedPath(repoRoot, filePath)
   )
 
-  if (!isSubmodule) {
+  if (!submoduleRoot) {
     const entry = createDiffFileEntry(filePath, previousState, nextState, options)
     return entry ? [entry] : []
   }
 
-  const payload = buildSubmoduleDiffPayload(repoRoot, filePath, {
+  const payload = buildSubmoduleDiffPayload(repoRoot, submoduleRoot, {
     includePatch: true,
     includeStats: Boolean(options.includeStats),
     fromHeadOid,
@@ -1279,11 +1300,13 @@ function createDiffEntriesForPath(filePath = '', previousState = null, nextState
   })
 
   const nestedEntries = payload.patchLoaded
-    ? parseSubmodulePatchEntries(filePath, payload.patch)
+    ? parseSubmodulePatchEntries(submoduleRoot, payload.patch)
     : []
 
   if (nestedEntries.length) {
-    return nestedEntries
+    const normalizedPath = String(filePath || '').trim()
+    const matchedEntry = nestedEntries.find((entry) => entry.path === normalizedPath)
+    return matchedEntry ? [matchedEntry] : nestedEntries
   }
 
   return [{
