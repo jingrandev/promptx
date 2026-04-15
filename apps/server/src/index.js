@@ -133,6 +133,7 @@ function broadcastServerEvent(type, payload = {}) {
 
 const runEventIngestService = createRunEventIngestService({
   broadcastServerEvent,
+  decorateCodexSession,
 })
 
 function updateTaskAutomationRuntimeWithBroadcast(taskSlug, patch = {}) {
@@ -166,9 +167,17 @@ function decorateCodexSession(session, runningSessionIds = getRunningSessionIdSe
     return null
   }
 
+  const nextAgentBindings = Array.isArray(session.agentBindings)
+    ? session.agentBindings.map((item) => ({
+        ...item,
+        running: runningSessionIds.has(String(item?.sessionRecordId || '').trim()),
+      }))
+    : []
+
   return {
     ...session,
-    running: runningSessionIds.has(session.id),
+    agentBindings: nextAgentBindings,
+    running: runningSessionIds.has(session.id) || nextAgentBindings.some((item) => item.running),
   }
 }
 

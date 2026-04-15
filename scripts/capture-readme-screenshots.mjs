@@ -55,11 +55,13 @@ const {
   buildThreadStartedEvent,
   buildTurnCompletedEvent,
   buildTurnStartedEvent,
+  openWorkbenchTask,
 } = helpers
 
 const {
   createTask,
   deleteTask,
+  updateTaskCodexSession,
 } = repository
 
 const {
@@ -80,7 +82,18 @@ const {
 
 const createdTaskSlugs = []
 const createdSessionIds = []
-let stackProcess = null
+let serverProcess = null
+let webProcess = null
+const screenshotNames = {
+  workbench: 'readme-workbench-wechat.png',
+  execution: 'readme-execution-focus-wechat.png',
+  manager: 'readme-project-manager-wechat.png',
+  source: 'readme-source-browser-wechat.png',
+  settingsTheme: 'readme-settings-theme-wechat.png',
+  settingsSystem: 'readme-settings-system-wechat.png',
+  diff: 'readme-diff-wechat.png',
+  mobile: 'readme-mobile-wechat.png',
+}
 
 function textBlock(content) {
   return {
@@ -115,12 +128,22 @@ async function createShowcaseData() {
   const webDir = path.join(workspaceRoot, 'apps', 'web')
   const runnerDir = path.join(workspaceRoot, 'apps', 'runner')
 
-  const codexSession = registerSession(createPromptxCodexSession({
-    title: 'PromptX 控制面',
+  const projectSession = registerSession(createPromptxCodexSession({
+    title: 'PromptX 多 Agent 协作',
     engine: AGENT_ENGINES.CODEX,
     cwd: repoDir,
+    agentEngines: [
+      AGENT_ENGINES.CODEX,
+      AGENT_ENGINES.CLAUDE_CODE,
+      AGENT_ENGINES.OPENCODE,
+    ],
   }))
-  updatePromptxCodexSession(codexSession.id, {
+  const projectBindings = new Map((projectSession.agentBindings || []).map((item) => [item.engine, item.sessionRecordId]))
+  const codexSessionId = projectBindings.get(AGENT_ENGINES.CODEX) || projectSession.id
+  const claudeMemberId = projectBindings.get(AGENT_ENGINES.CLAUDE_CODE) || projectSession.id
+  const openCodeMemberId = projectBindings.get(AGENT_ENGINES.OPENCODE) || projectSession.id
+
+  updatePromptxCodexSession(codexSessionId, {
     codexThreadId: 'thread_promptx_readme_codex',
     engineThreadId: 'thread_promptx_readme_codex',
   })
@@ -145,22 +168,31 @@ async function createShowcaseData() {
     engineThreadId: 'opencode-thread-readme',
   })
 
+  updatePromptxCodexSession(claudeMemberId, {
+    engineSessionId: 'claude-session-project',
+    engineThreadId: 'claude-thread-project',
+  })
+  updatePromptxCodexSession(openCodeMemberId, {
+    engineSessionId: 'opencode-session-project',
+    engineThreadId: 'opencode-thread-project',
+  })
+
   const selectedTask = registerTask(createTask({
-    title: '重写 README 与产品说明',
-    autoTitle: 'README 重写',
-    lastPromptPreview: '把 PromptX 写成更适合 Codex / Claude Code / OpenCode 用户的本机 AI 工作台。',
-    codexSessionId: codexSession.id,
+    title: '准备 README 更新与产品截图',
+    autoTitle: 'README 更新',
+    lastPromptPreview: '整理多 Agent、源码查看、Diff、手机端与微信主题截图，更新 README。',
+    codexSessionId: projectSession.id,
     blocks: [
-      textBlock('目标：重写 README，突出 PromptX 针对 Codex / Claude Code / OpenCode 用户的输入输出体验。'),
-      textBlock('需要强调：1. 先整理上下文再发送；2. 绑定固定目录与项目；3. 输出同时看过程、回复与代码变更；4. 多轮连续协作。'),
-      importedBlock('README 现状\n- 产品定位偏轻\n- 截图数量较少\n- 多引擎价值表达还不够集中', 'readme-notes.md'),
+      textBlock('目标：更新 README，突出 PromptX 最近补齐的多 Agent、源码查看、代码变更、移动端与微信主题。'),
+      textBlock('需要强调：1. 任务/项目/目录/线程结构；2. 一个项目可挂多个 Agent；3. Prompt / 过程 / 回复 / Diff / 源码查看同页协作。'),
+      importedBlock('本轮截图清单\n- 工作台总览\n- 多 Agent 项目管理\n- 只读源码查看\n- 代码变更审查\n- 设置页\n- 手机端', 'readme-notes.md'),
     ],
     todoItems: [
       {
         id: 'todo-readme-1',
         createdAt: new Date().toISOString(),
         blocks: [
-          textBlock('补齐安装、启动、使用流程与 Relay 文档入口。'),
+          textBlock('同步更新中英文 README，并替换成微信主题截图。'),
         ],
       },
     ],
@@ -186,62 +218,120 @@ async function createShowcaseData() {
 
   const earlierRun = createCodexRun({
     taskSlug: selectedTask.slug,
-    sessionId: codexSession.id,
-    prompt: '请先分析 README 当前结构与表达问题。',
+    sessionId: claudeMemberId,
+    prompt: '先从 PromptX 最近新增的功能里挑出 README 里必须讲清楚的点。',
     promptBlocks: [
-      textBlock('请先分析 README 当前结构与表达问题。'),
-      textBlock('重点从目标用户、核心能力、安装方式、截图组织四个角度给建议。'),
+      textBlock('请先盘点 PromptX 最近新增的能力。'),
+      textBlock('重点看：多 Agent 项目、源码查看、内容搜索、Diff 审查、插入上下文、移动端体验。'),
     ],
   })
   await appendRunPayloads(earlierRun.id, [
-    buildSessionPayload(codexSession, {
+    buildSessionPayload({
+      id: claudeMemberId,
+      title: projectSession.title,
+      engine: AGENT_ENGINES.CLAUDE_CODE,
+      cwd: repoDir,
       started: true,
-      engineThreadId: 'thread_promptx_readme_codex',
-      codexThreadId: 'thread_promptx_readme_codex',
+      codexThreadId: '',
+      engineSessionId: 'claude-session-project',
+      engineThreadId: 'claude-thread-project',
+    }, {
+      started: true,
+      engineSessionId: 'claude-session-project',
+      engineThreadId: 'claude-thread-project',
     }),
-    buildThreadStartedEvent('thread_promptx_readme_codex'),
+    buildThreadStartedEvent('claude-thread-project'),
     buildTurnStartedEvent(),
-    buildReasoningEvent('先梳理产品定位、目标用户和现有截图覆盖范围。'),
-    buildCommandStartedEvent('Read README.md and docs/assets'),
-    buildCommandCompletedEvent('Read README.md and docs/assets', '已确认 README 现有结构偏轻，截图只有 3 张。'),
-    buildAgentMessageEvent('README 当前更像简短介绍，尚未把多引擎协作体验讲透。'),
+    buildReasoningEvent('先把最近的关键能力梳出来，确认 README 不能再停留在旧版 3 张图。'),
+    buildCommandStartedEvent('Read README.md, CHANGELOG.md, docs/assets'),
+    buildCommandCompletedEvent('Read README.md, CHANGELOG.md, docs/assets', '已确认近期增加了多 Agent、源码查看、Diff 审查与微信主题。'),
+    buildAgentMessageEvent('README 应该把“一个项目可挂多个 Agent”“源码查看和 Diff 审查”讲得更前。'),
     buildTurnCompletedEvent({ input_tokens: 1472, output_tokens: 382 }),
   ])
   updateCodexRun(earlierRun.id, {
     status: 'completed',
-    responseMessage: '当前 README 的主要问题：\n\n- 对 Codex / Claude Code / OpenCode 用户的价值表达不够聚焦\n- 输入侧的上下文整理能力没有被突出\n- 输出侧的过程、回复、diff 三段式体验没有展开\n- 截图数量偏少，缺少主题、项目管理、系统面板等画面\n',
+    responseMessage: '这轮 README 更新建议优先突出：\n\n- **一个项目可挂多个 Agent**，右侧直接切换发送目标\n- **源码查看与内容搜索**，能在同一工作台里只读浏览代码\n- **代码变更审查**，支持看 workspace / 任务累计 / 单轮 diff\n- **输入与输出闭环**，可把 Prompt、回复、源码、Diff 再插回编辑区继续下一轮\n',
     finishedAt: new Date().toISOString(),
   })
 
   const latestRun = createCodexRun({
     taskSlug: selectedTask.slug,
-    sessionId: codexSession.id,
-    prompt: '请按 Codex / Claude Code / OpenCode 用户视角重写 README，并补充更完整的截图说明。',
+    sessionId: codexSessionId,
+    prompt: '按近期产品形态重写 README，截图改成微信主题，并多展示几个关键场景。',
     promptBlocks: [
-      textBlock('请按 Codex / Claude Code / OpenCode 用户视角重写 README。'),
-      textBlock('强调：先整理上下文、绑定固定目录、查看过程日志、查看最终回复、查看代码变更。'),
-      importedBlock('截图计划\n1. 工作台总览\n2. 项目管理\n3. 主题设置\n4. 系统诊断\n5. Relay 面板', 'screenshot-plan.md'),
+      textBlock('请按 PromptX 当前产品形态重写 README。'),
+      textBlock('强调：多 Agent、源码查看、代码变更、插入上下文、移动端与微信主题。'),
+      importedBlock('截图计划\n1. 工作台总览\n2. 多 Agent 项目管理\n3. 源码查看\n4. 代码变更\n5. 设置\n6. 手机端', 'screenshot-plan.md'),
     ],
   })
   await appendRunPayloads(latestRun.id, [
-    buildSessionPayload(codexSession, {
+    buildSessionPayload({
+      id: codexSessionId,
+      title: projectSession.title,
+      engine: AGENT_ENGINES.CODEX,
+      cwd: repoDir,
+      started: true,
+      codexThreadId: 'thread_promptx_readme_codex',
+      engineSessionId: '',
+      engineThreadId: 'thread_promptx_readme_codex',
+    }, {
       started: true,
       engineThreadId: 'thread_promptx_readme_codex',
       codexThreadId: 'thread_promptx_readme_codex',
     }),
     buildThreadStartedEvent('thread_promptx_readme_codex'),
     buildTurnStartedEvent(),
-    buildReasoningEvent('把输入体验、输出体验和多引擎统一面板拆成三个章节。'),
-    buildCommandStartedEvent('Draft README sections and screenshot plan'),
-    buildCommandCompletedEvent('Draft README sections and screenshot plan', '已生成 README 提纲、截图清单与展示顺序。'),
-    buildAgentMessageEvent('准备把 README 改成面向 agent CLI 用户的产品说明，并补上 Glass Light 皮肤截图。'),
+    buildReasoningEvent('把 README 改成“快速开始 + 关键能力 + 多场景截图 + 适用场景”的结构。'),
+    buildCommandStartedEvent('Draft README sections, screenshot plan, and image captions'),
+    buildCommandCompletedEvent('Draft README sections, screenshot plan, and image captions', '已生成新版 README 提纲与微信主题截图清单。'),
+    buildAgentMessageEvent('准备把 README 的截图统一切到 WeChat 主题，并把项目管理、源码查看、代码变更都放进展示区。'),
     buildTurnCompletedEvent({ input_tokens: 2510, output_tokens: 816 }),
   ])
   updateCodexRun(latestRun.id, {
     status: 'completed',
-    responseMessage: '已整理新的 README 方向：\n\n- 更突出 **先整理再发送** 的输入体验\n- 更突出 **过程 / 回复 / Diff 同页查看** 的输出体验\n- 更明确说明 **Codex / Claude Code / OpenCode** 共用同一套任务与项目面板\n- 补充更多系统截图，统一使用 Glass Light 主题来展示整体气质\n',
+    responseMessage: '新版 README 方向已经确定：\n\n- 更明确说明 **任务 -> 项目 -> 目录 -> 线程 -> Run -> Diff** 这一层结构\n- 更突出 **一个项目可挂多个 Agent**，以及 PromptX 与 CLI 双向复用会话\n- 更完整展示 **工作台总览 / 项目管理 / 源码查看 / 代码变更 / 设置 / 手机端**\n- 所有主图统一切到 **WeChat 主题**，让整体视觉更贴近当前产品状态\n',
     finishedAt: new Date().toISOString(),
   })
+
+  const openCodeRun = createCodexRun({
+    taskSlug: selectedTask.slug,
+    sessionId: openCodeMemberId,
+    prompt: '再补一轮，把 README 截图区改成分场景展示，并强调只读源码查看和插入编辑区。',
+    promptBlocks: [
+      textBlock('再补一轮，把 README 截图区改成分场景展示。'),
+      textBlock('记得强调：源码查看、内容搜索、从 Prompt/回复/Diff/源码把上下文插回编辑区。'),
+    ],
+  })
+  await appendRunPayloads(openCodeRun.id, [
+    buildSessionPayload({
+      id: openCodeMemberId,
+      title: projectSession.title,
+      engine: AGENT_ENGINES.OPENCODE,
+      cwd: repoDir,
+      started: true,
+      codexThreadId: '',
+      engineSessionId: 'opencode-session-project',
+      engineThreadId: 'opencode-thread-project',
+    }, {
+      started: true,
+      engineSessionId: 'opencode-session-project',
+      engineThreadId: 'opencode-thread-project',
+    }),
+    buildThreadStartedEvent('opencode-thread-project'),
+    buildTurnStartedEvent(),
+    buildReasoningEvent('补充截图标题和场景说明，让 README 更像产品说明而不是简短介绍。'),
+    buildCommandStartedEvent('Review screenshot set and README section order'),
+    buildCommandCompletedEvent('Review screenshot set and README section order', '已确认需要补工作台、项目管理、源码查看、Diff、设置、手机端 6 类场景。'),
+    buildAgentMessageEvent('建议把“为什么好用”改成更偏本机 Agent 用户的使用路径。'),
+    buildTurnCompletedEvent({ input_tokens: 980, output_tokens: 260 }),
+  ])
+  updateCodexRun(openCodeRun.id, {
+    status: 'completed',
+    responseMessage: '可以把 README 的截图区调整为：\n\n- 工作台总览\n- 多 Agent 项目管理\n- 源码查看与搜索\n- 代码变更审查\n- 设置与系统\n- 手机端远程访问\n',
+    finishedAt: new Date().toISOString(),
+  })
+
+  updateTaskCodexSession(selectedTask.slug, projectSession.id)
 
   return {
     selectedTask,
@@ -270,7 +360,7 @@ async function waitForUrl(url, timeoutMs = 60000) {
 }
 
 async function startStack() {
-  stackProcess = spawn(process.execPath, ['scripts/dev.mjs'], {
+  serverProcess = spawn('pnpm', ['--filter', '@promptx/server', 'dev'], {
     cwd: workspaceRoot,
     env: {
       ...process.env,
@@ -279,11 +369,27 @@ async function startStack() {
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,
   })
+  webProcess = spawn('pnpm', ['--filter', '@promptx/web', 'exec', 'vite', '--host', '127.0.0.1', '--port', webPort], {
+    cwd: workspaceRoot,
+    env: {
+      ...process.env,
+      FORCE_COLOR: '0',
+      VITE_API_PORT: serverPort,
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: true,
+  })
 
-  stackProcess.stdout.on('data', (chunk) => {
+  serverProcess.stdout.on('data', (chunk) => {
     process.stdout.write(String(chunk || ''))
   })
-  stackProcess.stderr.on('data', (chunk) => {
+  serverProcess.stderr.on('data', (chunk) => {
+    process.stderr.write(String(chunk || ''))
+  })
+  webProcess.stdout.on('data', (chunk) => {
+    process.stdout.write(String(chunk || ''))
+  })
+  webProcess.stderr.on('data', (chunk) => {
     process.stderr.write(String(chunk || ''))
   })
 
@@ -294,27 +400,33 @@ async function startStack() {
 }
 
 async function stopStack() {
-  if (!stackProcess || stackProcess.killed) {
-    return
-  }
-
-  await new Promise((resolve) => {
-    stackProcess.once('exit', () => resolve())
-
-    if (process.platform === 'win32') {
-      execFile('taskkill', ['/PID', String(stackProcess.pid), '/T', '/F'], () => resolve())
-      setTimeout(resolve, 2000)
-      return
+  const processes = [webProcess, serverProcess].filter(Boolean)
+  for (const child of processes) {
+    if (!child || child.killed) {
+      continue
     }
 
-    stackProcess.kill('SIGTERM')
-    setTimeout(resolve, 2000)
-  })
+    await new Promise((resolve) => {
+      child.once('exit', () => resolve())
+
+      if (process.platform === 'win32') {
+        execFile('taskkill', ['/PID', String(child.pid), '/T', '/F'], () => resolve())
+        setTimeout(resolve, 2000)
+        return
+      }
+
+      child.kill('SIGTERM')
+      setTimeout(resolve, 2000)
+    })
+  }
+
+  serverProcess = null
+  webProcess = null
 }
 
-async function setGlassTheme(page) {
+async function setWechatTheme(page) {
   await page.addInitScript(() => {
-    window.localStorage.setItem('promptx:theme-id', 'promptx-glass-light')
+    window.localStorage.setItem('promptx:theme-id', 'promptx-wechat-light')
   })
 }
 
@@ -369,7 +481,7 @@ async function captureExecutionFocus(page) {
   const viewport = page.viewportSize() || { width: 1600, height: 1080 }
 
   await page.screenshot({
-    path: path.join(outputDir, 'readme-execution-focus-glass.png'),
+    path: path.join(outputDir, screenshotNames.execution),
     clip: clampClip({
       x: left,
       y: top,
@@ -379,7 +491,7 @@ async function captureExecutionFocus(page) {
   })
 }
 
-async function captureMobileRemote(selectedTaskSlug, browser) {
+async function captureMobileRemote(selectedTaskSlug, selectedTaskTitle, browser) {
   const context = await browser.newContext({
     viewport: { width: 430, height: 932 },
     deviceScaleFactor: 2,
@@ -389,18 +501,20 @@ async function captureMobileRemote(selectedTaskSlug, browser) {
 
   try {
     const page = await context.newPage()
-    await setGlassTheme(page)
-    await page.goto(baseUrl, {
+    await setWechatTheme(page)
+    await page.goto(`${baseUrl}/?task=${encodeURIComponent(selectedTaskSlug)}`, {
       waitUntil: 'domcontentloaded',
       timeout: 30000,
     })
-    await page.waitForSelector('text=PromptX 工作台', { timeout: 30000 })
-    await page.getByText('重写 README 与产品说明').first().click()
-    await page.waitForTimeout(600)
+    await page.waitForSelector('text=PromptX 工作台', { timeout: 30000 }).catch(() => {})
+    if (selectedTaskTitle) {
+      await page.getByText(selectedTaskTitle).first().click().catch(() => {})
+    }
+    await page.waitForTimeout(1200)
     await page.getByRole('button', { name: '执行' }).click().catch(() => {})
     await page.waitForTimeout(800)
     await page.screenshot({
-      path: path.join(outputDir, 'readme-mobile-remote-glass.png'),
+      path: path.join(outputDir, screenshotNames.mobile),
       fullPage: false,
     })
   } finally {
@@ -421,18 +535,14 @@ async function captureScreenshots(selectedTaskSlug) {
       deviceScaleFactor: 1.5,
     })
     const page = await context.newPage()
-    await setGlassTheme(page)
-    await page.goto(`${baseUrl}/?task=${encodeURIComponent(selectedTaskSlug)}`, {
-      waitUntil: 'domcontentloaded',
-      timeout: 30000,
-    })
-    await page.waitForSelector('text=本轮提示词', { timeout: 30000 })
+    await setWechatTheme(page)
+    await openWorkbenchTask(page, selectedTaskSlug, { baseUrl })
     await page.addStyleTag({ content: '* { caret-color: transparent !important; }' })
     await expandVisibleButtons(page, /展开/, 4)
     await page.waitForTimeout(800)
 
     await page.screenshot({
-      path: path.join(outputDir, 'readme-workbench-glass.png'),
+      path: path.join(outputDir, screenshotNames.workbench),
       fullPage: false,
     })
     await captureExecutionFocus(page)
@@ -441,24 +551,28 @@ async function captureScreenshots(selectedTaskSlug) {
     await page.waitForSelector('text=项目列表', { timeout: 10000 })
     await page.waitForTimeout(500)
     await page.screenshot({
-      path: path.join(outputDir, 'readme-project-manager-glass.png'),
+      path: path.join(outputDir, screenshotNames.manager),
       fullPage: false,
     })
+
+    await page.getByRole('button', { name: '查看源码' }).click()
+    await page.waitForSelector('input[placeholder=\"搜索文件名或路径片段\"]', { timeout: 10000 })
+    await page.getByPlaceholder('搜索文件名或路径片段').fill('README')
+    await page.waitForTimeout(700)
+    await page.getByText('README.md').first().click().catch(() => {})
+    await page.waitForTimeout(900)
+    await page.screenshot({
+      path: path.join(outputDir, screenshotNames.source),
+      fullPage: false,
+    })
+    await closeTopDialog(page)
     await closeTopDialog(page)
 
     await page.getByRole('button', { name: '设置' }).click()
     await page.waitForSelector('text=界面主题', { timeout: 10000 })
     await page.waitForTimeout(500)
     await page.screenshot({
-      path: path.join(outputDir, 'readme-settings-theme-glass.png'),
-      fullPage: false,
-    })
-
-    await page.locator('button').filter({ hasText: '远程' }).first().click()
-    await page.waitForSelector('text=启用远程访问', { timeout: 10000 })
-    await page.waitForTimeout(500)
-    await page.screenshot({
-      path: path.join(outputDir, 'readme-settings-relay-glass.png'),
+      path: path.join(outputDir, screenshotNames.settingsTheme),
       fullPage: false,
     })
 
@@ -466,7 +580,7 @@ async function captureScreenshots(selectedTaskSlug) {
     await page.waitForSelector('text=真实 agent 最大并发数', { timeout: 10000 })
     await page.waitForTimeout(500)
     await page.screenshot({
-      path: path.join(outputDir, 'readme-settings-system-glass.png'),
+      path: path.join(outputDir, screenshotNames.settingsSystem),
       fullPage: false,
     })
 
@@ -477,11 +591,11 @@ async function captureScreenshots(selectedTaskSlug) {
     await page.locator('button').filter({ hasText: 'README.md' }).first().click().catch(() => {})
     await page.waitForTimeout(400)
     await page.screenshot({
-      path: path.join(outputDir, 'readme-diff-glass.png'),
+      path: path.join(outputDir, screenshotNames.diff),
       fullPage: false,
     })
 
-    await captureMobileRemote(selectedTaskSlug, browser)
+    await captureMobileRemote(selectedTaskSlug, '准备 README 更新与产品截图', browser)
 
     await context.close()
   } finally {

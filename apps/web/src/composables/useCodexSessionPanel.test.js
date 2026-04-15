@@ -16,6 +16,7 @@ import {
   getTurnSummaryItems,
   getTurnSummaryStatus,
   hasTurnSummary,
+  mergeCodexSessionRecord,
   normalizeStoredProcessVisibility,
   sortSessions,
   syncTurnStateFromRun,
@@ -1085,4 +1086,36 @@ test('syncTurnStateFromRun keeps event-derived error when persisted error is onl
 
   assert.match(turn.errorMessage, /网络问题/)
   assert.doesNotMatch(turn.errorMessage, /no last agent message/i)
+})
+
+test('mergeCodexSessionRecord 在 partial session 更新后保留已有 agentBindings', () => {
+  const currentSession = {
+    id: 'session-1',
+    title: '聊天',
+    engine: 'codex',
+    running: true,
+    agentBindings: [
+      { engine: 'codex', sessionRecordId: 'session-1', isDefault: true },
+      { engine: 'claude-code', sessionRecordId: 'session-2', isDefault: false },
+      { engine: 'opencode', sessionRecordId: 'session-3', isDefault: false },
+    ],
+  }
+
+  const partialSession = {
+    id: 'session-1',
+    title: '聊天',
+    engine: 'codex',
+    updatedAt: '2026-04-15T10:00:00.000Z',
+  }
+
+  const merged = mergeCodexSessionRecord(currentSession, partialSession, {
+    preserveRunning: true,
+  })
+
+  assert.equal(merged?.id, 'session-1')
+  assert.equal(merged?.running, true)
+  assert.deepEqual(
+    (merged?.agentBindings || []).map((item) => item.engine),
+    ['codex', 'claude-code', 'opencode']
+  )
 })

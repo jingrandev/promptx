@@ -19,6 +19,10 @@ const props = defineProps({
     type: String,
     default: '',
   },
+  selectedAgentEngine: {
+    type: String,
+    default: '',
+  },
   sessionSelectionLocked: {
     type: Boolean,
     default: false,
@@ -42,12 +46,14 @@ const props = defineProps({
 })
 
 const emit = defineEmits([
+  'agent-bindings-change',
   'insert-code-context',
   'sending-change',
   'project-created',
   'selected-session-change',
   'open-diff',
   'toast',
+  'update:selectedAgentEngine',
 ])
 
 const panelRef = ref(null)
@@ -95,14 +101,17 @@ defineExpose({
       :build-prompt="buildPrompt || (() => '')"
       :build-prompt-blocks="buildPromptBlocks || (() => [])"
       :selected-session-id="selectedSessionId"
+      :selected-agent-engine="selectedAgentEngine"
       :session-selection-locked="sessionSelectionLocked"
       :session-selection-lock-reason="sessionSelectionLockReason"
       :diff-supported="diffSupported"
       :task-running="taskRunning"
+      @agent-bindings-change="emit('agent-bindings-change', $event)"
       @insert-code-context="emit('insert-code-context', $event)"
       @project-created="emit('project-created', $event)"
       @sending-change="emit('sending-change', $event)"
       @selected-session-change="emit('selected-session-change', $event)"
+      @update:selected-agent-engine="emit('update:selectedAgentEngine', $event)"
       @open-diff="emit('open-diff', $event)"
       @toast="emit('toast', $event)"
     />

@@ -1,5 +1,5 @@
 <script setup>
-import { computed, defineAsyncComponent, nextTick, ref } from 'vue'
+import { computed, defineAsyncComponent, nextTick, ref, watch } from 'vue'
 import {
   ArrowDown,
   ChevronDown,
@@ -11,6 +11,7 @@ import {
   FileDiff,
   LoaderCircle,
   PencilLine,
+  Plus,
 } from 'lucide-vue-next'
 import CodexSessionSelect from './CodexSessionSelect.vue'
 import ImagePreviewOverlay from './ImagePreviewOverlay.vue'
@@ -23,12 +24,22 @@ import { useCodeSelectionAction } from '../composables/useCodeSelectionAction.js
 import { useCodexSessionPanel } from '../composables/useCodexSessionPanel.js'
 import { useCodexTranscriptCollapse } from '../composables/useCodexTranscriptCollapse.js'
 import { useTheme } from '../composables/useTheme.js'
+import { formatAgentBindingLabel } from '../lib/agentEngines.js'
 import { renderCodexMarkdown, renderPlainCodexMarkdown } from '../lib/codexMarkdown.js'
 import { aggregateProcessEvents } from '../lib/processEventGrouping.js'
 
 const CodexSessionManagerDialog = defineAsyncComponent(() => import('./CodexSessionManagerDialog.vue'))
 
-const emit = defineEmits(['insert-code-context', 'project-created', 'selected-session-change', 'sending-change', 'open-diff', 'toast'])
+const emit = defineEmits([
+  'agent-bindings-change',
+  'insert-code-context',
+  'project-created',
+  'selected-session-change',
+  'sending-change',
+  'open-diff',
+  'toast',
+  'update:selectedAgentEngine',
+])
 
 const props = defineProps({
   prompt: {
@@ -56,6 +67,10 @@ const props = defineProps({
     default: '',
   },
   selectedSessionId: {
+    type: String,
+    default: '',
+  },
+  selectedAgentEngine: {
     type: String,
     default: '',
   },
@@ -124,6 +139,7 @@ const {
   workingLabel,
   sessions,
   loadSessions,
+  currentProjectAgentBindings,
   scheduleScrollToBottom,
   scrollToBottom,
 } = useCodexSessionPanel(props, emit)
@@ -133,9 +149,31 @@ const managerDialogRef = ref(null)
 const showSourceBrowser = ref(false)
 const sourceBrowserSessionId = ref('')
 const previewPromptImageUrl = ref('')
+const selectedAgentFilter = ref('all')
 const { t } = useI18n()
 const { isDark } = useTheme()
 const responseThemeKey = computed(() => (isDark.value ? 'dark' : 'light'))
+
+const agentFilterOptions = computed(() => {
+  const seen = new Set()
+  return (Array.isArray(currentProjectAgentBindings.value) ? currentProjectAgentBindings.value : []).filter((item) => {
+    const engine = String(item?.engine || '').trim()
+    if (!engine || seen.has(engine)) {
+      return false
+    }
+    seen.add(engine)
+    return true
+  })
+})
+const showAgentFilter = computed(() => agentFilterOptions.value.length > 1)
+const filteredTurns = computed(() => {
+  const filter = String(selectedAgentFilter.value || '').trim()
+  if (!showAgentFilter.value || filter === 'all') {
+    return turns.value
+  }
+
+  return turns.value.filter((turn) => String(turn?.engine || '').trim() === filter)
+})
 
 const {
   selectionAction: responseSelectionAction,
@@ -149,6 +187,28 @@ const {
   getCodeLeft: (rowElement) => rowElement?.getBoundingClientRect?.()?.left || 0,
   debounceMs: 72,
 })
+
+watch(
+  [selectedAgentFilter, () => agentFilterOptions.value.map((item) => item.engine).join('\n')],
+  () => {
+    if (selectedAgentFilter.value === 'all') {
+      return
+    }
+    if (agentFilterOptions.value.some((item) => item.engine === selectedAgentFilter.value)) {
+      return
+    }
+    selectedAgentFilter.value = 'all'
+  },
+  { immediate: true }
+)
+
+watch(
+  selectedAgentFilter,
+  () => {
+    clearResponseSelectionAction({ clearBrowserSelection: true })
+    scheduleScrollToBottom({ force: true })
+  }
+)
 
 function shouldHideSystemEvent(item = {}) {
   if (item?.kind === 'reasoning') {
@@ -259,6 +319,33 @@ async function copyText(text) {
   document.body.removeChild(textarea)
 }
 
+function getTurnPromptContent(turn = {}) {
+  const promptBlocks = Array.isArray(turn?.promptBlocks) ? turn.promptBlocks : []
+  const blockText = promptBlocks
+    .filter((item) => item?.type === 'text' || item?.type === 'imported_text')
+    .map((item) => String(item?.content || '').replace(/\u200b/g, '').trim())
+    .filter(Boolean)
+    .join('\n\n')
+
+  if (blockText) {
+    return blockText
+  }
+
+  return String(turn?.prompt || '').replace(/\u200b/g, '').trim()
+}
+
+function insertTurnPrompt(turn = {}) {
+  const content = getTurnPromptContent(turn)
+  if (!content) {
+    return
+  }
+
+  emit('insert-code-context', {
+    source: 'response',
+    content,
+  })
+}
+
 async function copyResponseCode(event) {
   const button = event?.target?.closest?.('[data-copy-code="1"]')
   if (!button) {
@@ -308,6 +395,22 @@ function insertSelectedResponseContext() {
   clearResponseSelectionAction({ clearBrowserSelection: true })
 }
 
+function insertTurnResponse(turn = {}) {
+  if (turn?.errorMessage) {
+    return
+  }
+
+  const content = String(turn?.responseMessage || '').replace(/\u200b/g, '').trim()
+  if (!content) {
+    return
+  }
+
+  emit('insert-code-context', {
+    source: 'response',
+    content,
+  })
+}
+
 const promptPreviewImages = computed(() => (
   turns.value.flatMap((turn) => (Array.isArray(turn?.promptBlocks) ? turn.promptBlocks : [])
     .filter((item) => item?.type === 'image')
@@ -346,6 +449,12 @@ function shouldShowCollapsedEventHint(turn) {
 
 function shouldShowDeferredEventHint(turn) {
   return hasTurnEventHistory(turn) && !turn?.eventsLoaded && !turn?.eventsLoading
+}
+
+function getAgentFilterLabel(item = {}) {
+  return formatAgentBindingLabel(item, {
+    defaultLabel: t('sessionPanel.defaultAgent'),
+  })
 }
 
 function getEventCardClass(item = {}) {
@@ -493,6 +602,34 @@ defineExpose({
           </div>
         </div>
 
+        <div
+          v-if="showAgentFilter"
+          class="flex max-w-full items-center gap-1.5 overflow-x-auto pb-0.5"
+          :aria-label="t('sessionPanel.agentFilter')"
+        >
+          <button
+            type="button"
+            class="theme-agent-selector-button"
+            :class="selectedAgentFilter === 'all' ? 'theme-filter-active' : 'theme-filter-idle'"
+            :aria-pressed="selectedAgentFilter === 'all' ? 'true' : 'false'"
+            @click="selectedAgentFilter = 'all'"
+          >
+            {{ t('sessionPanel.allAgents') }}
+          </button>
+          <button
+            v-for="item in agentFilterOptions"
+            :key="item.engine"
+            type="button"
+            class="theme-agent-selector-button"
+            :class="selectedAgentFilter === item.engine ? 'theme-filter-active' : 'theme-filter-idle'"
+            :aria-pressed="selectedAgentFilter === item.engine ? 'true' : 'false'"
+            :title="getAgentFilterLabel(item)"
+            @click="selectedAgentFilter = item.engine"
+          >
+            {{ getAgentFilterLabel(item) }}
+          </button>
+        </div>
+
         <p v-if="sessionError" class="theme-danger-text inline-flex items-center gap-2 text-sm">
           <CircleAlert class="h-4 w-4" />
           <span>{{ sessionError }}</span>
@@ -503,6 +640,7 @@ defineExpose({
     <div class="min-h-0 flex-1">
       <div
         ref="transcriptRef"
+        data-promptx-transcript="1"
         class="workbench-transcript relative flex h-full flex-col gap-3 overflow-x-hidden overflow-y-auto px-4 py-4"
         @scroll="handleTranscriptScroll"
         @touchstart.passive="handleTranscriptTouchStart"
@@ -516,13 +654,35 @@ defineExpose({
         >
           {{ t('sessionPanel.empty') }}
         </div>
+        <div
+          v-else-if="!filteredTurns.length"
+          class="theme-empty-state px-4 py-6 text-sm"
+        >
+          {{ t('sessionPanel.emptyAgentFilter') }}
+        </div>
 
-        <div v-for="turn in turns" :key="turn.id" class="flex min-w-0 flex-col gap-3">
+        <div
+          v-for="turn in filteredTurns"
+          :key="turn.id"
+          data-promptx-turn="1"
+          :data-turn-id="turn.id"
+          :data-run-id="turn.runId || ''"
+          class="flex min-w-0 flex-col gap-3"
+        >
           <div class="flex justify-end">
             <div class="transcript-card transcript-card--prompt min-w-0 w-full rounded-sm bg-[var(--theme-promptBg)] px-4 py-3 font-mono text-sm text-[var(--theme-promptText)]">
               <div class="flex items-center justify-between gap-3 text-xs opacity-75 font-sans">
-                <span class="font-semibold">{{ t('sessionPanel.promptTitle') }}</span>
+                <span class="font-semibold">{{ t('sessionPanel.promptTitleWithAgent', { agent: getTurnAgentLabel(turn) }) }}</span>
                 <div class="flex items-center gap-2">
+                  <button
+                    v-if="getTurnPromptContent(turn)"
+                    type="button"
+                    class="transcript-card__toggle inline-flex items-center gap-1 rounded-sm px-2 py-1 text-[11px] transition hover:bg-[var(--theme-appPanelStrong)]"
+                    @click="insertTurnPrompt(turn)"
+                  >
+                    <Plus class="h-3 w-3" />
+                    <span>{{ t('sessionPanel.insert') }}</span>
+                  </button>
                   <span>{{ formatTurnTime(turn.startedAt) }}</span>
                 </div>
               </div>
@@ -649,6 +809,15 @@ defineExpose({
                   >
                     <FileDiff class="h-3 w-3" />
                     <span>{{ t('sessionPanel.view') }}</span>
+                  </button>
+                  <button
+                    v-if="turn.responseMessage && !turn.errorMessage"
+                    type="button"
+                    class="transcript-card__toggle inline-flex items-center gap-1 rounded-sm px-2 py-1 text-[11px] transition hover:bg-[var(--theme-appPanelStrong)]"
+                    @click="insertTurnResponse(turn)"
+                  >
+                    <Plus class="h-3 w-3" />
+                    <span>{{ t('sessionPanel.insert') }}</span>
                   </button>
                   <span>{{ formatTurnTime(turn.finishedAt || turn.startedAt) }}</span>
                 </div>

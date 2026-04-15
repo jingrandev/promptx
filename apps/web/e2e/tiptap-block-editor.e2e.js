@@ -123,7 +123,7 @@ test('Tiptap 原型支持图文混排、文本导入与 PDF 导入', async (t) =
     const summary = await readEditorSummary(page)
     assert.match(summary.textContent, /第一段/)
     assert.match(summary.textContent, /新增文本块验证/)
-    assert.match(summary.textContent, /导入文件/)
+    assert.match(summary.textContent, /promptx-tiptap-sample\.txt/)
     assert.ok(summary.importedCount >= 1)
     assert.ok(summary.imageCount >= 1)
     assert.ok(summary.textCount >= 3)
@@ -222,8 +222,8 @@ test('Tiptap 导入文本块展开后可看到完整内容', async (t) => {
 
     await importedBlock.locator('[data-promptx-imported-preview]').click()
     await importedBlock.locator('[data-promptx-node-content="imported_text"]').getByText('最后一行完整内容').waitFor()
-    await importedBlock.locator('[data-promptx-imported-meta]').click()
-    await importedBlock.locator('[data-promptx-imported-actions] button').filter({ hasText: '展开' }).waitFor({ timeout: 10000 })
+    await importedBlock.locator('[data-promptx-imported-meta] [role="button"]').first().click()
+    await importedBlock.locator('[data-promptx-imported-preview]').waitFor({ timeout: 10000 })
   } finally {
     await browser.close()
   }
@@ -382,6 +382,8 @@ test('Tiptap 导入块在移动端头部纵向排布且不横向溢出', async (
 
     const layout = await importedBlock.evaluate((element) => {
       const meta = element.querySelector('[data-promptx-imported-meta]')?.getBoundingClientRect()
+      const label = element.querySelector('[data-promptx-imported-meta] p')?.getBoundingClientRect()
+      const summary = element.querySelector('[data-promptx-imported-meta] .col-span-2 p')?.getBoundingClientRect()
       const actions = element.querySelector('[data-promptx-imported-actions]')?.getBoundingClientRect()
       const actionButtons = Array.from(element.querySelectorAll('[data-promptx-imported-actions] button')).map((button) => {
         const rect = button.getBoundingClientRect()
@@ -394,12 +396,15 @@ test('Tiptap 导入块在移动端头部纵向排布且不横向溢出', async (
         clientWidth: element.clientWidth,
         scrollWidth: element.scrollWidth,
         metaBottom: meta?.bottom || 0,
+        labelBottom: label?.bottom || 0,
+        summaryTop: summary?.top || 0,
         actionsTop: actions?.top || 0,
         actionButtons,
       }
     })
 
-    assert.ok(layout.actionsTop >= layout.metaBottom - 1, `移动端操作区应位于说明区下方：${JSON.stringify(layout)}`)
+    assert.ok(layout.actionsTop <= layout.labelBottom + 2, `移动端操作区应与标题首行对齐：${JSON.stringify(layout)}`)
+    assert.ok(layout.actionsTop < layout.summaryTop, `移动端操作区应位于文件说明上方：${JSON.stringify(layout)}`)
     assert.ok(layout.scrollWidth <= layout.clientWidth + 1, `移动端导入块不应横向溢出：${JSON.stringify(layout)}`)
     assert.equal(new Set(layout.actionButtons.map((button) => Math.round(button.top))).size, 1, `移动端操作按钮应保持单行：${JSON.stringify(layout)}`)
   } finally {

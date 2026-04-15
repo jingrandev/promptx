@@ -577,17 +577,19 @@ export async function readTiptapScrollState(page) {
 
 export async function readTranscriptState(page) {
   return page.evaluate(() => {
-    const transcript = document.querySelector('.h-full.space-y-4.overflow-y-auto.px-4.py-4')
+    const transcript = document.querySelector('[data-promptx-transcript="1"]')
     const turns = transcript ? Array.from(transcript.children) : []
     const lastTurn = turns.at(-1) || null
-    const processCard = lastTurn?.children?.[1]?.querySelector('.theme-process-running, .theme-process-completed, .theme-process-stopped, .theme-process-error') || null
-    const logsContainer = processCard?.querySelector('.mt-3.space-y-3') || null
+    const processCard = lastTurn?.querySelector?.('.theme-process-running, .theme-process-completed, .theme-process-stopped, .theme-process-error') || null
+    const logsContainer = processCard?.querySelector('.mt-2.min-w-0.space-y-2') || null
+    const rawDistanceToBottom = transcript ? (transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight) : -1
 
     return {
       scrollTop: transcript ? Math.round(transcript.scrollTop) : -1,
       clientHeight: transcript ? Math.round(transcript.clientHeight) : -1,
       scrollHeight: transcript ? Math.round(transcript.scrollHeight) : -1,
-      distanceToBottom: transcript ? Math.round(transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight) : -1,
+      maxScrollTop: transcript ? Math.max(0, Math.round(transcript.scrollHeight - transcript.clientHeight)) : -1,
+      distanceToBottom: transcript ? Math.max(0, Math.round(rawDistanceToBottom)) : -1,
       logCount: logsContainer ? logsContainer.children.length : 0,
       hasNewerButton: Boolean(document.body.innerText.includes('有新消息，跳到底部')),
     }

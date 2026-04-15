@@ -9,6 +9,10 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  agentEngines: {
+    type: Array,
+    default: () => [],
+  },
   canEditEngine: {
     type: Boolean,
     default: true,
@@ -83,6 +87,7 @@ const emit = defineEmits([
   'copy-session-id',
   'open-directory-picker',
   'select-session-candidate',
+  'update:agentEngines',
   'update:cwd',
   'update:engine',
   'update:sessionId',
@@ -98,6 +103,13 @@ const selectedEngineOption = computed(() => {
   const current = String(props.engine || '').trim()
   return props.engineOptions.find((item) => String(item?.value || '').trim() === current) || null
 })
+const normalizedAgentEngines = computed(() => {
+  const values = Array.isArray(props.agentEngines) ? props.agentEngines : []
+  return [...new Set(values.map((value) => String(value || '').trim()).filter(Boolean))]
+})
+const collaborativeEngineOptions = computed(() => (
+  props.engineOptions.filter((item) => String(item?.value || '').trim() !== String(props.engine || '').trim())
+))
 const hasSessionDirectory = computed(() => Boolean(String(props.cwd || '').trim()))
 const normalizedSessionId = computed(() => String(props.sessionId || '').trim())
 const normalizedSessionKeyword = computed(() => normalizedSessionId.value.toLowerCase())
@@ -164,6 +176,18 @@ function toggleSessionDropdown() {
 
 function clearCwd() {
   emit('update:cwd', '')
+}
+
+function toggleAgentEngine(engine) {
+  if (!props.canEditEngine || props.busy) {
+    return
+  }
+
+  const normalized = String(engine || '').trim()
+  const nextItems = normalizedAgentEngines.value.includes(normalized)
+    ? normalizedAgentEngines.value.filter((item) => item !== normalized)
+    : [...normalizedAgentEngines.value, normalized]
+  emit('update:agentEngines', nextItems)
 }
 
 function clearSessionId() {
@@ -389,6 +413,32 @@ onBeforeUnmount(() => {
         {{ engineReadonlyMessage }}
       </p>
     </label>
+
+    <div class="theme-muted-text block text-xs">
+      <span>{{ t('projectManager.collaborationAgents') }}</span>
+      <div class="mt-2 grid gap-2">
+        <button
+          v-for="option in collaborativeEngineOptions"
+          :key="option.value"
+          type="button"
+          class="theme-list-row flex items-center justify-between gap-3 rounded-sm border border-solid px-3 py-2 text-left transition"
+          :class="normalizedAgentEngines.includes(option.value) ? 'theme-list-item-active' : 'theme-list-item-hover'"
+          :disabled="busy || !canEditEngine"
+          @click="toggleAgentEngine(option.value)"
+        >
+          <div class="min-w-0">
+            <div class="text-sm text-[var(--theme-textPrimary)]">{{ option.label }}</div>
+            <div class="theme-muted-text mt-0.5 text-[11px] leading-5">
+              {{ normalizedAgentEngines.includes(option.value) ? t('projectManager.agentEnabled') : t('projectManager.agentDisabled') }}
+            </div>
+          </div>
+          <Check v-if="normalizedAgentEngines.includes(option.value)" class="h-4 w-4 shrink-0 text-[var(--theme-textPrimary)]" />
+        </button>
+      </div>
+      <p class="theme-muted-text mt-2 text-[11px] leading-5">
+        {{ t('projectManager.collaborationAgentsHint') }}
+      </p>
+    </div>
 
     <label class="theme-muted-text block text-xs">
       <span>{{ t('projectManager.sessionId') }}</span>

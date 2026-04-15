@@ -6,6 +6,8 @@ import { all, get, run, transaction } from './db.js'
 import { assertAgentRunner } from './agents/index.js'
 import { createApiError } from './apiErrors.js'
 
+const AGENT_ENGINE_ORDER = ['codex', 'claude-code', 'opencode']
+
 function createHttpError(message, statusCode = 400) {
   return createApiError('', message, statusCode)
 }
@@ -34,6 +36,14 @@ function hasSessionIdentity(record = {}) {
 
 function hasManualSessionBinding(engineMeta = {}) {
   return Boolean(engineMeta?.manualSessionBinding)
+}
+
+function isHiddenProjectMember(engineMeta = {}) {
+  return Boolean(engineMeta?.hidden) && Boolean(String(engineMeta?.projectRootId || '').trim())
+}
+
+function getProjectRootId(engineMeta = {}) {
+  return String(engineMeta?.projectRootId || '').trim()
 }
 
 function mapSessionIdToEngine(engine, sessionId = '') {
@@ -88,6 +98,181 @@ function toCodexSession(row) {
   }
 }
 
+function getSessionSelectRows() {
+  return all(
+    `SELECT id, title, engine, cwd, codex_thread_id, engine_session_id, engine_thread_id, engine_meta_json, created_at, updated_at
+     FROM codex_sessions
+     ORDER BY updated_at DESC`
+  )
+}
+
+function sortAgentBindings(items = [], defaultEngine = 'codex') {
+  const orderMap = new Map(AGENT_ENGINE_ORDER.map((engine, index) => [engine, index]))
+  return [...items].sort((left, right) => {
+    const leftDefault = Number(left?.engine === defaultEngine)
+    const rightDefault = Number(right?.engine === defaultEngine)
+    if (leftDefault !== rightDefault) {
+      return rightDefault - leftDefault
+    }
+
+    const leftOrder = orderMap.has(left?.engine) ? orderMap.get(left.engine) : 999
+    const rightOrder = orderMap.has(right?.engine) ? orderMap.get(right.engine) : 999
+    if (leftOrder !== rightOrder) {
+      return leftOrder - rightOrder
+    }
+
+    return String(left?.engine || '').localeCompare(String(right?.engine || ''), 'zh-CN')
+  })
+}
+
+function normalizeProjectAgentEngines(items = [], defaultEngine = 'codex') {
+  const seen = new Set()
+  const normalizedItems = []
+
+  ;[defaultEngine, ...(Array.isArray(items) ? items : [])].forEach((value) => {
+    const normalized = normalizeAgentEngine(value)
+    if (seen.has(normalized)) {
+      return
+    }
+    seen.add(normalized)
+    normalizedItems.push(normalized)
+  })
+
+  return sortAgentBindings(
+    normalizedItems.map((engine) => ({ engine })),
+    normalizeAgentEngine(defaultEngine)
+  ).map((item) => item.engine)
+}
+
+function buildProjectAgentBinding(session, options = {}) {
+  return {
+    engine: normalizeAgentEngine(session?.engine),
+    sessionRecordId: String(session?.id || '').trim(),
+    sessionId: String(session?.sessionId || '').trim(),
+    started: Boolean(session?.started),
+    running: Boolean(session?.running),
+    isDefault: Boolean(options.isDefault),
+  }
+}
+
+function hydrateProjectSession(rootSession, memberSessions = []) {
+  if (!rootSession) {
+    return null
+  }
+
+  const byEngine = new Map()
+  byEngine.set(rootSession.engine, buildProjectAgentBinding(rootSession, { isDefault: true }))
+
+  memberSessions.forEach((memberSession) => {
+    const engine = normalizeAgentEngine(memberSession?.engine)
+    if (!engine || byEngine.has(engine)) {
+      return
+    }
+
+    byEngine.set(engine, buildProjectAgentBinding(memberSession, { isDefault: false }))
+  })
+
+  const agentBindings = sortAgentBindings([...byEngine.values()], rootSession.engine)
+  const started = Boolean(rootSession.started || agentBindings.some((item) => item.started))
+  const running = Boolean(rootSession.running || agentBindings.some((item) => item.running))
+
+  return {
+    ...rootSession,
+    running,
+    started,
+    agentBindings,
+  }
+}
+
+function listProjectMemberSessions(rootSessionId = '', rows = []) {
+  const targetId = String(rootSessionId || '').trim()
+  if (!targetId) {
+    return []
+  }
+
+  return rows
+    .map(toCodexSession)
+    .filter((session) => getProjectRootId(session?.engineMeta) === targetId && isHiddenProjectMember(session?.engineMeta))
+}
+
+function createSessionRecord(input = {}) {
+  const id = String(input.id || `pxcs_${nanoid(12)}`).trim()
+  const title = normalizeTitle(input.title, input.cwd)
+  const engine = normalizeAgentEngine(input.engine)
+  const cwd = normalizeCwd(input.cwd)
+  const sessionId = String(input.sessionId || '').trim()
+  const sessionFields = mapSessionIdToEngine(engine, sessionId)
+  const engineMeta = cloneEngineMeta(input.engineMeta)
+
+  if (sessionId) {
+    engineMeta.manualSessionBinding = true
+  } else {
+    delete engineMeta.manualSessionBinding
+  }
+
+  run(
+    `INSERT INTO codex_sessions (
+       id, title, engine, cwd, codex_thread_id, engine_session_id, engine_thread_id, engine_meta_json, created_at, updated_at
+     )
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      id,
+      title,
+      engine,
+      cwd,
+      sessionFields.codexThreadId,
+      sessionFields.engineSessionId,
+      sessionFields.engineThreadId,
+      JSON.stringify(engineMeta),
+      String(input.createdAt || input.updatedAt || new Date().toISOString()),
+      String(input.updatedAt || input.createdAt || new Date().toISOString()),
+    ]
+  )
+
+  return id
+}
+
+function upsertProjectMemberSessions(rootSession, agentEngines = [], options = {}) {
+  const now = String(options.updatedAt || new Date().toISOString())
+  const nextAgentEngines = normalizeProjectAgentEngines(agentEngines, rootSession.engine)
+  const memberEngines = nextAgentEngines.filter((engine) => engine !== rootSession.engine)
+  const allRows = getSessionSelectRows()
+  const existingMembers = listProjectMemberSessions(rootSession.id, allRows)
+  const existingByEngine = new Map(existingMembers.map((item) => [item.engine, item]))
+
+  existingMembers.forEach((member) => {
+    if (memberEngines.includes(member.engine)) {
+      run(
+        `UPDATE codex_sessions
+         SET title = ?, cwd = ?, updated_at = ?
+         WHERE id = ?`,
+        [rootSession.title, rootSession.cwd, now, member.id]
+      )
+      return
+    }
+
+    run('DELETE FROM codex_sessions WHERE id = ?', [member.id])
+  })
+
+  memberEngines.forEach((engine) => {
+    if (existingByEngine.has(engine)) {
+      return
+    }
+
+    createSessionRecord({
+      title: rootSession.title,
+      engine,
+      cwd: rootSession.cwd,
+      engineMeta: {
+        hidden: true,
+        projectRootId: rootSession.id,
+      },
+      createdAt: now,
+      updatedAt: now,
+    })
+  })
+}
+
 function parseEngineMeta(rawValue = '{}') {
   try {
     const parsed = JSON.parse(rawValue || '{}')
@@ -135,15 +320,13 @@ export function normalizeCwd(input = '') {
 }
 
 export function listPromptxCodexSessions(limit = 30) {
-  const rows = all(
-    `SELECT id, title, engine, cwd, codex_thread_id, engine_session_id, engine_thread_id, engine_meta_json, created_at, updated_at
-     FROM codex_sessions
-     ORDER BY updated_at DESC
-     LIMIT ?`,
-    [Math.max(1, Number(limit) || 30)]
-  )
+  const rows = getSessionSelectRows()
+  const rootSessions = rows
+    .map(toCodexSession)
+    .filter((session) => !isHiddenProjectMember(session?.engineMeta))
+    .slice(0, Math.max(1, Number(limit) || 30))
 
-  return rows.map(toCodexSession)
+  return rootSessions.map((session) => hydrateProjectSession(session, listProjectMemberSessions(session.id, rows)))
 }
 
 export function getPromptxCodexSessionById(sessionId) {
@@ -152,48 +335,55 @@ export function getPromptxCodexSessionById(sessionId) {
     return null
   }
 
-  return toCodexSession(
-    get(
-      `SELECT id, title, engine, cwd, codex_thread_id, engine_session_id, engine_thread_id, engine_meta_json, created_at, updated_at
-       FROM codex_sessions
-       WHERE id = ?`,
-      [targetId]
-    )
+  const row = get(
+    `SELECT id, title, engine, cwd, codex_thread_id, engine_session_id, engine_thread_id, engine_meta_json, created_at, updated_at
+     FROM codex_sessions
+     WHERE id = ?`,
+    [targetId]
   )
+
+  const session = toCodexSession(row)
+  if (!session) {
+    return null
+  }
+
+  if (isHiddenProjectMember(session.engineMeta)) {
+    return session
+  }
+
+  return hydrateProjectSession(session, listProjectMemberSessions(session.id, getSessionSelectRows()))
 }
 
 export function createPromptxCodexSession(input = {}) {
   const cwd = normalizeCwd(input.cwd)
   const title = normalizeTitle(input.title, cwd)
   const engine = normalizeAgentEngine(input.engine)
+  const agentEngines = normalizeProjectAgentEngines(input.agentEngines, engine)
   const sessionId = String(input.sessionId || '').trim()
-  const sessionFields = mapSessionIdToEngine(engine, sessionId)
-  const engineMeta = sessionId
-    ? { manualSessionBinding: true }
-    : {}
   ensureAgentRunnerAvailable(engine)
+  agentEngines.forEach((item) => ensureAgentRunnerAvailable(item))
   const now = new Date().toISOString()
   const id = `pxcs_${nanoid(12)}`
 
   transaction(() => {
-    run(
-      `INSERT INTO codex_sessions (
-         id, title, engine, cwd, codex_thread_id, engine_session_id, engine_thread_id, engine_meta_json, created_at, updated_at
-       )
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        id,
-        title,
-        engine,
-        cwd,
-        sessionFields.codexThreadId,
-        sessionFields.engineSessionId,
-        sessionFields.engineThreadId,
-        JSON.stringify(engineMeta),
-        now,
-        now,
-      ]
-    )
+    createSessionRecord({
+      id,
+      title,
+      engine,
+      cwd,
+      sessionId,
+      engineMeta: {},
+      createdAt: now,
+      updatedAt: now,
+    })
+    upsertProjectMemberSessions({
+      id,
+      title,
+      engine,
+      cwd,
+    }, agentEngines, {
+      updatedAt: now,
+    })
   })
 
   return getPromptxCodexSessionById(id)
@@ -204,6 +394,7 @@ export function updatePromptxCodexSession(sessionId, patch = {}) {
   if (!existing) {
     return null
   }
+  const isProjectRoot = !isHiddenProjectMember(existing.engineMeta)
 
   const wantsCwd = Object.prototype.hasOwnProperty.call(patch, 'cwd')
   const nextCwd = wantsCwd
@@ -214,12 +405,28 @@ export function updatePromptxCodexSession(sessionId, patch = {}) {
     ? normalizeAgentEngine(patch.engine)
     : existing.engine
   ensureAgentRunnerAvailable(nextEngine)
+  const wantsAgentEngines = Object.prototype.hasOwnProperty.call(patch, 'agentEngines')
+  const nextAgentEngines = isProjectRoot && wantsAgentEngines
+    ? normalizeProjectAgentEngines(patch.agentEngines, nextEngine)
+    : (isProjectRoot
+      ? normalizeProjectAgentEngines(existing.agentBindings?.map((item) => item.engine), nextEngine)
+      : [nextEngine])
+  if (isProjectRoot) {
+    nextAgentEngines.forEach((engine) => ensureAgentRunnerAvailable(engine))
+  }
 
   if (existing.started && wantsCwd && nextCwd !== existing.cwd) {
     throw createApiError('errors.startedProjectCwdLocked', '已启动的 PromptX 项目不能直接修改工作目录。', 409)
   }
   if (existing.started && wantsEngine && nextEngine !== existing.engine) {
     throw createApiError('errors.startedProjectEngineLocked', '已启动的 PromptX 项目不能直接切换执行引擎，请新建项目。', 409)
+  }
+  if (
+    existing.started
+    && wantsAgentEngines
+    && nextAgentEngines.join('\n') !== normalizeProjectAgentEngines(existing.agentBindings?.map((item) => item.engine), existing.engine).join('\n')
+  ) {
+    throw createApiError('errors.startedProjectEngineLocked', '已启动的 PromptX 项目不能直接修改协作 Agent，请新建项目。', 409)
   }
 
   const wantsGenericSessionId = Object.prototype.hasOwnProperty.call(patch, 'sessionId')
@@ -281,6 +488,17 @@ export function updatePromptxCodexSession(sessionId, patch = {}) {
        WHERE id = ?`,
       [title, nextEngine, nextCwd, codexThreadId, engineSessionId, engineThreadId, JSON.stringify(engineMeta), updatedAt, existing.id]
     )
+
+    if (isProjectRoot) {
+      upsertProjectMemberSessions({
+        id: existing.id,
+        title,
+        engine: nextEngine,
+        cwd: nextCwd,
+      }, nextAgentEngines, {
+        updatedAt,
+      })
+    }
   })
 
   return getPromptxCodexSessionById(existing.id)
@@ -301,6 +519,20 @@ export function resetPromptxCodexSession(sessionId) {
        WHERE id = ?`,
       [updatedAt, existing.id]
     )
+
+    const memberSessions = listProjectMemberSessions(existing.id, getSessionSelectRows())
+    memberSessions.forEach((memberSession) => {
+      const nextEngineMeta = {
+        hidden: true,
+        projectRootId: existing.id,
+      }
+      run(
+        `UPDATE codex_sessions
+         SET codex_thread_id = '', engine_session_id = '', engine_thread_id = '', engine_meta_json = ?, updated_at = ?
+         WHERE id = ?`,
+        [JSON.stringify(nextEngineMeta), updatedAt, memberSession.id]
+      )
+    })
   })
 
   return getPromptxCodexSessionById(existing.id)
@@ -313,6 +545,10 @@ export function deletePromptxCodexSession(sessionId) {
   }
 
   transaction(() => {
+    const memberSessions = listProjectMemberSessions(existing.id, getSessionSelectRows())
+    memberSessions.forEach((memberSession) => {
+      run('DELETE FROM codex_sessions WHERE id = ?', [memberSession.id])
+    })
     run('DELETE FROM codex_sessions WHERE id = ?', [existing.id])
   })
 

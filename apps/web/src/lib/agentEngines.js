@@ -35,3 +35,15 @@ export async function fetchEnabledAgentEngineOptions() {
 
   return getEnabledAgentEngineOptions(payload?.agentEngineOptions)
 }
+
+export function formatAgentBindingLabel(item = {}, options = {}) {
+  const {
+    defaultLabel = '默认',
+    prefix = '',
+  } = options
+
+  const label = getAgentEngineLabel(item?.engine)
+  const baseLabel = `${String(prefix || '')}${label}`
+
+  return item?.isDefault ? `${baseLabel} · ${defaultLabel}` : baseLabel
+}

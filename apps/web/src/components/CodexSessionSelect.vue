@@ -42,6 +42,15 @@ function getRuntimeStatusClass(session) {
   return session?.running ? 'theme-status-warning' : 'theme-status-success'
 }
 
+function getEngineSummary(session) {
+  const count = Math.max(0, Number(session?.agentBindings?.length) || 0)
+  if (count > 1) {
+    return t('projectManager.agentCount', { count })
+  }
+
+  return getAgentEngineLabel(session?.engine)
+}
+
 function getOptionClass(selected) {
   return selected ? 'theme-filter-active' : 'theme-filter-idle'
 }
@@ -68,7 +77,7 @@ function getOptionClass(selected) {
             <span class="theme-muted-text ml-2 hidden font-mono text-[11px] sm:inline">{{ getSessionCwd(selectedOption) }}</span>
           </span>
           <span class="theme-status-neutral hidden items-center rounded-sm border border-dashed px-1.5 py-0.5 text-[10px] sm:inline-flex">
-            {{ getAgentEngineLabel(selectedOption.engine) }}
+            {{ getEngineSummary(selectedOption) }}
           </span>
           <span class="hidden items-center rounded-sm border border-dashed px-1.5 py-0.5 text-[10px] sm:inline-flex" :class="getRuntimeStatusClass(selectedOption)">
             {{ getRuntimeStatusLabel(selectedOption) }}
@@ -106,11 +115,11 @@ function getOptionClass(selected) {
 
             <div class="hidden items-center gap-2 text-sm sm:flex">
               <span class="min-w-0 flex-1 truncate">
-                <span class="font-medium text-[var(--theme-textPrimary)]">{{ getSessionTitle(option) }}</span>
+              <span class="font-medium text-[var(--theme-textPrimary)]">{{ getSessionTitle(option) }}</span>
                 <span class="theme-muted-text ml-2 font-mono text-[11px]">{{ getSessionCwd(option) }}</span>
               </span>
               <span class="theme-status-neutral inline-flex items-center rounded-sm border border-dashed px-1.5 py-0.5 text-[10px]">
-                {{ getAgentEngineLabel(option.engine) }}
+                {{ getEngineSummary(option) }}
               </span>
               <span class="inline-flex items-center rounded-sm border border-dashed px-1.5 py-0.5 text-[10px]" :class="getRuntimeStatusClass(option)">
                 {{ getRuntimeStatusLabel(option) }}

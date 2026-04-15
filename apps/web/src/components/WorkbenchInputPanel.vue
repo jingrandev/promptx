@@ -9,6 +9,14 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  agentBindings: {
+    type: Array,
+    default: () => [],
+  },
+  selectedAgentEngine: {
+    type: String,
+    default: '',
+  },
   codexSessionId: {
     type: String,
     default: '',
@@ -54,6 +62,7 @@ const emit = defineEmits([
   'copy-request',
   'manage-todo',
   'send-request',
+  'update:selectedAgentEngine',
 ])
 
 const blockEditorRef = ref(null)
@@ -137,7 +146,9 @@ defineExpose({
     <template #header-actions>
       <WorkbenchEditorActions
         :can-add-todo="canAddTodo"
+        :agent-bindings="agentBindings"
         :is-current-task-sending="isCurrentTaskSending"
+        :selected-agent-engine="selectedAgentEngine"
         :send-state="sendState"
         :todo-count="todoCount"
         :uploading="uploading"
@@ -147,6 +158,7 @@ defineExpose({
         @copy-request="emit('copy-request')"
         @manage-todo="emit('manage-todo')"
         @send-request="emit('send-request')"
+        @update:selected-agent-engine="emit('update:selectedAgentEngine', $event)"
       />
     </template>
   </TiptapBlockEditor>

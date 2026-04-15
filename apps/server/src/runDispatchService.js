@@ -101,6 +101,7 @@ export function createRunDispatchService(options = {}) {
   async function startTaskRunForTask(payload = {}) {
     const normalizedTaskSlug = String(payload.taskSlug || '').trim()
     const normalizedSessionId = String(payload.sessionId || '').trim()
+    const normalizedProjectSessionId = String(payload.projectSessionId || normalizedSessionId).trim()
     const normalizedPrompt = String(payload.prompt || '').trim()
     const promptBlocks = Array.isArray(payload.promptBlocks) ? payload.promptBlocks : []
 
@@ -123,9 +124,24 @@ export function createRunDispatchService(options = {}) {
     if (!session) {
       throw createApiError('errors.sessionNotFound', '没有找到对应的 PromptX 项目。', 404)
     }
+    const projectSession = normalizedProjectSessionId === normalizedSessionId
+      ? session
+      : getPromptxCodexSessionById(normalizedProjectSessionId)
+    if (!projectSession) {
+      throw createApiError('errors.sessionNotFound', '没有找到对应的 PromptX 项目。', 404)
+    }
 
-    const runningRunOnSession = getRunningCodexRunBySessionId(normalizedSessionId)
-    if (runningRunOnSession) {
+    const relatedSessionIds = new Set([
+      normalizedProjectSessionId,
+      ...((Array.isArray(projectSession.agentBindings) ? projectSession.agentBindings : [])
+        .map((item) => String(item?.sessionRecordId || '').trim())
+        .filter(Boolean)),
+    ])
+    const runningRunOnProject = [...relatedSessionIds]
+      .map((sessionId) => getRunningCodexRunBySessionId(sessionId))
+      .find(Boolean)
+
+    if (runningRunOnProject) {
       throw createApiError('errors.currentProjectRunning', '当前项目正在执行中，请等待完成后再发送。', 409)
     }
 
@@ -137,7 +153,7 @@ export function createRunDispatchService(options = {}) {
       status: 'queued',
     })
 
-    updateTaskCodexSession(normalizedTaskSlug, normalizedSessionId)
+    updateTaskCodexSession(normalizedTaskSlug, normalizedProjectSessionId)
 
     let acceptedRun = runRecord
     let runnerDispatchPending = false
@@ -210,12 +226,12 @@ export function createRunDispatchService(options = {}) {
       status: acceptedRun?.status || 'queued',
     })
     broadcastServerEvent('sessions.changed', {
-      sessionId: normalizedSessionId,
+      sessionId: normalizedProjectSessionId,
     })
 
     return {
       run: acceptedRun || getCodexRunById(runRecord.id),
-      session: decorateCodexSession(getPromptxCodexSessionById(normalizedSessionId)),
+      session: decorateCodexSession(getPromptxCodexSessionById(normalizedProjectSessionId)),
       runnerDispatchPending,
     }
   }

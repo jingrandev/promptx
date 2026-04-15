@@ -32,6 +32,16 @@ test('runEventIngest 会写入事件、同步 session 更新并推进 run 状态
       ['session-1', 'Session 1', tempDir, now, now]
     )
     run(
+      `INSERT INTO codex_sessions (id, title, engine, cwd, codex_thread_id, engine_session_id, engine_thread_id, engine_meta_json, created_at, updated_at)
+       VALUES (?, ?, 'claude-code', ?, '', 'claude-1', 'claude-1', ?, ?, ?)`,
+      ['session-2', 'Session 1', tempDir, JSON.stringify({ hidden: true, projectRootId: 'session-1' }), now, now]
+    )
+    run(
+      `INSERT INTO codex_sessions (id, title, engine, cwd, codex_thread_id, engine_session_id, engine_thread_id, engine_meta_json, created_at, updated_at)
+       VALUES (?, ?, 'opencode', ?, '', 'opencode-1', 'opencode-1', ?, ?, ?)`,
+      ['session-3', 'Session 1', tempDir, JSON.stringify({ hidden: true, projectRootId: 'session-1' }), now, now]
+    )
+    run(
       `INSERT INTO codex_runs (id, task_slug, session_id, engine, prompt, prompt_blocks_json, status, response_message, error_message, created_at, updated_at, started_at, finished_at)
        VALUES (?, ?, ?, 'codex', ?, '[]', 'queued', '', '', ?, ?, NULL, NULL)`,
       ['run-1', 'task-1', 'session-1', 'hello', now, now]
@@ -75,6 +85,17 @@ test('runEventIngest 会写入事件、同步 session 更新并推进 run 状态
     assert.equal(eventsResult.ok, true)
     assert.equal(listCodexRunEvents('run-1')?.length, 2)
     assert.equal(getPromptxCodexSessionById('session-1')?.engineThreadId, 'thread-1')
+    assert.deepEqual(
+      listCodexRunEvents('run-1')?.[0]?.payload?.session?.agentBindings?.map((item) => item.engine),
+      ['codex', 'claude-code', 'opencode']
+    )
+    assert.deepEqual(
+      broadcasts
+        .filter((item) => item.type === 'run.event' && item.runId === 'run-1')
+        .map((item) => item.event?.payload?.session?.agentBindings?.map((binding) => binding.engine))
+        .find(Boolean),
+      ['codex', 'claude-code', 'opencode']
+    )
 
     const runningRun = ingest.ingestStatus({
       runId: 'run-1',
@@ -102,6 +123,7 @@ test('runEventIngest 会写入事件、同步 session 更新并推进 run 状态
     assert.equal(completedRun?.status, 'completed')
     assert.equal(storedRun?.status, 'completed')
     assert.equal(storedRun?.responseMessage, 'done')
+    assert.equal(getPromptxCodexSessionById('session-1')?.engineThreadId, 'thread-1')
     assert.ok(broadcasts.some((item) => item.type === 'run.event' && item.runId === 'run-1'))
     assert.ok(broadcasts.some((item) => item.type === 'runs.changed' && item.runId === 'run-1'))
     assert.ok(broadcasts.some((item) => item.type === 'sessions.changed' && item.sessionId === 'session-1'))

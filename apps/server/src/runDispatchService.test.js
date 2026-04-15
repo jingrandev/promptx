@@ -299,3 +299,122 @@ test('runDispatchService adapts local image base url for claude dev server port'
   assert.equal(runnerPayload?.prompt, '看图：http://127.0.0.1:3001/uploads/demo-2.png')
   assert.equal(runnerPayload?.promptBlocks?.[0]?.content, 'http://127.0.0.1:3001/uploads/demo-2.png')
 })
+
+test('runDispatchService 在多 agent 项目中把 run 绑定到实际 member session，并回写 root 项目 session', async () => {
+  let createdRunPayload = null
+  let updatedTaskSession = null
+  let runnerPayload = null
+  const rootSession = {
+    id: 'project-root',
+    engine: 'codex',
+    cwd: '/tmp/demo',
+    title: 'Multi Agent Project',
+    codexThreadId: '',
+    engineSessionId: '',
+    engineThreadId: '',
+    engineMeta: {},
+    createdAt: '2026-03-22T00:00:00.000Z',
+    updatedAt: '2026-03-22T00:00:00.000Z',
+    agentBindings: [
+      { engine: 'codex', sessionRecordId: 'project-root', isDefault: true },
+      { engine: 'claude-code', sessionRecordId: 'member-claude', isDefault: false },
+      { engine: 'opencode', sessionRecordId: 'member-opencode', isDefault: false },
+    ],
+  }
+  const memberClaudeSession = {
+    id: 'member-claude',
+    engine: 'claude-code',
+    cwd: '/tmp/demo',
+    title: 'Multi Agent Project',
+    codexThreadId: '',
+    engineSessionId: 'claude-existing',
+    engineThreadId: 'claude-existing',
+    engineMeta: {
+      hidden: true,
+      projectRootId: 'project-root',
+    },
+    createdAt: '2026-03-22T00:00:00.000Z',
+    updatedAt: '2026-03-22T00:00:00.000Z',
+  }
+
+  const service = createRunDispatchService({
+    createCodexRun(payload = {}) {
+      createdRunPayload = payload
+      return {
+        id: 'run-member-1',
+        taskSlug: payload.taskSlug,
+        sessionId: payload.sessionId,
+        status: payload.status || 'queued',
+      }
+    },
+    decorateCodexSession(session) {
+      return {
+        ...session,
+        running: false,
+      }
+    },
+    getCodexRunById() {
+      return {
+        id: 'run-member-1',
+        status: 'queued',
+      }
+    },
+    getPromptxCodexSessionById(sessionId) {
+      if (sessionId === 'project-root') {
+        return rootSession
+      }
+      if (sessionId === 'member-claude') {
+        return memberClaudeSession
+      }
+      return null
+    },
+    getRunningCodexRunBySessionId() {
+      return null
+    },
+    getTaskBySlug() {
+      return {
+        slug: 'task-1',
+        expired: false,
+      }
+    },
+    logger: {
+      warn() {},
+    },
+    runnerClient: {
+      async startRun(payload = {}) {
+        runnerPayload = payload
+        return {
+          status: 'queued',
+        }
+      },
+    },
+    updateCodexRunFromRunnerStatus(_runId, patch = {}) {
+      return {
+        id: 'run-member-1',
+        taskSlug: 'task-1',
+        sessionId: createdRunPayload?.sessionId || 'member-claude',
+        status: patch.status || 'queued',
+      }
+    },
+    updateTaskCodexSession(taskSlug, sessionId) {
+      updatedTaskSession = { taskSlug, sessionId }
+    },
+  })
+
+  const result = await service.startTaskRunForTask({
+    taskSlug: 'task-1',
+    sessionId: 'member-claude',
+    projectSessionId: 'project-root',
+    prompt: 'hello',
+    promptBlocks: [],
+  })
+
+  assert.equal(createdRunPayload?.sessionId, 'member-claude')
+  assert.equal(updatedTaskSession?.taskSlug, 'task-1')
+  assert.equal(updatedTaskSession?.sessionId, 'project-root')
+  assert.equal(runnerPayload?.sessionId, 'member-claude')
+  assert.equal(runnerPayload?.engine, 'claude-code')
+  assert.equal(runnerPayload?.engineSessionId, 'claude-existing')
+  assert.equal(result?.run?.sessionId, 'member-claude')
+  assert.equal(result?.session?.id, 'project-root')
+})
