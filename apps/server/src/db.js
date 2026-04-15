@@ -231,6 +231,7 @@ function migrateToV1() {
       task_slug TEXT NOT NULL,
       session_id TEXT NOT NULL,
       engine TEXT NOT NULL DEFAULT 'codex',
+      run_meta_json TEXT NOT NULL DEFAULT '{}',
       prompt TEXT NOT NULL DEFAULT '',
       prompt_blocks_json TEXT NOT NULL DEFAULT '[]',
       status TEXT NOT NULL,
@@ -356,6 +357,7 @@ function applyAdditiveSchemaPatches() {
      WHERE COALESCE(NULLIF(engine_thread_id, ''), '') = ''`,
     `ALTER TABLE codex_runs ADD COLUMN prompt_blocks_json TEXT NOT NULL DEFAULT '[]'`,
     `ALTER TABLE codex_runs ADD COLUMN engine TEXT NOT NULL DEFAULT 'codex'`,
+    `ALTER TABLE codex_runs ADD COLUMN run_meta_json TEXT NOT NULL DEFAULT '{}'`,
     `UPDATE codex_runs
      SET engine = COALESCE(NULLIF(engine, ''), 'codex')
      WHERE COALESCE(NULLIF(engine, ''), '') = ''`,

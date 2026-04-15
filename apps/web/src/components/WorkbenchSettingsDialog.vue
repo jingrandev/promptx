@@ -60,6 +60,7 @@ const relayForm = reactive({
   relayUrl: '',
   deviceId: '',
   deviceToken: '',
+  allowRemoteShell: false,
 })
 const systemForm = reactive({
   runnerMaxConcurrentRuns: 3,
@@ -275,6 +276,7 @@ const relayDiagnosticsText = computed(() => {
       relayUrl: relayForm.relayUrl,
       deviceId: relayForm.deviceId,
       deviceTokenMasked: maskedToken,
+      allowRemoteShell: relayForm.allowRemoteShell,
       managedByEnv: relayManagedByEnv.value,
     },
     status: relayStatus.value || null,
@@ -402,6 +404,7 @@ function syncRelayForm(payload = {}) {
   relayForm.relayUrl = String(payload?.relayUrl || '')
   relayForm.deviceId = String(payload?.deviceId || '')
   relayForm.deviceToken = String(payload?.deviceToken || '')
+  relayForm.allowRemoteShell = Boolean(payload?.allowRemoteShell)
 }
 
 function syncSystemForm(payload = {}) {
@@ -475,6 +478,7 @@ async function handleSaveRelay() {
       relayUrl: relayForm.relayUrl,
       deviceId: relayForm.deviceId,
       deviceToken: relayForm.deviceToken,
+      allowRemoteShell: relayForm.allowRemoteShell,
     })
     syncRelayForm(payload?.config || {})
     relayManagedByEnv.value = Boolean(payload?.managedByEnv)
@@ -559,6 +563,7 @@ async function handleToggleRelayEnabled() {
       relayUrl: relayForm.relayUrl,
       deviceId: relayForm.deviceId,
       deviceToken: relayForm.deviceToken,
+      allowRemoteShell: relayForm.allowRemoteShell,
     })
     syncRelayForm(payload?.config || {})
     relayManagedByEnv.value = Boolean(payload?.managedByEnv)
@@ -883,6 +888,23 @@ onBeforeUnmount(() => {
                     </div>
                   </label>
                 </div>
+
+                <label class="settings-form-card flex items-center justify-between gap-3 px-3 py-2">
+                  <div>
+                    <div class="text-sm font-medium text-[var(--theme-textPrimary)]">{{ t('settingsDialog.relay.allowRemoteShellTitle') }}</div>
+                    <p class="theme-muted-text mt-1 text-xs">{{ t('settingsDialog.relay.allowRemoteShellDescription') }}</p>
+                  </div>
+                  <input
+                    v-model="relayForm.allowRemoteShell"
+                    type="checkbox"
+                    class="h-4 w-4"
+                    :disabled="relayManagedByEnv"
+                  />
+                </label>
+
+                <p class="theme-status-warning theme-note-text">
+                  {{ t('settingsDialog.relay.allowRemoteShellWarning') }}
+                </p>
 
                 <div class="settings-form-footer flex flex-wrap items-center justify-between gap-3">
                   <div class="min-w-0 space-y-1">

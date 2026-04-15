@@ -76,17 +76,21 @@ function normalizeMaxConcurrentRuns(value, fallback = DEFAULT_MAX_CONCURRENT_RUN
 }
 
 function normalizeSession(payload = {}) {
+  const engine = String(payload.engine || '').trim() || 'codex'
+  const isShellEngine = engine === 'shell'
   return {
     id: String(payload.sessionId || payload.id || '').trim(),
     title: String(payload.sessionTitle || payload.title || '').trim(),
-    engine: String(payload.engine || '').trim() || 'codex',
+    engine,
     cwd: String(payload.cwd || '').trim(),
-    codexThreadId: String(payload.codexThreadId || payload.engineThreadId || '').trim(),
-    engineSessionId: String(payload.engineSessionId || '').trim(),
-    engineThreadId: String(payload.engineThreadId || payload.codexThreadId || '').trim(),
-    engineMeta: payload.engineMeta && typeof payload.engineMeta === 'object' ? payload.engineMeta : {},
+    codexThreadId: isShellEngine ? '' : String(payload.codexThreadId || payload.engineThreadId || '').trim(),
+    engineSessionId: isShellEngine ? '' : String(payload.engineSessionId || '').trim(),
+    engineThreadId: isShellEngine ? '' : String(payload.engineThreadId || payload.codexThreadId || '').trim(),
+    engineMeta: isShellEngine
+      ? {}
+      : (payload.engineMeta && typeof payload.engineMeta === 'object' ? payload.engineMeta : {}),
     running: true,
-    started: Boolean(String(payload.engineThreadId || payload.codexThreadId || '').trim()),
+    started: isShellEngine ? false : Boolean(String(payload.engineThreadId || payload.codexThreadId || '').trim()),
     createdAt: String(payload.sessionCreatedAt || '').trim(),
     updatedAt: String(payload.sessionUpdatedAt || '').trim(),
   }
@@ -522,6 +526,11 @@ export function createRunManager(options = {}) {
   }
 
   async function handleStreamError(context, error) {
+    const errorOutput = String(error?.output || '').trim()
+    const errorMessage = [String(error?.message || '执行引擎运行失败。').trim(), errorOutput]
+      .filter(Boolean)
+      .join('\n\n')
+
     if (context.stopRequestedAt) {
       const stopReason = classifyStoppedErrorReason(context)
       await finalizeRun(context, 'stopped', {
@@ -535,7 +544,7 @@ export function createRunManager(options = {}) {
     }
 
     await finalizeRun(context, 'error', {
-      errorMessage: error?.message || '执行引擎运行失败。',
+      errorMessage,
     })
   }
 

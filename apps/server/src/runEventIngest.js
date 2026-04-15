@@ -8,26 +8,28 @@ import {
 import { getPromptxCodexSessionById, updatePromptxCodexSession } from './codexSessions.js'
 
 function toSafeSessionPatch(session = {}) {
+  const isShellEngine = String(session?.engine || '').trim().toLowerCase() === 'shell'
   const hasIdentityPatch = [
     'codexThreadId',
     'engineSessionId',
     'engineThreadId',
   ].some((key) => Object.prototype.hasOwnProperty.call(session, key))
+    && !isShellEngine
 
   return {
     ...(Object.prototype.hasOwnProperty.call(session, 'title')
       ? { title: session.title }
       : {}),
-    ...(Object.prototype.hasOwnProperty.call(session, 'codexThreadId')
+    ...(!isShellEngine && Object.prototype.hasOwnProperty.call(session, 'codexThreadId')
       ? { codexThreadId: session.codexThreadId }
       : {}),
-    ...(Object.prototype.hasOwnProperty.call(session, 'engineSessionId')
+    ...(!isShellEngine && Object.prototype.hasOwnProperty.call(session, 'engineSessionId')
       ? { engineSessionId: session.engineSessionId }
       : {}),
-    ...(Object.prototype.hasOwnProperty.call(session, 'engineThreadId')
+    ...(!isShellEngine && Object.prototype.hasOwnProperty.call(session, 'engineThreadId')
       ? { engineThreadId: session.engineThreadId }
       : {}),
-    ...(Object.prototype.hasOwnProperty.call(session, 'engineMeta')
+    ...(!isShellEngine && Object.prototype.hasOwnProperty.call(session, 'engineMeta')
       ? { engineMeta: session.engineMeta }
       : {}),
     ...(hasIdentityPatch

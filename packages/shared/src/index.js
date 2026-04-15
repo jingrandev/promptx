@@ -44,6 +44,12 @@ export const BLOCK_TYPES = {
   IMPORTED_TEXT: 'imported_text',
 }
 
+export {
+  extractShellCommandIntent,
+  isShellCommandPrompt,
+  normalizeShellPromptPrefix,
+} from './shellCommands.js'
+
 export const BLOCK_TYPE_LABELS = {
   [BLOCK_TYPES.TEXT]: '文本',
   [BLOCK_TYPES.IMAGE]: '图片',

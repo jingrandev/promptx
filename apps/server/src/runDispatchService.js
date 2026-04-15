@@ -2,6 +2,7 @@ import {
   extractRunnerDispatchPatch,
   reconcileRunAfterRunnerDispatchError,
 } from './runnerDispatch.js'
+import { extractShellCommandIntent } from '../../../packages/shared/src/index.js'
 import { createApiError } from './apiErrors.js'
 
 function normalizeBaseUrl(value = '') {
@@ -82,6 +83,11 @@ function buildRunnerPromptPayload(session = {}, input = {}, options = {}) {
   }
 }
 
+function normalizeCommandMode(value = '') {
+  const normalized = String(value || '').trim().toLowerCase()
+  return normalized === 'shell' ? 'shell' : ''
+}
+
 export function createRunDispatchService(options = {}) {
   const runnerClient = options.runnerClient
   const logger = options.logger || console
@@ -100,19 +106,37 @@ export function createRunDispatchService(options = {}) {
 
   async function startTaskRunForTask(payload = {}) {
     const normalizedTaskSlug = String(payload.taskSlug || '').trim()
-    const normalizedSessionId = String(payload.sessionId || '').trim()
-    const normalizedProjectSessionId = String(payload.projectSessionId || normalizedSessionId).trim()
+    const requestedSessionId = String(payload.sessionId || '').trim()
+    const normalizedProjectSessionId = String(payload.projectSessionId || requestedSessionId).trim()
     const normalizedPrompt = String(payload.prompt || '').trim()
     const promptBlocks = Array.isArray(payload.promptBlocks) ? payload.promptBlocks : []
+    const displayEngine = String(payload.displayEngine || '').trim()
+    const requestedCommandMode = normalizeCommandMode(payload.commandMode)
+    const shellIntent = extractShellCommandIntent({
+      prompt: normalizedPrompt,
+      promptBlocks,
+    })
+    const commandMode = shellIntent.mode === 'shell' ? 'shell' : ''
+    const normalizedCommand = commandMode === 'shell' ? shellIntent.command : ''
+    const allowShellCommand = payload.allowShellCommand === true
 
     if (!normalizedTaskSlug) {
       throw createApiError('errors.taskNotFound', '任务不存在。', 404)
     }
-    if (!normalizedSessionId) {
+    if (!requestedSessionId) {
       throw createApiError('errors.sessionRequired', '请先选择一个 PromptX 项目。')
     }
     if (!normalizedPrompt) {
       throw createApiError('errors.noPromptToSend', '没有可发送的提示词。')
+    }
+    if (requestedCommandMode === 'shell' && shellIntent.reason === 'unsupported_blocks') {
+      throw createApiError('errors.shellUnsupportedBlocks', '命令模式暂不支持图片或导入文件，请只保留纯文本命令。', 400)
+    }
+    if (requestedCommandMode === 'shell' && shellIntent.reason === 'empty_command') {
+      throw createApiError('errors.shellEmptyCommand', '请输入要执行的命令，例如 !git status', 400)
+    }
+    if (commandMode === 'shell' && !allowShellCommand) {
+      throw createApiError('errors.shellLocalOnly', '命令模式默认仅允许在本机本地界面中使用；如需对远程访问开放，请先到设置里显式开启。', 403)
     }
 
     const task = getTaskBySlug(normalizedTaskSlug)
@@ -120,16 +144,18 @@ export function createRunDispatchService(options = {}) {
       throw createApiError('errors.taskNotFound', '任务不存在。', 404)
     }
 
-    const session = getPromptxCodexSessionById(normalizedSessionId)
-    if (!session) {
+    const requestedSession = getPromptxCodexSessionById(requestedSessionId)
+    if (!requestedSession) {
       throw createApiError('errors.sessionNotFound', '没有找到对应的 PromptX 项目。', 404)
     }
-    const projectSession = normalizedProjectSessionId === normalizedSessionId
-      ? session
+    const projectSession = normalizedProjectSessionId === requestedSessionId
+      ? requestedSession
       : getPromptxCodexSessionById(normalizedProjectSessionId)
     if (!projectSession) {
       throw createApiError('errors.sessionNotFound', '没有找到对应的 PromptX 项目。', 404)
     }
+    const session = commandMode === 'shell' ? projectSession : requestedSession
+    const normalizedSessionId = String(session?.id || '').trim()
 
     const relatedSessionIds = new Set([
       normalizedProjectSessionId,
@@ -145,11 +171,16 @@ export function createRunDispatchService(options = {}) {
       throw createApiError('errors.currentProjectRunning', '当前项目正在执行中，请等待完成后再发送。', 409)
     }
 
+    const runEngine = commandMode === 'shell' ? 'shell' : (session.engine || 'codex')
+    const runnerPrompt = commandMode === 'shell' ? normalizedCommand : normalizedPrompt
+
     const runRecord = createCodexRun({
       taskSlug: normalizedTaskSlug,
       sessionId: normalizedSessionId,
       prompt: normalizedPrompt,
       promptBlocks,
+      engine: runEngine,
+      displayEngine,
       status: 'queued',
     })
 
@@ -160,7 +191,7 @@ export function createRunDispatchService(options = {}) {
 
     try {
       const runnerPromptPayload = buildRunnerPromptPayload(session, {
-        prompt: normalizedPrompt,
+        prompt: runnerPrompt,
         promptBlocks,
       }, {
         localServerBaseUrl,
@@ -172,15 +203,15 @@ export function createRunDispatchService(options = {}) {
         runId: runRecord.id,
         taskSlug: normalizedTaskSlug,
         sessionId: normalizedSessionId,
-        engine: session.engine,
+        engine: runEngine,
         prompt: runnerPromptPayload.prompt,
         promptBlocks: runnerPromptPayload.promptBlocks,
         cwd: session.cwd,
         title: session.title,
-        codexThreadId: session.codexThreadId,
-        engineSessionId: session.engineSessionId,
-        engineThreadId: session.engineThreadId,
-        engineMeta: session.engineMeta,
+        codexThreadId: commandMode === 'shell' ? '' : session.codexThreadId,
+        engineSessionId: commandMode === 'shell' ? '' : session.engineSessionId,
+        engineThreadId: commandMode === 'shell' ? '' : session.engineThreadId,
+        engineMeta: commandMode === 'shell' ? {} : session.engineMeta,
         sessionCreatedAt: session.createdAt,
         sessionUpdatedAt: session.updatedAt,
       })

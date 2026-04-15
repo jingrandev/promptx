@@ -14,6 +14,9 @@ function normalizeRelayConfig(input = {}) {
   const relayUrl = String(input?.relayUrl || '').trim()
   const deviceId = String(input?.deviceId || '').trim()
   const deviceToken = String(input?.deviceToken || '').trim()
+  const allowRemoteShell = typeof input?.allowRemoteShell === 'boolean'
+    ? input.allowRemoteShell
+    : ['1', 'true', 'on', 'yes'].includes(String(input?.allowRemoteShell || '').trim().toLowerCase())
   const enabled = typeof input?.enabled === 'boolean'
     ? input.enabled
     : !['0', 'false', 'off', 'no'].includes(String(input?.enabled || '').trim().toLowerCase())
@@ -22,6 +25,7 @@ function normalizeRelayConfig(input = {}) {
     relayUrl,
     deviceId,
     deviceToken,
+    allowRemoteShell,
     enabled: Boolean(enabled && relayUrl && deviceId && deviceToken),
   }
 }
@@ -49,6 +53,7 @@ function getRelayConfigForClient() {
   const relayUrl = String(process.env.PROMPTX_RELAY_URL || stored.relayUrl || '').trim()
   const deviceId = String(process.env.PROMPTX_RELAY_DEVICE_ID || stored.deviceId || '').trim()
   const deviceToken = String(process.env.PROMPTX_RELAY_DEVICE_TOKEN || stored.deviceToken || '').trim()
+  const envAllowRemoteShell = String(process.env.PROMPTX_RELAY_ALLOW_REMOTE_SHELL || '').trim()
   const envEnabled = String(process.env.PROMPTX_RELAY_ENABLED || '').trim()
   const managedByEnv = isRelayConfigManagedByEnv()
   const enabled = envEnabled
@@ -56,11 +61,15 @@ function getRelayConfigForClient() {
     : managedByEnv
       ? Boolean(relayUrl && deviceId && deviceToken)
       : Boolean(stored.enabled)
+  const allowRemoteShell = envAllowRemoteShell
+    ? ['1', 'true', 'on', 'yes'].includes(envAllowRemoteShell.toLowerCase())
+    : Boolean(stored.allowRemoteShell)
 
   return normalizeRelayConfig({
     relayUrl,
     deviceId,
     deviceToken,
+    allowRemoteShell,
     enabled,
   })
 }
@@ -70,6 +79,7 @@ function isRelayConfigManagedByEnv() {
     String(process.env.PROMPTX_RELAY_URL || '').trim()
     || String(process.env.PROMPTX_RELAY_DEVICE_ID || '').trim()
     || String(process.env.PROMPTX_RELAY_DEVICE_TOKEN || '').trim()
+    || String(process.env.PROMPTX_RELAY_ALLOW_REMOTE_SHELL || '').trim()
     || String(process.env.PROMPTX_RELAY_ENABLED || '').trim()
   )
 }

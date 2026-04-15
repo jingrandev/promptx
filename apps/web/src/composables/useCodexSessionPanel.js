@@ -44,10 +44,12 @@ export {
   formatCodexIssueMessage,
   formatElapsedDuration,
   getProcessStatus,
+  getTurnAgentLabel,
   getTurnSummaryDetail,
   getTurnSummaryItems,
   getTurnSummaryStatus,
   hasTurnSummary,
+  isShellTurn,
   sortSessions,
   syncTurnStateFromRun,
 } from './codexSessionPanelTurns.js'

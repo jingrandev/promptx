@@ -12,10 +12,12 @@ import {
   formatCodexEvent,
   getStoredProcessVisibility,
   getProcessStatus,
+  getTurnAgentLabel,
   getTurnSummaryDetail,
   getTurnSummaryItems,
   getTurnSummaryStatus,
   hasTurnSummary,
+  isShellTurn,
   mergeCodexSessionRecord,
   normalizeStoredProcessVisibility,
   sortSessions,
@@ -57,6 +59,21 @@ test('sortSessions prioritizes running then current then updatedAt', () => {
   ], 'current')
 
   assert.deepEqual(sessions.map((item) => item.id), ['running', 'current', 'old'])
+})
+
+test('shell turns use displayEngine as visible agent label', () => {
+  const turn = createTurnFromRun({
+    id: 'run-shell-1',
+    engine: 'shell',
+    displayEngine: 'claude-code',
+    prompt: '!git status',
+    status: 'completed',
+  }, () => 'turn-shell-1', () => 'log-shell-1', () => {})
+
+  assert.equal(isShellTurn(turn), true)
+  assert.equal(turn.engine, 'shell')
+  assert.equal(turn.displayEngine, 'claude-code')
+  assert.equal(getTurnAgentLabel(turn), 'Claude Code')
 })
 
 test('formatCodexEvent formats command completion details', () => {

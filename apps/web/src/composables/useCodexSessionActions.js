@@ -1,4 +1,5 @@
 import { computed } from 'vue'
+import { extractShellCommandIntent } from '../../../../packages/shared/src/index.js'
 import {
   createCodexSession,
   createTaskCodexRun,
@@ -316,6 +317,22 @@ export function useCodexSessionActions(options = {}) {
       const promptBlocks = typeof props.buildPromptBlocks === 'function'
         ? await props.buildPromptBlocks()
         : []
+      const shellIntent = extractShellCommandIntent({
+        prompt,
+        promptBlocks,
+      })
+
+      if (shellIntent.reason) {
+        const shellIntentReason = shellIntent.reason === 'unsupported_blocks'
+          ? translate('sessionPanel.shellUnsupportedBlocks')
+          : translate('sessionPanel.shellEmptyCommand')
+        sessionError.value = shellIntentReason
+        showToast?.({
+          message: shellIntentReason,
+          type: 'warning',
+        })
+        return false
+      }
 
       if (!String(prompt || '').trim()) {
         sessionError.value = translate('sessionTurns.noPromptToSend')
@@ -335,12 +352,19 @@ export function useCodexSessionActions(options = {}) {
       }
 
       const nextBinding = currentBinding
-      const targetSessionId = String(nextBinding?.sessionRecordId || selectedSessionId.value).trim()
+      const targetSessionId = String(
+        shellIntent.mode === 'shell'
+          ? selectedSessionId.value
+          : (nextBinding?.sessionRecordId || selectedSessionId.value)
+      ).trim()
       const result = await createTaskCodexRun(props.taskSlug, {
         projectSessionId: selectedSessionId.value,
         sessionId: targetSessionId,
-        prompt,
+        displayEngine: currentEngine,
+        prompt: shellIntent.mode === 'shell' ? shellIntent.prompt : prompt,
         promptBlocks,
+        commandMode: shellIntent.mode,
+        command: shellIntent.command,
       })
       applyCreatedRun(result)
       if (typeof props.afterSend === 'function') {

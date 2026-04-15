@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.1
+
+- 新增工作台 `shell` 命令模式：在右侧编辑区输入 `!pwd`、`!git status`、`!pnpm test` 这类纯文本命令时，PromptX 会直接按当前选中的 `Codex / Claude Code / OpenCode` 语义发起本地命令执行，并把结果继续收拢回原有的 `PromptX → Agent / Agent` 对话流，不额外引入一套独立的 Shell 卡片心智。
+- 收紧命令模式的安全边界与展示逻辑：命令意图改为由服务端重新解析，不再信任前端直传命令；shell run 固定绑定 root project session，避免污染 member session 的 thread/identity；默认仅本机可用，Relay 需在设置里显式开启“允许远程执行命令模式”后，且仅对带内部标记的 relay 转发请求放行。
+- 为远程命令模式补齐配置与回归测试：Relay 设置页新增高权限开关与明确警告，诊断信息也会带上该配置；同时新增本地允许、远程默认拒绝、仅 relay 显式开启可用、环境变量覆盖等测试，降低后续回归风险。
+- 修复 runner 大事件上报导致任务卡死的问题：内部 runner events 接口提高了 body limit，避免长过程日志或大批量事件刷新时触发 `Request body is too large`，导致一轮任务停在中间。
+- 改进代码变更审查对 Git submodule 的支持：代码变更与 diff review 现在会展开 submodule 内部的真实文件改动，而不再只显示顶层 submodule 占位项；相关任务级、轮次级与子文件明细链路都已补齐测试。
+- 补充开发环境的 `Vite allowedHosts` 配置，方便在代理、局域网或特定本地域名下更稳定地访问工作台开发服务。
+
 ## 0.2.0
 
 - 项目正式升级为多 Agent 协作模型：一个项目可同时绑定 `Codex / Claude Code / OpenCode`，右侧可直接切换本轮发送目标，中栏也支持按 Agent 过滤整轮消息流，适合同一任务里拆分“方案 / 执行 / 复核”等分工。

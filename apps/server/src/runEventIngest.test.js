@@ -155,3 +155,71 @@ test('runEventIngest 会写入事件、同步 session 更新并推进 run 状态
     }
   }
 })
+
+test('runEventIngest 忽略 shell session 的身份字段补丁', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-run-ingest-shell-'))
+  const originalCwd = process.cwd()
+  const originalDataDir = process.env.PROMPTX_DATA_DIR
+  const dataDir = path.join(tempDir, 'data')
+  fs.mkdirSync(dataDir, { recursive: true })
+  process.chdir(tempDir)
+  process.env.PROMPTX_DATA_DIR = dataDir
+
+  try {
+    const suffix = `test=${Date.now()}-${Math.random().toString(36).slice(2)}`
+    const { get, run } = await import(`./db.js?${suffix}`)
+    const { createRunEventIngestService } = await import(`./runEventIngest.js?${suffix}`)
+
+    const now = new Date().toISOString()
+    const sessionId = 'session-shell-only'
+    const taskSlug = 'task-shell-only'
+    const runId = 'run-shell-only'
+    run(
+      `INSERT INTO tasks (slug, edit_token, title, auto_title, last_prompt_preview, codex_session_id, visibility, expires_at, created_at, updated_at)
+       VALUES (?, ?, '', '', '', ?, 'private', NULL, ?, ?)`,
+      [taskSlug, 'token-shell', sessionId, now, now]
+    )
+    run(
+      `INSERT INTO codex_sessions (id, title, engine, cwd, codex_thread_id, engine_session_id, engine_thread_id, engine_meta_json, created_at, updated_at)
+       VALUES (?, ?, 'codex', ?, ?, '', ?, '{}', ?, ?)`,
+      [sessionId, 'Session 1', tempDir, 'thread-original', 'thread-original', now, now]
+    )
+    run(
+      `INSERT INTO codex_runs (id, task_slug, session_id, engine, prompt, prompt_blocks_json, status, response_message, error_message, created_at, updated_at, started_at, finished_at)
+       VALUES (?, ?, ?, 'shell', ?, '[]', 'queued', '', '', ?, ?, NULL, NULL)`,
+      [runId, taskSlug, sessionId, '!pwd', now, now]
+    )
+
+    const ingest = createRunEventIngestService()
+    ingest.ingestStatus({
+      runId,
+      status: 'completed',
+      responseMessage: '/tmp/demo',
+      finishedAt: now,
+      heartbeatAt: now,
+      session: {
+        id: sessionId,
+        engine: 'shell',
+        codexThreadId: 'thread-shell-overwrite',
+        engineThreadId: 'thread-shell-overwrite',
+        updatedAt: now,
+      },
+    })
+
+    const row = get(
+      `SELECT codex_thread_id, engine_thread_id
+       FROM codex_sessions
+       WHERE id = ?`,
+      [sessionId]
+    )
+    assert.equal(row?.codex_thread_id, 'thread-original')
+    assert.equal(row?.engine_thread_id, 'thread-original')
+  } finally {
+    process.chdir(originalCwd)
+    if (typeof originalDataDir === 'string') {
+      process.env.PROMPTX_DATA_DIR = originalDataDir
+    } else {
+      delete process.env.PROMPTX_DATA_DIR
+    }
+  }
+})

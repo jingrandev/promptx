@@ -90,6 +90,14 @@ function formatCount(value = 0) {
   return number.toLocaleString(getCurrentLocale())
 }
 
+function isShellEngineValue(value = '') {
+  return String(value || '').trim().toLowerCase() === 'shell'
+}
+
+function getDisplayEngineLabel(engine = '') {
+  return isShellEngineValue(engine) ? text('Shell', 'Shell') : getAgentEngineLabel(engine)
+}
+
 function normalizeCollabAgentStatus(value = '') {
   const normalized = String(value || '').trim().toLowerCase()
   if (['completed', 'complete', 'succeeded', 'success', 'done'].includes(normalized)) {
@@ -444,7 +452,7 @@ function buildCommandDetailBlocks(item = {}, includeOutput = false, engine = 'co
     todoChecklistBlock || parsed.category !== 'shell'
       ? null
       : (parsed.subject ? { label: text('命令', 'Command'), value: parsed.subject } : (item.command ? { label: text('命令', 'Command'), value: item.command } : null)),
-    engine && engine !== 'codex' ? { label: text('引擎', 'Engine'), value: getAgentEngineLabel(engine) } : null,
+    engine && engine !== 'codex' ? { label: text('引擎', 'Engine'), value: getDisplayEngineLabel(engine) } : null,
     hasExplicitExitCode && !isSuccessful ? { label: text('退出码', 'Exit code'), value: String(item.exit_code) } : null,
   ])
 
@@ -539,6 +547,13 @@ export function applyRunEventsPayloadToTurns(turnList, runId, payload, nextLogId
 }
 
 export function getTurnAgentEngine(turn = {}) {
+  const displayEngine = String(turn?.displayEngine || '').trim()
+  if (displayEngine) {
+    return normalizeAgentEngine(displayEngine)
+  }
+  if (isShellEngineValue(turn?.engine)) {
+    return 'codex'
+  }
   return normalizeAgentEngine(turn?.engine)
 }
 
@@ -546,11 +561,18 @@ export function getTurnAgentLabel(turn = {}) {
   return getAgentEngineLabel(getTurnAgentEngine(turn))
 }
 
+export function isShellTurn(turn = {}) {
+  return isShellEngineValue(turn?.engine)
+}
+
 export function isTurnActiveStatus(status = '') {
   return ACTIVE_TURN_STATUSES.has(String(status || '').trim())
 }
 
 function getAgentCliCommand(engine = 'codex') {
+  if (isShellEngineValue(engine)) {
+    return '!git status'
+  }
   const normalized = normalizeAgentEngine(engine)
   if (normalized === 'claude-code') {
     return 'claude --version'
@@ -562,7 +584,7 @@ function getAgentCliCommand(engine = 'codex') {
 }
 
 function getAgentFailureText(engine = 'codex') {
-  return text(`${getAgentEngineLabel(engine)} 执行失败`, `${getAgentEngineLabel(engine)} failed`)
+  return text(`${getDisplayEngineLabel(engine)} 执行失败`, `${getDisplayEngineLabel(engine)} failed`)
 }
 
 function parseCodexRetryMessage(message = '') {
@@ -1496,7 +1518,8 @@ function createBaseTurn(run = {}, nextTurnId) {
   return {
     id: nextTurnId(),
     runId: String(run.id || '').trim(),
-    engine: getTurnAgentEngine(run),
+    engine: String(run.engine || '').trim(),
+    displayEngine: String(run.displayEngine || '').trim(),
     prompt: String(run.prompt || '').trim(),
     promptBlocks,
     status: 'completed',
@@ -1551,13 +1574,11 @@ export function applyRunPayloadToTurn(turn, payload = {}, nextLogId, mergeSessio
 
   if (envelopeType === AGENT_RUN_ENVELOPE_EVENT_TYPES.SESSION) {
     mergeSession(payload.session)
-    turn.engine = getTurnAgentEngine(payload.session || turn)
     return
   }
 
   if (envelopeType === AGENT_RUN_ENVELOPE_EVENT_TYPES.SESSION_UPDATED) {
     mergeSession(payload.session)
-    turn.engine = getTurnAgentEngine(payload.session || turn)
     return
   }
 

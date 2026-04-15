@@ -22,6 +22,7 @@ import { useI18n } from '../composables/useI18n.js'
 import { useAsyncRenderedMarkdown } from '../composables/useAsyncRenderedMarkdown.js'
 import { useCodeSelectionAction } from '../composables/useCodeSelectionAction.js'
 import { useCodexSessionPanel } from '../composables/useCodexSessionPanel.js'
+import { getTurnAgentEngine, isShellTurn } from '../composables/codexSessionPanelTurns.js'
 import { useCodexTranscriptCollapse } from '../composables/useCodexTranscriptCollapse.js'
 import { useTheme } from '../composables/useTheme.js'
 import { formatAgentBindingLabel } from '../lib/agentEngines.js'
@@ -172,7 +173,7 @@ const filteredTurns = computed(() => {
     return turns.value
   }
 
-  return turns.value.filter((turn) => String(turn?.engine || '').trim() === filter)
+  return turns.value.filter((turn) => getTurnAgentEngine(turn) === filter)
 })
 
 const {
@@ -240,6 +241,16 @@ function shouldHideSystemEvent(item = {}) {
     /^本轮执行结束$/,
     /^Run finished$/,
   ].some((pattern) => pattern.test(title))
+}
+
+function getTurnPromptTitle(turn = {}) {
+  return t('sessionPanel.promptTitleWithAgent', { agent: getTurnAgentLabel(turn) })
+}
+
+function getTurnResponseTitle(turn = {}) {
+  return turn.errorMessage
+    ? t('sessionPanel.errorSuffix', { agent: getTurnAgentLabel(turn) })
+    : t('sessionPanel.responseSuffix', { agent: getTurnAgentLabel(turn) })
 }
 
 const {
@@ -457,6 +468,10 @@ function getAgentFilterLabel(item = {}) {
   })
 }
 
+function shouldShowProcessCard(turn = {}) {
+  return !isShellTurn(turn)
+}
+
 function getEventCardClass(item = {}) {
   return 'bg-[var(--theme-appPanelStrong)]'
 }
@@ -672,7 +687,7 @@ defineExpose({
           <div class="flex justify-end">
             <div class="transcript-card transcript-card--prompt min-w-0 w-full rounded-sm bg-[var(--theme-promptBg)] px-4 py-3 font-mono text-sm text-[var(--theme-promptText)]">
               <div class="flex items-center justify-between gap-3 text-xs opacity-75 font-sans">
-                <span class="font-semibold">{{ t('sessionPanel.promptTitleWithAgent', { agent: getTurnAgentLabel(turn) }) }}</span>
+                <span class="font-semibold">{{ getTurnPromptTitle(turn) }}</span>
                 <div class="flex items-center gap-2">
                   <button
                     v-if="getTurnPromptContent(turn)"
@@ -718,7 +733,7 @@ defineExpose({
             </div>
           </div>
 
-          <div v-if="showProcessLogs" class="flex min-w-0 justify-start">
+          <div v-if="showProcessLogs && shouldShowProcessCard(turn)" class="flex min-w-0 justify-start">
             <div class="transcript-card transcript-card--process min-w-0 w-full rounded-sm px-4 py-3" :class="getProcessCardClass(turn)">
               <div class="flex items-center justify-between gap-3 text-xs">
                 <span class="font-semibold">{{ t('sessionPanel.processTitle') }}</span>
@@ -799,7 +814,7 @@ defineExpose({
                 : 'bg-[var(--theme-responseBg)] text-[var(--theme-responseText)]'"
             >
               <div class="flex items-center justify-between gap-3 text-xs opacity-75 font-sans">
-                <span class="font-semibold">{{ turn.errorMessage ? t('sessionPanel.errorSuffix', { agent: getTurnAgentLabel(turn) }) : t('sessionPanel.responseSuffix', { agent: getTurnAgentLabel(turn) }) }}</span>
+                <span class="font-semibold">{{ getTurnResponseTitle(turn) }}</span>
                 <div class="flex items-center gap-2">
                   <button
                     v-if="diffSupported && turn.runId"

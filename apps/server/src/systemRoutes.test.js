@@ -60,6 +60,7 @@ async function withTestApp(t, overrides, run) {
     PROMPTX_RELAY_URL: process.env.PROMPTX_RELAY_URL,
     PROMPTX_RELAY_DEVICE_ID: process.env.PROMPTX_RELAY_DEVICE_ID,
     PROMPTX_RELAY_DEVICE_TOKEN: process.env.PROMPTX_RELAY_DEVICE_TOKEN,
+    PROMPTX_RELAY_ALLOW_REMOTE_SHELL: process.env.PROMPTX_RELAY_ALLOW_REMOTE_SHELL,
     PROMPTX_RELAY_ENABLED: process.env.PROMPTX_RELAY_ENABLED,
   }
 
@@ -67,6 +68,7 @@ async function withTestApp(t, overrides, run) {
   delete process.env.PROMPTX_RELAY_URL
   delete process.env.PROMPTX_RELAY_DEVICE_ID
   delete process.env.PROMPTX_RELAY_DEVICE_TOKEN
+  delete process.env.PROMPTX_RELAY_ALLOW_REMOTE_SHELL
   delete process.env.PROMPTX_RELAY_ENABLED
   process.env.PROMPTX_DATA_DIR = tempDir
 
@@ -247,5 +249,25 @@ test('relay reconnect endpoint rejects when relay is disabled', async (t) => {
 
     assert.equal(response.statusCode, 400)
     assert.match(response.json().message, /尚未启用/)
+  })
+})
+
+test('relay config persists allowRemoteShell and hot updates relay client config', async (t) => {
+  await withTestApp(t, {}, async ({ app, services }) => {
+    const response = await app.inject({
+      method: 'PUT',
+      url: '/api/relay/config',
+      payload: {
+        enabled: true,
+        relayUrl: 'https://relay.example.com',
+        deviceId: 'my-device',
+        deviceToken: 'secret-token',
+        allowRemoteShell: true,
+      },
+    })
+
+    assert.equal(response.statusCode, 200)
+    assert.equal(response.json().config.allowRemoteShell, true)
+    assert.equal(services.relayUpdates[0]?.allowRemoteShell, true)
   })
 })

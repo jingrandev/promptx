@@ -1,6 +1,7 @@
 import process from 'node:process'
 import WebSocket from 'ws'
 
+import { buildInternalAuthHeaders } from './internalAuth.js'
 import {
   buildRelayWebSocketUrl,
   createRelayRequestId,
@@ -315,7 +316,10 @@ function createRelayClient({
       const targetUrl = new URL(record.path, config.localBaseUrl)
       const response = await fetch(targetUrl, {
         method: record.method,
-        headers: sanitizeProxyHeaders(record.headers, ['cookie']),
+        headers: buildInternalAuthHeaders({
+          ...sanitizeProxyHeaders(record.headers, ['cookie']),
+          'x-promptx-relay-request': '1',
+        }),
         body: ['GET', 'HEAD'].includes(record.method) || !bodyBuffer.length ? undefined : bodyBuffer,
         signal: controller.signal,
       })

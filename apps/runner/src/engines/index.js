@@ -7,22 +7,32 @@ import {
 import { codexRunner } from './codexRunner.js'
 import { claudeCodeRunner } from './claudeCodeRunner.js'
 import { openCodeRunner } from './openCodeRunner.js'
+import { shellRunner } from './shellRunner.js'
 
 const runnerRegistry = new Map([
   [codexRunner.engine, codexRunner],
   [claudeCodeRunner.engine, claudeCodeRunner],
   [openCodeRunner.engine, openCodeRunner],
+  [shellRunner.engine, shellRunner],
 ])
 
+function normalizeRunnerEngine(engine = AGENT_ENGINES.CODEX) {
+  const normalized = String(engine || '').trim().toLowerCase()
+  if (normalized === shellRunner.engine) {
+    return shellRunner.engine
+  }
+  return normalizeAgentEngine(normalized)
+}
+
 export function getAgentRunner(engine = AGENT_ENGINES.CODEX) {
-  return runnerRegistry.get(normalizeAgentEngine(engine)) || null
+  return runnerRegistry.get(normalizeRunnerEngine(engine)) || null
 }
 
 export function assertAgentRunner(engine = AGENT_ENGINES.CODEX) {
-  const normalized = normalizeAgentEngine(engine)
+  const normalized = normalizeRunnerEngine(engine)
   const runner = getAgentRunner(normalized)
   if (!runner) {
-    throw new Error(`当前还不支持执行引擎：${getAgentEngineLabel(normalized)}`)
+    throw new Error(`当前还不支持执行引擎：${normalized === shellRunner.engine ? shellRunner.label : getAgentEngineLabel(normalized)}`)
   }
   return runner
 }

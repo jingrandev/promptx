@@ -1,7 +1,74 @@
 import { normalizeCodexRunEventsMode } from '../../../packages/shared/src/index.js'
 import { getApiErrorPayload } from './apiErrors.js'
+import { isValidInternalAuthToken, readInternalAuthToken } from './internalAuth.js'
+import { getRelayConfigForClient } from './relayConfig.js'
 
 const MAX_TASK_REORDER_COUNT = 200
+
+function isLoopbackHost(value = '') {
+  const host = String(value || '').trim().toLowerCase().replace(/^\[|\]$/g, '')
+  return host === '127.0.0.1'
+    || host === '::1'
+    || host === 'localhost'
+    || host.endsWith('.localhost')
+}
+
+function isLoopbackUrl(value = '') {
+  const text = String(value || '').trim()
+  if (!text) {
+    return false
+  }
+
+  try {
+    return isLoopbackHost(new URL(text).hostname)
+  } catch {
+    return false
+  }
+}
+
+function isLocalShellCommandRequest(request) {
+  if (isRelayProxyRequest(request)) {
+    return false
+  }
+
+  const origin = String(request?.headers?.origin || '').trim()
+  if (origin) {
+    return isLoopbackUrl(origin)
+  }
+
+  const referer = String(request?.headers?.referer || '').trim()
+  if (referer) {
+    return isLoopbackUrl(referer)
+  }
+
+  const hostname = String(request?.hostname || '').trim()
+  if (hostname) {
+    return isLoopbackHost(hostname)
+  }
+
+  const hostHeader = String(request?.headers?.host || '').trim()
+  if (hostHeader) {
+    return isLoopbackHost(hostHeader.split(':')[0])
+  }
+
+  return false
+}
+
+function isRelayProxyRequest(request) {
+  const relayRequestFlag = String(request?.headers?.['x-promptx-relay-request'] || '').trim()
+  if (relayRequestFlag !== '1') {
+    return false
+  }
+  return isValidInternalAuthToken(readInternalAuthToken(request?.headers || {}))
+}
+
+function isShellCommandRequestAllowed(request, relayConfig = {}) {
+  if (isLocalShellCommandRequest(request)) {
+    return true
+  }
+
+  return isRelayProxyRequest(request) && Boolean(relayConfig?.allowRemoteShell)
+}
 
 function createEmptyWorkspaceDiffSummary() {
   return {
@@ -116,6 +183,7 @@ function registerTaskRoutes(app, options = {}) {
     deleteTask,
     deleteTaskCodexRuns,
     getPromptxCodexSessionById,
+    getRelayConfig = getRelayConfigForClient,
     getRunningCodexRunByTaskSlug,
     getTaskBySlug,
     getTaskGitDiffReviewInSubprocess,
@@ -366,6 +434,10 @@ function registerTaskRoutes(app, options = {}) {
         sessionId: request.body?.sessionId,
         prompt: request.body?.prompt,
         promptBlocks: request.body?.promptBlocks,
+        displayEngine: request.body?.displayEngine,
+        commandMode: request.body?.commandMode,
+        command: request.body?.command,
+        allowShellCommand: isShellCommandRequestAllowed(request, getRelayConfig()),
       })
       return reply.code(payload?.runnerDispatchPending ? 202 : 201).send(payload)
     } catch (error) {

@@ -81,6 +81,149 @@ test('runDispatchService keeps queued status when runner accepts queued run', as
   assert.ok(broadcasts.some((item) => item.type === 'runs.changed' && item.status === 'queued'))
 })
 
+test('runDispatchService dispatches shell command runs with project cwd', async () => {
+  let createdRunPayload = null
+  let runnerPayload = null
+  let selectedSessionIds = []
+  const service = createRunDispatchService({
+    createCodexRun(payload = {}) {
+      createdRunPayload = payload
+      return {
+        id: 'run-shell-1',
+        status: payload.status || 'queued',
+      }
+    },
+    decorateCodexSession(session) {
+      return {
+        ...session,
+        running: false,
+      }
+    },
+    getCodexRunById() {
+      return {
+        id: 'run-shell-1',
+        status: 'queued',
+      }
+    },
+    getPromptxCodexSessionById(sessionId) {
+      selectedSessionIds.push(sessionId)
+      if (sessionId === 'session-1') {
+        return {
+          id: 'session-1',
+          engine: 'codex',
+          cwd: '/tmp/demo-shell',
+          title: 'Demo Shell',
+          codexThreadId: 'thread-root',
+          engineSessionId: '',
+          engineThreadId: 'thread-root',
+          engineMeta: { root: true },
+          createdAt: '2026-03-22T00:00:00.000Z',
+          updatedAt: '2026-03-22T00:00:00.000Z',
+        }
+      }
+      return {
+        id: 'member-claude',
+        engine: 'claude-code',
+        cwd: '/tmp/demo-shell',
+        title: 'Claude Member',
+        codexThreadId: '',
+        engineSessionId: 'claude-session-1',
+        engineThreadId: 'claude-thread-1',
+        engineMeta: { hidden: true },
+        createdAt: '2026-03-22T00:00:00.000Z',
+        updatedAt: '2026-03-22T00:00:00.000Z',
+      }
+    },
+    getRunningCodexRunBySessionId() {
+      return null
+    },
+    getTaskBySlug() {
+      return {
+        slug: 'task-shell-1',
+        expired: false,
+      }
+    },
+    logger: {
+      warn() {},
+    },
+    runnerClient: {
+      async startRun(payload = {}) {
+        runnerPayload = payload
+        return {
+          status: 'queued',
+        }
+      },
+    },
+    updateCodexRunFromRunnerStatus(_runId, patch = {}) {
+      return {
+        id: 'run-shell-1',
+        status: patch.status || 'queued',
+      }
+    },
+    updateTaskCodexSession() {},
+  })
+
+  await service.startTaskRunForTask({
+    taskSlug: 'task-shell-1',
+    projectSessionId: 'session-1',
+    sessionId: 'member-claude',
+    displayEngine: 'claude-code',
+    prompt: '!git status --short',
+    promptBlocks: [{ type: 'text', content: '!git status --short', meta: {} }],
+    commandMode: 'shell',
+    command: 'echo hacked',
+    allowShellCommand: true,
+  })
+
+  assert.equal(createdRunPayload?.engine, 'shell')
+  assert.equal(createdRunPayload?.displayEngine, 'claude-code')
+  assert.equal(createdRunPayload?.sessionId, 'session-1')
+  assert.equal(createdRunPayload?.prompt, '!git status --short')
+  assert.equal(runnerPayload?.engine, 'shell')
+  assert.equal(runnerPayload?.prompt, 'git status --short')
+  assert.equal(runnerPayload?.cwd, '/tmp/demo-shell')
+  assert.equal(runnerPayload?.sessionId, 'session-1')
+  assert.equal(runnerPayload?.codexThreadId, '')
+  assert.equal(runnerPayload?.engineSessionId, '')
+  assert.equal(runnerPayload?.engineThreadId, '')
+  assert.deepEqual(runnerPayload?.engineMeta, {})
+  assert.deepEqual(selectedSessionIds, ['member-claude', 'session-1', 'session-1'])
+})
+
+test('runDispatchService rejects shell runs from non-local requests', async () => {
+  const service = createRunDispatchService({
+    getPromptxCodexSessionById() {
+      return {
+        id: 'session-1',
+        engine: 'codex',
+        cwd: '/tmp/demo-shell',
+        title: 'Demo Shell',
+      }
+    },
+    getRunningCodexRunBySessionId() {
+      return null
+    },
+    getTaskBySlug() {
+      return {
+        slug: 'task-shell-1',
+        expired: false,
+      }
+    },
+  })
+
+  await assert.rejects(
+    () => service.startTaskRunForTask({
+      taskSlug: 'task-shell-1',
+      sessionId: 'session-1',
+      prompt: '!pwd',
+      promptBlocks: [{ type: 'text', content: '!pwd' }],
+      commandMode: 'shell',
+      allowShellCommand: false,
+    }),
+    (error) => error?.statusCode === 403 && error?.messageKey === 'errors.shellLocalOnly'
+  )
+})
+
 test('runDispatchService marks stop request as stopping and returns accepted result', async () => {
   const broadcasts = []
   let currentStatus = 'running'
