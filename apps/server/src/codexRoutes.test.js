@@ -184,7 +184,7 @@ test('codex routes broadcast task updates when deleting a session with reference
     decorateCodexSessionList: (items) => items,
     deletePromptxCodexSession: () => ({ id: 'session-1' }),
     getCodexRunById: () => null,
-    getPromptxCodexSessionById: () => null,
+    getPromptxCodexSessionById: () => ({ id: 'session-1', agentBindings: [] }),
     getRunningCodexRunBySessionId: () => null,
     isActiveRunStatus: () => false,
     listCodexRunEvents: () => [],

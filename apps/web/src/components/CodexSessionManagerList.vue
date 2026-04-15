@@ -128,7 +128,11 @@ function getSessionStateClass(session) {
             {{ session.cwd }}
           </div>
           <div class="theme-muted-text flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] leading-5">
-            <span>{{ getAgentEngineLabel(session.engine) }}</span>
+            <span>
+              {{ session?.agentBindings?.length > 1
+                ? t('projectManager.agentCount', { count: session.agentBindings.length })
+                : getAgentEngineLabel(session.engine) }}
+            </span>
             <span v-if="!mobile" aria-hidden="true">·</span>
             <span v-if="!mobile">{{ formatUpdatedAt(session.updatedAt) }}</span>
           </div>

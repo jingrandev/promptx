@@ -66,6 +66,15 @@ const { t } = useI18n()
       <div class="mt-2 text-sm text-[var(--theme-textPrimary)]">
         {{ getAgentEngineLabel(activeSession?.engine) }}
       </div>
+      <div v-if="activeSession?.agentBindings?.length > 1" class="mt-2 flex flex-wrap gap-1.5">
+        <span
+          v-for="item in activeSession.agentBindings"
+          :key="item.engine"
+          class="theme-status-neutral inline-flex items-center rounded-sm border border-solid px-1.5 py-0.5 text-[10px]"
+        >
+          {{ getAgentEngineLabel(item.engine) }}
+        </span>
+      </div>
     </div>
 
     <div class="dashed-panel px-3 py-3">

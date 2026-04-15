@@ -130,6 +130,7 @@ const editingSessionId = ref('')
 const form = reactive({
   title: '',
   engine: 'codex',
+  agentEngines: [],
   cwd: '',
   sessionId: '',
 })
@@ -316,6 +317,9 @@ function formatUpdatedAt(value = '') {
 function syncFormFromSession(session) {
   form.title = String(session?.title || '')
   form.engine = normalizeAgentEngine(session?.engine)
+  form.agentEngines = (Array.isArray(session?.agentBindings) ? session.agentBindings : [])
+    .map((item) => normalizeAgentEngine(item?.engine))
+    .filter((engine) => engine && engine !== form.engine)
   form.cwd = String(session?.cwd || '')
   form.sessionId = String(
     session?.sessionId
@@ -332,6 +336,7 @@ function openCreateMode() {
   error.value = ''
   form.title = ''
   form.engine = 'codex'
+  form.agentEngines = []
   form.cwd = ''
   form.sessionId = ''
 }
@@ -442,6 +447,15 @@ function updateFormTitle(value) {
 
 function updateFormEngine(value) {
   form.engine = normalizeAgentEngine(value)
+  form.agentEngines = form.agentEngines.filter((item) => item !== form.engine)
+}
+
+function updateFormAgentEngines(value) {
+  form.agentEngines = [...new Set(
+    (Array.isArray(value) ? value : [])
+      .map((item) => normalizeAgentEngine(item))
+      .filter((item) => item && item !== form.engine)
+  )]
 }
 
 function updateFormCwd(value) {
@@ -651,6 +665,7 @@ function createSubmitAction() {
       payload: {
         title: form.title,
         engine: form.engine,
+        agentEngines: [form.engine, ...form.agentEngines],
         cwd,
         sessionId: String(form.sessionId || '').trim(),
       },
@@ -665,6 +680,7 @@ function createSubmitAction() {
   const payload = {
     title: form.title,
     engine: form.engine,
+    agentEngines: [form.engine, ...form.agentEngines],
   }
 
   if (canEditCwd.value) {
@@ -969,6 +985,7 @@ defineExpose({
                 :cwd-readonly-message="cwdReadonlyMessage"
                 :duplicate-cwd-message="duplicateCwdMessage"
                 :engine="form.engine"
+                :agent-engines="form.agentEngines"
                 :engine-options="engineOptions"
                 :engine-readonly-message="engineReadonlyMessage"
                 :session-candidates="decoratedSessionCandidates"
@@ -983,6 +1000,7 @@ defineExpose({
                 @select-session-candidate="selectSessionCandidate"
                 @update:cwd="updateFormCwd"
                 @update:engine="updateFormEngine"
+                @update:agent-engines="updateFormAgentEngines"
                 @update:session-id="updateFormSessionId"
                 @update:title="updateFormTitle"
               />
@@ -1136,6 +1154,7 @@ defineExpose({
                   :cwd-readonly-message="cwdReadonlyMessage"
                   :duplicate-cwd-message="duplicateCwdMessage"
                   :engine="form.engine"
+                  :agent-engines="form.agentEngines"
                   :engine-options="engineOptions"
                   :engine-readonly-message="engineReadonlyMessage"
                   :session-candidates="decoratedSessionCandidates"
@@ -1150,6 +1169,7 @@ defineExpose({
                   @select-session-candidate="selectSessionCandidate"
                   @update:cwd="updateFormCwd"
                   @update:engine="updateFormEngine"
+                  @update:agent-engines="updateFormAgentEngines"
                   @update:session-id="updateFormSessionId"
                   @update:title="updateFormTitle"
                 />

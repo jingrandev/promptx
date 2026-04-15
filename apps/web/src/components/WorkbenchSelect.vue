@@ -28,6 +28,10 @@ const props = defineProps({
     type: String,
     default: '',
   },
+  ariaLabel: {
+    type: String,
+    default: '',
+  },
   getOptionValue: {
     type: Function,
     default: (option) => option?.id ?? option?.value ?? '',
@@ -191,6 +195,7 @@ onBeforeUnmount(() => {
           ? 'cursor-not-allowed border-[color-mix(in_srgb,var(--theme-borderDefault)_88%,var(--theme-textMuted))] bg-[color-mix(in_srgb,var(--theme-appPanelMuted)_82%,var(--theme-appBg))] text-[var(--theme-textMuted)]'
           : 'theme-input-shell text-[var(--theme-textPrimary)] hover:border-[var(--theme-borderStrong)] focus:border-[var(--theme-borderStrong)] focus:ring-[var(--theme-focusRing)]',
       ]"
+      :aria-label="props.ariaLabel || undefined"
       :disabled="disabled"
       @click="toggleDropdown"
       @keydown.down.prevent="openDropdown"

@@ -83,6 +83,30 @@ function registerCodexRoutes(app, options = {}) {
     updatePromptxCodexSession,
   } = options
 
+  function getProjectRelatedSessionIds(session = null) {
+    const ids = new Set()
+    const rootId = String(session?.id || '').trim()
+    if (rootId) {
+      ids.add(rootId)
+    }
+
+    ;(Array.isArray(session?.agentBindings) ? session.agentBindings : []).forEach((item) => {
+      const memberId = String(item?.sessionRecordId || '').trim()
+      if (memberId) {
+        ids.add(memberId)
+      }
+    })
+
+    return [...ids]
+  }
+
+  function findRunningProjectRun(session = null) {
+    const sessionIds = getProjectRelatedSessionIds(session)
+    return sessionIds
+      .map((sessionId) => getRunningCodexRunBySessionId(sessionId))
+      .find(Boolean) || null
+  }
+
   app.get('/api/codex/sessions', async () => ({
     items: decorateCodexSessionList(listPromptxCodexSessions()),
   }))
@@ -183,7 +207,12 @@ function registerCodexRoutes(app, options = {}) {
 
   app.post('/api/codex/sessions/:sessionId/reset', async (request, reply) => {
     const sessionId = String(request.params.sessionId || '').trim()
-    if (getRunningCodexRunBySessionId(sessionId)) {
+    const projectSession = getPromptxCodexSessionById(sessionId)
+    if (!projectSession) {
+      return reply.code(404).send({ messageKey: 'errors.sessionNotFound', message: '没有找到对应的 PromptX 项目。' })
+    }
+
+    if (findRunningProjectRun(projectSession)) {
       return reply.code(409).send({
         messageKey: 'errors.currentProjectRunning',
         message: '当前项目正在执行中，请先停止后再新建会话。',
@@ -200,9 +229,6 @@ function registerCodexRoutes(app, options = {}) {
     }
 
     const session = resetPromptxCodexSession(sessionId)
-    if (!session) {
-      return reply.code(404).send({ messageKey: 'errors.sessionNotFound', message: '没有找到对应的 PromptX 项目。' })
-    }
 
     affectedTaskSlugs.forEach((taskSlug) => {
       deleteTaskCodexRuns(taskSlug)
@@ -224,7 +250,12 @@ function registerCodexRoutes(app, options = {}) {
   })
 
   app.delete('/api/codex/sessions/:sessionId', async (request, reply) => {
-    if (getRunningCodexRunBySessionId(request.params.sessionId)) {
+    const projectSession = getPromptxCodexSessionById(request.params.sessionId)
+    if (!projectSession) {
+      return reply.code(404).send({ messageKey: 'errors.sessionNotFound', message: '没有找到对应的 PromptX 项目。' })
+    }
+
+    if (findRunningProjectRun(projectSession)) {
       return reply.code(409).send({
         messageKey: 'errors.currentProjectDeleteWhileRunning',
         message: '当前项目正在执行中，请先停止后再删除。',
@@ -233,9 +264,6 @@ function registerCodexRoutes(app, options = {}) {
 
     const affectedTaskSlugs = clearTaskCodexSessionReferences(request.params.sessionId)
     const session = deletePromptxCodexSession(request.params.sessionId)
-    if (!session) {
-      return reply.code(404).send({ messageKey: 'errors.sessionNotFound', message: '没有找到对应的 PromptX 项目。' })
-    }
 
     broadcastServerEvent('sessions.changed', {
       sessionId: request.params.sessionId,

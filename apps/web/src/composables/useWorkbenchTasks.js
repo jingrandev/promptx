@@ -445,7 +445,30 @@ export function useWorkbenchTasks(options = {}) {
     autoTitle: draft.value.autoTitle,
     preview: deriveTaskPreview(draft.value.blocks),
   }, draft.value.blocks))
-  const currentSelectedSessionId = computed(() => selectedSessionMap.value[currentTaskSlug.value] || '')
+  function resolveTaskProjectSessionId(taskSlug, options = {}) {
+    const normalizedSlug = String(taskSlug || '').trim()
+    if (!normalizedSlug) {
+      return ''
+    }
+
+    const summary = options.summary || getTaskSummary(normalizedSlug)
+    const cachedDraft = options.cachedDraft === undefined
+      ? getTaskDraftState(normalizedSlug)
+      : options.cachedDraft
+    const isCurrentTask = normalizedSlug === currentTaskSlug.value
+
+    if (Object.prototype.hasOwnProperty.call(selectedSessionMap.value, normalizedSlug)) {
+      return String(selectedSessionMap.value[normalizedSlug] || '').trim()
+    }
+
+    if (isCurrentTask) {
+      return String(draft.value.codexSessionId || summary?.codexSessionId || '').trim()
+    }
+
+    return String(cachedDraft?.codexSessionId || summary?.codexSessionId || '').trim()
+  }
+
+  const currentProjectSessionId = computed(() => resolveTaskProjectSessionId(currentTaskSlug.value))
   const currentTaskSendState = computed(() => getCurrentTaskSendState(
     getTaskSummary(currentTaskSlug.value),
     sendingTaskMap.value[currentTaskSlug.value]
@@ -580,9 +603,10 @@ function normalizeTodoItemsForSnapshot(items = []) {
     const preview = task.slug === currentTaskSlug.value
       ? draft.value.lastPromptPreview || task.lastPromptPreview || ''
       : cachedDraft?.lastPromptPreview || task.lastPromptPreview || ''
-    const codexSessionId = task.slug === currentTaskSlug.value
-      ? selectedSessionMap.value[task.slug] || draft.value.codexSessionId || task.codexSessionId || ''
-      : cachedDraft?.codexSessionId || task.codexSessionId || ''
+    const codexSessionId = resolveTaskProjectSessionId(task.slug, {
+      summary: task,
+      cachedDraft,
+    })
 
     return {
       ...task,
@@ -804,7 +828,7 @@ function normalizeTodoItemsForSnapshot(items = []) {
       autoTitle: String(draft.value.autoTitle || ''),
       lastPromptPreview: String(draft.value.lastPromptPreview || ''),
       todoCount: cloneTodoItems(draft.value.todoItems).length,
-      codexSessionId: String(selectedSessionMap.value[currentTaskSlug.value] || draft.value.codexSessionId || ''),
+      codexSessionId: currentProjectSessionId.value,
       preview: String(draft.value.lastPromptPreview || ''),
     })
   }
@@ -1165,7 +1189,7 @@ function normalizeTodoItemsForSnapshot(items = []) {
           autoTitle: String(draft.value.autoTitle || ''),
           lastPromptPreview: String(draft.value.lastPromptPreview || ''),
           todoItems: cloneTodoItems(draft.value.todoItems),
-          codexSessionId: String(selectedSessionMap.value[currentTaskSlug.value] || draft.value.codexSessionId || ''),
+          codexSessionId: currentProjectSessionId.value,
           expiry: 'none',
           visibility: 'private',
           blocks: normalizeBlocksForSave(draft.value.blocks),
@@ -1176,7 +1200,7 @@ function normalizeTodoItemsForSnapshot(items = []) {
           autoTitle: String(task.autoTitle || ''),
           lastPromptPreview: String(task.lastPromptPreview || ''),
           todoItems: cloneTodoItems(task.todoItems || draft.value.todoItems || []),
-          codexSessionId: String(selectedSessionMap.value[currentTaskSlug.value] || task.codexSessionId || ''),
+          codexSessionId: currentProjectSessionId.value || String(task.codexSessionId || '').trim(),
           blocks: cloneBlocks(draft.value.blocks),
         }
         setTaskDraftState(currentTaskSlug.value, normalizedState)
@@ -1701,7 +1725,7 @@ function normalizeTodoItemsForSnapshot(items = []) {
     buildPromptPreview,
     clearCurrentTaskContent,
     createTaskAndSelect,
-    currentSelectedSessionId,
+    currentProjectSessionId,
     currentTaskSendState,
     currentTaskAutoTitle,
     currentTaskDisplayTitle,

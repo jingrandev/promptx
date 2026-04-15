@@ -38,6 +38,45 @@ const TaskDiffReviewDialog = defineAsyncComponent(() => import('../components/Ta
 const WorkbenchSettingsDialog = defineAsyncComponent(() => import('../components/WorkbenchSettingsDialog.vue'))
 
 const codexPanelRef = ref(null)
+const currentProjectAgentBindings = ref([])
+const selectedAgentEngineMap = ref({})
+
+function normalizeSelectedAgentEngine(value = '', bindings = currentProjectAgentBindings.value) {
+  const normalized = String(value || '').trim()
+  if (!normalized) {
+    return ''
+  }
+
+  return bindings.some((item) => item?.engine === normalized) ? normalized : ''
+}
+
+function getDefaultAgentEngine(bindings = currentProjectAgentBindings.value) {
+  return bindings.find((item) => item?.isDefault)?.engine || bindings[0]?.engine || ''
+}
+
+const currentSelectedAgentEngine = computed({
+  get() {
+    const projectId = String(currentProjectSessionId.value || '').trim()
+    if (!projectId) {
+      return ''
+    }
+
+    return normalizeSelectedAgentEngine(selectedAgentEngineMap.value[projectId])
+      || getDefaultAgentEngine()
+  },
+  set(value) {
+    const projectId = String(currentProjectSessionId.value || '').trim()
+    const normalized = normalizeSelectedAgentEngine(value)
+    if (!projectId || !normalized) {
+      return
+    }
+
+    selectedAgentEngineMap.value = {
+      ...selectedAgentEngineMap.value,
+      [projectId]: normalized,
+    }
+  },
+})
 
 function getCurrentPanelRef(currentTaskSlug) {
   if (!currentTaskSlug) {
@@ -61,7 +100,7 @@ const {
   clearCurrentTaskContent,
   createTaskAndSelect,
   creatingTask,
-  currentSelectedSessionId,
+  currentProjectSessionId,
   currentTaskSendState,
   currentTaskAutoTitle,
   currentTaskDisplayTitle,
@@ -138,16 +177,19 @@ const activityPanelProps = computed(() => ({
   buildPromptBlocks: currentTaskBuildPromptBlocks.value,
   buildPrompt: currentTaskBuildPrompt.value,
   diffSupported: currentTaskDiffSupported.value,
-  selectedSessionId: currentRenderedTask.value?.codexSessionId || '',
+  selectedAgentEngine: currentSelectedAgentEngine.value,
+  selectedSessionId: currentProjectSessionId.value,
   sessionSelectionLockReason: currentRenderedTask.value?.sessionSelectionLockReason || '',
   sessionSelectionLocked: Boolean(currentRenderedTask.value?.sessionSelectionLocked),
   taskSlug: currentRenderedTask.value?.slug || '',
   taskRunning: Boolean(currentRenderedTask.value?.running),
 }))
 const inputPanelProps = computed(() => ({
+  agentBindings: currentProjectAgentBindings.value,
   canAddTodo: hasCurrentDraftContent.value,
-  codexSessionId: currentSelectedSessionId.value,
+  codexSessionId: currentProjectSessionId.value,
   isCurrentTaskSending: isCurrentTaskSending.value,
+  selectedAgentEngine: currentSelectedAgentEngine.value,
   sendBehavior: sendBehavior.value,
   sendState: currentTaskSendState.value,
   loading: loadingTask.value,
@@ -323,6 +365,40 @@ function handleCurrentTaskSessionChange(nextSessionId) {
   }
 
   handleTaskSessionChange(task.slug, nextSessionId)
+}
+
+function handleCurrentAgentBindingsChange(payload = {}) {
+  const sessionId = String(payload?.sessionId || '').trim()
+  const activeProjectSessionId = currentProjectSessionId.value
+  if (sessionId && sessionId !== activeProjectSessionId) {
+    return
+  }
+
+  const bindings = Array.isArray(payload?.bindings) ? payload.bindings : []
+  currentProjectAgentBindings.value = bindings
+
+  const nextEngine = normalizeSelectedAgentEngine(
+    selectedAgentEngineMap.value[activeProjectSessionId],
+    bindings
+  ) || normalizeSelectedAgentEngine(payload?.selectedEngine, bindings) || getDefaultAgentEngine(bindings)
+  if (nextEngine) {
+    currentSelectedAgentEngine.value = nextEngine
+  }
+}
+
+watch(
+  currentProjectSessionId,
+  (value, previousValue) => {
+    if (String(value || '').trim() === String(previousValue || '').trim()) {
+      return
+    }
+
+    currentProjectAgentBindings.value = []
+  }
+)
+
+function handleCurrentAgentEngineChange(value) {
+  currentSelectedAgentEngine.value = value
 }
 
 function handleActivityToast(message) {
@@ -718,10 +794,12 @@ const taskListPanelListeners = {
 }
 
 const activityPanelListeners = {
+  'agent-bindings-change': handleCurrentAgentBindingsChange,
   'insert-code-context': handleInsertCodeContext,
   'open-diff': ({ scope, runId }) => openTaskDiff(scope, runId),
   'project-created': () => flashToast({ message: t('workbench.projectCreated'), type: 'success' }),
   'selected-session-change': handleCurrentTaskSessionChange,
+  'update:selectedAgentEngine': handleCurrentAgentEngineChange,
   'sending-change': handleCurrentTaskSendingChange,
   toast: handleActivityToast,
 }
@@ -736,6 +814,7 @@ const inputPanelListeners = {
   'manage-todo': openTodoDialog,
   'send-request': sendToCodex,
   'upload-files': handleUpload,
+  'update:selectedAgentEngine': handleCurrentAgentEngineChange,
 }
 
 const mobileDetailHeaderListeners = {

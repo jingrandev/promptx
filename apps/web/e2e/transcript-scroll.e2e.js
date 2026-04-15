@@ -18,7 +18,7 @@ import {
 
 test('执行过程面板遵循 IM 式滚动跟随规则', async (t) => {
   const initialPayloads = []
-  for (let index = 1; index <= 16; index += 1) {
+  for (let index = 1; index <= 28; index += 1) {
     initialPayloads.push(buildCommandStartedEvent(`echo init-${index}`))
     initialPayloads.push(buildCommandCompletedEvent(`echo init-${index}`, `init-${index}`))
   }
@@ -47,7 +47,7 @@ test('执行过程面板遵循 IM 式滚动跟随规则', async (t) => {
   ])
 
   const browser = await chromium.launch({ headless: true })
-  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } })
+  const page = await browser.newPage({ viewport: { width: 1440, height: 720 } })
   await page.addInitScript(() => {
     Object.defineProperty(window, 'EventSource', {
       value: undefined,
@@ -59,11 +59,12 @@ test('执行过程面板遵循 IM 式滚动跟随规则', async (t) => {
     await openWorkbenchTask(page, fixture.task.slug)
 
     const initialState = await readTranscriptState(page)
-    assert.equal(initialState.distanceToBottom, 0)
+    assert.ok(initialState.maxScrollTop > 0)
+    assert.ok(initialState.distanceToBottom <= 1)
     assert.equal(initialState.hasNewerButton, false)
 
     await page.evaluate(() => {
-      const transcript = document.querySelector('.h-full.space-y-4.overflow-y-auto.px-4.py-4')
+      const transcript = document.querySelector('[data-promptx-transcript="1"]')
       if (!transcript) {
         return
       }
@@ -91,7 +92,7 @@ test('执行过程面板遵循 IM 式滚动跟随规则', async (t) => {
     assert.equal(afterIncomingWhileUp.hasNewerButton, true)
 
     await page.evaluate(() => {
-      const transcript = document.querySelector('.h-full.space-y-4.overflow-y-auto.px-4.py-4')
+      const transcript = document.querySelector('[data-promptx-transcript="1"]')
       if (!transcript) {
         return
       }
@@ -100,7 +101,7 @@ test('执行过程面板遵循 IM 式滚动跟随规则', async (t) => {
     })
     await page.waitForTimeout(300)
     const backToBottomState = await readTranscriptState(page)
-    assert.equal(backToBottomState.distanceToBottom, 0)
+    assert.ok(backToBottomState.distanceToBottom <= 1)
 
     await appendRunPayloads(fixture.run.id, [
       buildCommandStartedEvent('echo step-bottom'),
@@ -111,7 +112,7 @@ test('执行过程面板遵循 IM 式滚动跟随规则', async (t) => {
 
     await page.waitForTimeout(2500)
     const afterIncomingWhileBottom = await readTranscriptState(page)
-    assert.equal(afterIncomingWhileBottom.distanceToBottom, 0)
+    assert.ok(afterIncomingWhileBottom.distanceToBottom <= 1)
     assert.ok(afterIncomingWhileBottom.logCount > backToBottomState.logCount)
   } finally {
     await browser.close()

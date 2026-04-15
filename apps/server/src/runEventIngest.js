@@ -5,7 +5,7 @@ import {
   isTerminalRunStatus,
   updateCodexRunFromRunnerStatus,
 } from './codexRuns.js'
-import { updatePromptxCodexSession } from './codexSessions.js'
+import { getPromptxCodexSessionById, updatePromptxCodexSession } from './codexSessions.js'
 
 function toSafeSessionPatch(session = {}) {
   const hasIdentityPatch = [
@@ -52,6 +52,46 @@ function syncSessionFromEnvelope(session = null) {
 
 export function createRunEventIngestService(options = {}) {
   const broadcastServerEvent = options.broadcastServerEvent || (() => {})
+  const resolveSessionSnapshot = options.resolveSessionSnapshot
+    || ((sessionId = '') => getPromptxCodexSessionById(sessionId))
+  const decorateCodexSession = options.decorateCodexSession || ((session) => session)
+
+  function hydrateEnvelopeSession(session = null) {
+    const sessionId = String(session?.id || '').trim()
+    if (!sessionId) {
+      return null
+    }
+
+    syncSessionFromEnvelope(session)
+
+    const storedSession = resolveSessionSnapshot(sessionId)
+    if (storedSession?.id) {
+      return decorateCodexSession(storedSession)
+    }
+
+    return null
+  }
+
+  function normalizeEnvelopeItem(item = {}) {
+    const payload = item?.payload && typeof item.payload === 'object' ? item.payload : null
+    const envelopeType = normalizeAgentRunEnvelopeEventType(payload?.type)
+    if (envelopeType !== 'session' && envelopeType !== 'session.updated') {
+      return item
+    }
+
+    const nextSession = hydrateEnvelopeSession(payload?.session || null)
+    if (!nextSession) {
+      return item
+    }
+
+    return {
+      ...item,
+      payload: {
+        ...payload,
+        session: nextSession,
+      },
+    }
+  }
 
   function notifyRunUpdated(runRecord) {
     if (!runRecord?.id) {
@@ -89,7 +129,7 @@ export function createRunEventIngestService(options = {}) {
       const results = []
 
       grouped.forEach((runItems, runId) => {
-        const events = appendCodexRunEventsBatch(runId, runItems) || []
+        const events = appendCodexRunEventsBatch(runId, runItems.map((item) => normalizeEnvelopeItem(item))) || []
         const runRecord = getCodexRunById(runId)
         if (!runRecord) {
           return
@@ -98,7 +138,7 @@ export function createRunEventIngestService(options = {}) {
         events.forEach((event) => {
           const envelopeType = normalizeAgentRunEnvelopeEventType(event?.payload?.type)
           if (envelopeType === 'session' || envelopeType === 'session.updated') {
-            const nextSession = syncSessionFromEnvelope(event?.payload?.session || null)
+            const nextSession = event?.payload?.session || null
             if (nextSession?.id) {
               broadcastServerEvent('sessions.changed', {
                 sessionId: nextSession.id,
@@ -132,7 +172,7 @@ export function createRunEventIngestService(options = {}) {
 
       const previousRun = getCodexRunById(runId)
       if (payload.session && typeof payload.session === 'object') {
-        const nextSession = syncSessionFromEnvelope(payload.session)
+        const nextSession = hydrateEnvelopeSession(payload.session)
         if (nextSession?.id) {
           broadcastServerEvent('sessions.changed', {
             sessionId: nextSession.id,

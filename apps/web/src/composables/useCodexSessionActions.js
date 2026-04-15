@@ -34,6 +34,7 @@ export function useCodexSessionActions(options = {}) {
     refreshRunHistory,
     markFallbackSessionPollNow,
     showToast,
+    getActiveAgentBinding = null,
   } = options
 
   let sessionsLoadPromise = null
@@ -321,8 +322,23 @@ export function useCodexSessionActions(options = {}) {
         return false
       }
 
+      const projectAgentBindings = getProjectAgentBindings(latestSelectedSession)
+      const currentBinding = typeof getActiveAgentBinding === 'function'
+        ? getActiveAgentBinding(latestSelectedSession)
+        : null
+      const currentEngine = String(currentBinding?.engine || '').trim()
+      if (currentEngine && !projectAgentBindings.some((item) => item.engine === currentEngine)) {
+        const message = translate('sessionPanel.agentNotEnabled')
+        sessionError.value = message
+        showToast?.({ message, type: 'warning' })
+        return false
+      }
+
+      const nextBinding = currentBinding
+      const targetSessionId = String(nextBinding?.sessionRecordId || selectedSessionId.value).trim()
       const result = await createTaskCodexRun(props.taskSlug, {
-        sessionId: selectedSessionId.value,
+        projectSessionId: selectedSessionId.value,
+        sessionId: targetSessionId,
         prompt,
         promptBlocks,
       })
@@ -388,4 +404,37 @@ export function useCodexSessionActions(options = {}) {
     sortedSessions,
     stopSending,
   }
+}
+
+function getProjectAgentBindings(session = {}) {
+  if (Array.isArray(session?.agentBindings) && session.agentBindings.length) {
+    return session.agentBindings
+  }
+
+  if (!session?.id) {
+    return []
+  }
+
+  return [{
+    engine: normalizeActionAgentEngine(session.engine),
+    sessionRecordId: session.id,
+    sessionId: session.sessionId || '',
+    isDefault: true,
+    running: Boolean(session.running),
+    started: Boolean(session.started),
+  }]
+}
+
+function normalizeActionAgentEngine(value = '') {
+  const normalized = String(value || '').trim().toLowerCase()
+  if (normalized === 'claude' || normalized === 'claudecode') {
+    return 'claude-code'
+  }
+  if (normalized === 'opencode' || normalized === 'open-code') {
+    return 'opencode'
+  }
+  if (normalized === 'claude-code') {
+    return 'claude-code'
+  }
+  return 'codex'
 }

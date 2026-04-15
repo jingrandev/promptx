@@ -62,6 +62,32 @@ import {
   hasTurnSummary,
 } from './codexSessionPanelTurns.js'
 
+export function mergeCodexSessionRecord(currentSession, nextSession, options = {}) {
+  const { preserveRunning = false } = options
+  if (!nextSession?.id) {
+    return currentSession || null
+  }
+
+  const mergedSession = {
+    ...(currentSession || {}),
+    ...nextSession,
+  }
+
+  if (
+    (!Array.isArray(nextSession?.agentBindings) || !nextSession.agentBindings.length)
+    && Array.isArray(currentSession?.agentBindings)
+    && currentSession.agentBindings.length
+  ) {
+    mergedSession.agentBindings = currentSession.agentBindings
+  }
+
+  if (preserveRunning) {
+    mergedSession.running = Boolean(currentSession?.running)
+  }
+
+  return mergedSession
+}
+
 export function useCodexSessionPanel(props, emit) {
   const realtime = useWorkbenchRealtime()
   const sessions = ref([])
@@ -119,6 +145,56 @@ export function useCodexSessionPanel(props, emit) {
       ? translate('sessionPanel.stopping')
       : `${translate('projectManager.running')} (${formatElapsedDuration(sendingElapsedSeconds.value)})`
   ))
+  const currentProjectSession = computed(() => (
+    sessions.value.find((session) => session.id === selectedSessionId.value) || null
+  ))
+  const currentProjectAgentBindings = computed(() => {
+    if (Array.isArray(currentProjectSession.value?.agentBindings) && currentProjectSession.value.agentBindings.length) {
+      return currentProjectSession.value.agentBindings
+    }
+
+    const session = currentProjectSession.value
+    if (!session?.id) {
+      return []
+    }
+
+    return [{
+      engine: session.engine,
+      sessionRecordId: session.id,
+      sessionId: session.sessionId || '',
+      started: Boolean(session.started),
+      running: Boolean(session.running),
+      isDefault: true,
+    }]
+  })
+  const activeAgentEngine = computed({
+    get() {
+      const remembered = normalizeRememberedAgentEngine(
+        props.selectedAgentEngine,
+        currentProjectAgentBindings.value
+      )
+      if (remembered) {
+        return remembered
+      }
+
+      return currentProjectAgentBindings.value.find((item) => item.isDefault)?.engine
+        || currentProjectAgentBindings.value[0]?.engine
+        || ''
+    },
+    set(value) {
+      const normalized = normalizeRememberedAgentEngine(value, currentProjectAgentBindings.value)
+      if (!normalized) {
+        return
+      }
+
+      emit('update:selectedAgentEngine', normalized)
+    },
+  })
+  const activeAgentBinding = computed(() => (
+    currentProjectAgentBindings.value.find((item) => item.engine === activeAgentEngine.value)
+    || currentProjectAgentBindings.value[0]
+    || null
+  ))
 
   const {
     destroy: destroyTranscriptAutoScroll,
@@ -135,19 +211,7 @@ export function useCodexSessionPanel(props, emit) {
   })
 
   function mergeSessionRecord(currentSession, nextSession, options = {}) {
-    const { preserveRunning = false } = options
-    if (!nextSession?.id) {
-      return currentSession || null
-    }
-
-    if (!preserveRunning) {
-      return nextSession
-    }
-
-    return {
-      ...nextSession,
-      running: Boolean(currentSession?.running),
-    }
+    return mergeCodexSessionRecord(currentSession, nextSession, options)
   }
 
   function mergeSession(nextSession, options = {}) {
@@ -228,6 +292,7 @@ export function useCodexSessionPanel(props, emit) {
     refreshRunHistory,
     markFallbackSessionPollNow,
     showToast,
+    getActiveAgentBinding: () => activeAgentBinding.value,
   })
 
   function clearSendingTimer() {
@@ -418,6 +483,45 @@ export function useCodexSessionPanel(props, emit) {
     { immediate: true }
   )
 
+  watch(
+    () => [
+      currentProjectSession.value?.id || '',
+      currentProjectAgentBindings.value.map((item) => item.engine).join(','),
+      props.selectedAgentEngine || '',
+    ].join('\n'),
+    () => {
+      const projectId = String(currentProjectSession.value?.id || '').trim()
+      const bindings = currentProjectAgentBindings.value
+      const selectedEngine = activeAgentEngine.value
+      emit('agent-bindings-change', {
+        sessionId: projectId,
+        bindings,
+        selectedEngine,
+      })
+      if (!projectId) {
+        return
+      }
+
+      const normalized = normalizeRememberedAgentEngine(
+        props.selectedAgentEngine,
+        bindings
+      )
+      if (normalized) {
+        return
+      }
+
+      const nextEngine = bindings.find((item) => item.isDefault)?.engine
+        || bindings[0]?.engine
+        || ''
+      if (!nextEngine) {
+        return
+      }
+
+      emit('update:selectedAgentEngine', nextEngine)
+    },
+    { immediate: true }
+  )
+
   onBeforeUnmount(() => {
     clearSendingTimer()
     clearRealtimeReconcileTimer()
@@ -499,6 +603,8 @@ export function useCodexSessionPanel(props, emit) {
   )
 
   return {
+    activeAgentBinding,
+    activeAgentEngine,
     clearTurns,
     closeManager,
     formatTurnTime,
@@ -538,6 +644,7 @@ export function useCodexSessionPanel(props, emit) {
     workingLabel,
     sessions,
     loadSessions,
+    currentProjectAgentBindings,
     handleTranscriptScroll,
     handleTranscriptTouchEnd,
     handleTranscriptTouchMove,
@@ -545,4 +652,13 @@ export function useCodexSessionPanel(props, emit) {
     scheduleScrollToBottom,
     scrollToBottom,
   }
+}
+
+function normalizeRememberedAgentEngine(value = '', bindings = []) {
+  const normalized = String(value || '').trim()
+  if (!normalized) {
+    return ''
+  }
+
+  return bindings.some((item) => item.engine === normalized) ? normalized : ''
 }

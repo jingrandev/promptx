@@ -83,19 +83,21 @@ test('历史 turn 展开后会拉取并展示执行过程', async (t) => {
   try {
     await openWorkbenchTask(page, fixture.task.slug)
 
-    const transcript = page.locator('.h-full.space-y-4.overflow-y-auto.px-4.py-4')
-    const oldTurn = transcript.locator('> div').first()
-    const processCard = oldTurn.locator('.theme-process-completed').first()
-    const toggleButton = processCard.locator('button').first()
+    const transcript = page.locator('[data-promptx-transcript="1"]')
+    const oldTurn = transcript.locator('[data-promptx-turn="1"]').filter({ hasText: '旧 turn' }).first()
+    const processCard = oldTurn.locator('.transcript-card--process').first()
+    const toggleButton = processCard.getByRole('button', { name: /展开|收起/ }).first()
 
     await assert.doesNotReject(() => oldTurn.getByText('旧 turn').waitFor())
-    assert.equal(await processCard.getByText('展开后加载').count(), 1)
+    assert.equal(await processCard.getByText(/展开后加载/).count(), 1)
 
     await toggleButton.click()
 
-    await assert.doesNotReject(() => processCard.getByText('旧 turn reasoning').waitFor())
+    await assert.doesNotReject(() => processCard.getByText('开始执行命令').waitFor())
     await assert.doesNotReject(() => processCard.getByText('echo old').first().waitFor())
-    assert.equal(await processCard.getByText('展开后加载').count(), 0)
+    await assert.doesNotReject(() => processCard.getByText('命令执行完成').waitFor())
+    assert.ok(await processCard.locator('.transcript-event-card').count() >= 4)
+    assert.equal(await processCard.getByText(/展开后加载/).count(), 0)
   } finally {
     await browser.close()
   }

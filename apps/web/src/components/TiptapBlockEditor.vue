@@ -950,7 +950,7 @@ defineExpose({
     @dragover.prevent
     @paste="handleSurfacePaste"
   >
-    <div class="theme-divider theme-secondary-text border-b px-5 py-3 text-sm">
+    <div class="theme-divider theme-secondary-text border-b px-3 py-3 text-sm sm:px-5">
       <div class="flex justify-end">
         <div class="w-full">
           <slot name="header-actions" />

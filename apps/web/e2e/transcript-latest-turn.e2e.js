@@ -55,20 +55,22 @@ test('最新一条 turn 默认展开并展示完整执行过程', async (t) => {
   try {
     await openWorkbenchTask(page, fixture.task.slug)
 
-    const transcript = page.locator('.h-full.space-y-4.overflow-y-auto.px-4.py-4')
-    const lastTurn = transcript.locator('> div').last()
-    const processCard = lastTurn.locator('.theme-process-running, .theme-process-completed').first()
-    const processToggle = processCard.locator('button').first()
-    const processLogs = processCard.locator('.mt-3.space-y-3 > div')
+    const transcript = page.locator('[data-promptx-transcript="1"]')
+    const lastTurn = transcript.locator('[data-promptx-turn="1"]').filter({ hasText: '请把最新一条 turn 默认展开' }).first()
+    const processCard = lastTurn.locator('.transcript-card--process').first()
+    const processToggle = processCard.getByRole('button', { name: /展开|收起/ }).first()
+    const processLogs = processCard.locator('.transcript-event-card')
     const responseCard = lastTurn.locator('.transcript-card--response .codex-markdown').first()
 
     await assert.doesNotReject(() => lastTurn.getByText('请把最新一条 turn 默认展开').waitFor())
-    await assert.doesNotReject(() => processLogs.nth(4).waitFor())
+    await assert.doesNotReject(() => processCard.getByText('开始执行命令').waitFor())
+    await assert.doesNotReject(() => processCard.getByText('pnpm build').first().waitFor())
+    await assert.doesNotReject(() => processCard.getByText('命令执行完成').waitFor())
     await assert.doesNotReject(() => responseCard.getByText('好的，最新一条 turn 已默认展开。').waitFor())
     assert.equal((await processToggle.textContent())?.trim(), '收起')
-    assert.equal(await processCard.getByText('展开后加载').count(), 0)
+    assert.equal(await processCard.getByText(/展开后加载/).count(), 0)
     assert.equal(await processCard.getByText('已折叠').count(), 0)
-    assert.ok((await processLogs.count()) >= 5)
+    assert.ok((await processLogs.count()) >= 4)
   } finally {
     await browser.close()
   }

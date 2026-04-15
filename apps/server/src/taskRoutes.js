@@ -362,6 +362,7 @@ function registerTaskRoutes(app, options = {}) {
     try {
       const payload = await runDispatchService.startTaskRunForTask({
         taskSlug: request.params.slug,
+        projectSessionId: request.body?.projectSessionId,
         sessionId: request.body?.sessionId,
         prompt: request.body?.prompt,
         promptBlocks: request.body?.promptBlocks,
