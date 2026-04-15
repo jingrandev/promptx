@@ -72,6 +72,46 @@ test('internal runner routes require auth and notify completed runs', async () =
   }
 })
 
+test('internal runner events route accepts payloads larger than default body limit', async () => {
+  const app = Fastify()
+  let acceptedCount = 0
+
+  registerInternalRunnerRoutes(app, {
+    runEventIngestService: {
+      ingestEvents(items) {
+        acceptedCount = items.length
+        return { ok: true, count: items.length }
+      },
+      ingestStatus() {
+        return null
+      },
+    },
+    taskAutomationService: {
+      notifyRun() {
+        return Promise.resolve()
+      },
+    },
+  })
+  await app.ready()
+
+  try {
+    const largeText = 'x'.repeat(2 * 1024 * 1024)
+    const response = await app.inject({
+      method: 'POST',
+      url: '/internal/runner-events',
+      headers: buildInternalAuthHeaders(),
+      payload: {
+        items: [{ runId: 'run-large', seq: 1, type: 'stdout', payload: { text: largeText } }],
+      },
+    })
+
+    assert.equal(response.statusCode, 200)
+    assert.equal(acceptedCount, 1)
+  } finally {
+    await app.close()
+  }
+})
+
 test('realtime routes are registered on the app', async () => {
   const app = Fastify()
 

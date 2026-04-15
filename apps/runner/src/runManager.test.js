@@ -658,6 +658,139 @@ test('runManager 会统计 event flush 失败次数', async () => {
   assert.equal(serverClient.postEventAttempts >= 2, true)
 })
 
+test('runManager 会按批次拆分较大的事件上报', async () => {
+  const completion = createDeferred()
+  const serverClient = {
+    batches: [],
+    statuses: [],
+    async postEvents(items = []) {
+      this.batches.push(items)
+      return { ok: true }
+    },
+    async postStatus(payload = {}) {
+      this.statuses.push(payload)
+      return { ok: true }
+    },
+  }
+
+  const runManager = createRunManager({
+    serverClient,
+    resolveRunner() {
+      return {
+        streamSessionPrompt(session, prompt, callbacks = {}) {
+          callbacks.onEvent?.({ type: 'stdout', text: `${session.id}:${prompt}` })
+          callbacks.onEvent?.({ type: 'stdout', text: 'x'.repeat(350_000) })
+          callbacks.onEvent?.({ type: 'stdout', text: 'y'.repeat(350_000) })
+          return {
+            child: {
+              pid: 8011,
+              exitCode: 0,
+              signalCode: null,
+            },
+            result: completion.promise,
+            cancel() {},
+          }
+        },
+      }
+    },
+  })
+
+  await runManager.startRun({
+    runId: 'run-large-batch-1',
+    taskSlug: 'task-large-batch',
+    sessionId: 'session-large-batch-1',
+    title: 'Large Batch 1',
+    engine: 'codex',
+    cwd: process.cwd(),
+    prompt: 'emit large events',
+  })
+
+  completion.resolve({
+    sessionId: 'session-large-batch-1',
+    threadId: 'thread-large-batch-1',
+    message: 'done',
+  })
+  await delay(80)
+
+  assert.equal(serverClient.statuses.some((item) => item.status === 'completed'), true)
+  assert.equal(serverClient.batches.length >= 2, true)
+  assert.equal(serverClient.batches.flat().some((item) => item.payload?.text?.startsWith('x')), true)
+  assert.equal(serverClient.batches.flat().some((item) => item.payload?.text?.startsWith('y')), true)
+})
+
+test('runManager 分批上报失败后只重试未成功的批次', async () => {
+  const completion = createDeferred()
+  const serverClient = {
+    events: [],
+    statuses: [],
+    postEventAttempts: 0,
+    async postEvents(items = []) {
+      this.postEventAttempts += 1
+      if (this.postEventAttempts === 2) {
+        throw new Error('second batch failed')
+      }
+      this.events.push(...items)
+      return { ok: true }
+    },
+    async postStatus(payload = {}) {
+      this.statuses.push(payload)
+      return { ok: true }
+    },
+  }
+
+  const runManager = createRunManager({
+    serverClient,
+    logger: {
+      error() {},
+    },
+    resolveRunner() {
+      return {
+        streamSessionPrompt(session, prompt, callbacks = {}) {
+          callbacks.onEvent?.({ type: 'stdout', text: `${session.id}:${prompt}` })
+          callbacks.onEvent?.({ type: 'stdout', text: 'x'.repeat(350_000) })
+          callbacks.onEvent?.({ type: 'stdout', text: 'y'.repeat(350_000) })
+          callbacks.onEvent?.({ type: 'stdout', text: 'z'.repeat(350_000) })
+          return {
+            child: {
+              pid: 8012,
+              exitCode: 0,
+              signalCode: null,
+            },
+            result: completion.promise,
+            cancel() {},
+          }
+        },
+      }
+    },
+  })
+
+  await runManager.startRun({
+    runId: 'run-large-batch-retry-1',
+    taskSlug: 'task-large-batch-retry',
+    sessionId: 'session-large-batch-retry-1',
+    title: 'Large Batch Retry 1',
+    engine: 'codex',
+    cwd: process.cwd(),
+    prompt: 'emit large events and retry',
+  })
+
+  await delay(420)
+
+  completion.resolve({
+    sessionId: 'session-large-batch-retry-1',
+    threadId: 'thread-large-batch-retry-1',
+    message: 'done',
+  })
+  await delay(80)
+
+  const seqList = serverClient.events.map((item) => item.seq)
+  assert.equal(serverClient.postEventAttempts >= 4, true)
+  assert.equal(seqList.length, new Set(seqList).size)
+  assert.equal(serverClient.events.some((item) => item.payload?.text?.startsWith('x')), true)
+  assert.equal(serverClient.events.some((item) => item.payload?.text?.startsWith('y')), true)
+  assert.equal(serverClient.events.some((item) => item.payload?.text?.startsWith('z')), true)
+})
+
 test('classifyStopTimeoutPhase 会区分 stop_timeout 的尾部阶段', () => {
   assert.equal(classifyStopTimeoutPhase({}), 'runner_timeout_without_stop_request')
   assert.equal(

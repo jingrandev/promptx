@@ -1,12 +1,19 @@
 import { assertInternalRequest } from './internalAuth.js'
 
+const RUNNER_EVENTS_BODY_LIMIT = Math.max(
+  1024 * 1024,
+  Number(process.env.PROMPTX_INTERNAL_RUNNER_EVENTS_BODY_LIMIT) || 8 * 1024 * 1024
+)
+
 function registerInternalRunnerRoutes(app, options = {}) {
   const {
     runEventIngestService,
     taskAutomationService,
   } = options
 
-  app.post('/internal/runner-events', async (request, reply) => {
+  app.post('/internal/runner-events', {
+    bodyLimit: RUNNER_EVENTS_BODY_LIMIT,
+  }, async (request, reply) => {
     try {
       assertInternalRequest(request.headers)
       return runEventIngestService.ingestEvents(request.body?.items || [])

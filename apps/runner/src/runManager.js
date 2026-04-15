@@ -19,11 +19,55 @@ const QUEUED_HEARTBEAT_INTERVAL_MS = Math.max(
 const DEFAULT_STOP_TIMEOUT_MS = Math.max(1000, Number(process.env.PROMPTX_RUNNER_STOP_TIMEOUT_MS) || 10000)
 const STOP_TIMEOUT_BUFFER_MS = Math.max(500, Number(process.env.PROMPTX_RUNNER_STOP_TIMEOUT_BUFFER_MS) || 2000)
 const DEFAULT_MAX_CONCURRENT_RUNS = Math.max(1, Number(process.env.PROMPTX_RUNNER_MAX_CONCURRENT_RUNS) || 3)
+const DEFAULT_EVENT_BATCH_BYTES = Math.max(
+  64 * 1024,
+  Number(process.env.PROMPTX_RUNNER_EVENT_BATCH_BYTES) || 512 * 1024
+)
 const RUNNER_ID = String(process.env.PROMPTX_RUNNER_ID || 'local-runner').trim() || 'local-runner'
 const DISPOSE_POLL_INTERVAL_MS = Math.max(50, Number(process.env.PROMPTX_RUNNER_DISPOSE_POLL_MS) || 100)
 
 function nowIso() {
   return new Date().toISOString()
+}
+
+function estimateJsonBytes(value) {
+  try {
+    return Buffer.byteLength(JSON.stringify(value), 'utf8')
+  } catch {
+    return Buffer.byteLength(String(value || ''), 'utf8')
+  }
+}
+
+function splitEventItemsIntoBatches(items = [], metadata = {}, maxBatchBytes = DEFAULT_EVENT_BATCH_BYTES) {
+  const normalizedLimit = Math.max(16 * 1024, Number(maxBatchBytes) || DEFAULT_EVENT_BATCH_BYTES)
+  const normalizedItems = Array.isArray(items) ? items.filter(Boolean) : []
+  if (!normalizedItems.length) {
+    return []
+  }
+
+  const metadataBytes = estimateJsonBytes(metadata)
+  const batches = []
+  let currentBatch = []
+  let currentBytes = metadataBytes
+
+  normalizedItems.forEach((item) => {
+    const itemBytes = estimateJsonBytes(item) + 1
+    if (currentBatch.length && currentBytes + itemBytes > normalizedLimit) {
+      batches.push(currentBatch)
+      currentBatch = [item]
+      currentBytes = metadataBytes + itemBytes
+      return
+    }
+
+    currentBatch.push(item)
+    currentBytes += itemBytes
+  })
+
+  if (currentBatch.length) {
+    batches.push(currentBatch)
+  }
+
+  return batches
 }
 
 function normalizeMaxConcurrentRuns(value, fallback = DEFAULT_MAX_CONCURRENT_RUNS) {
@@ -286,13 +330,19 @@ export function createRunManager(options = {}) {
     }
 
     const pendingItems = context.eventBuffer.splice(0, context.eventBuffer.length)
+    const batches = splitEventItemsIntoBatches(pendingItems, { runnerId: RUNNER_ID })
     context.flushing = true
 
+    let batchIndex = 0
     try {
-      await serverClient.postEvents(pendingItems, { runnerId: RUNNER_ID })
+      for (batchIndex = 0; batchIndex < batches.length; batchIndex += 1) {
+        const batch = batches[batchIndex]
+        await serverClient.postEvents(batch, { runnerId: RUNNER_ID })
+      }
       return pendingItems.length
     } catch (error) {
-      context.eventBuffer.unshift(...pendingItems)
+      const remainingItems = batches.slice(batchIndex).flat()
+      context.eventBuffer.unshift(...remainingItems)
       context.eventFlushFailureCount = Math.max(0, Number(context.eventFlushFailureCount) || 0) + 1
       context.lastEventFlushFailureAt = nowIso()
       context.lastEventFlushFailureMessage = String(error?.message || error || '').trim()
