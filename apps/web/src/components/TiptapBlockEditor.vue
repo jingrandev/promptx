@@ -36,10 +36,6 @@ const props = defineProps({
     type: String,
     default: 'shift_enter',
   },
-  uploading: {
-    type: Boolean,
-    default: false,
-  },
 })
 
 const emit = defineEmits([
@@ -944,27 +940,20 @@ defineExpose({
 
 <template>
   <section
-    class="workbench-input-shell panel relative flex h-full min-h-0 flex-col overflow-hidden"
+    class="workbench-input-editor relative flex h-full min-h-0 flex-col overflow-hidden"
     data-promptx-editor="tiptap"
     @drop="handleSurfaceDrop"
     @dragover.prevent
     @paste="handleSurfacePaste"
   >
-    <div class="theme-divider theme-secondary-text border-b px-3 py-3 text-sm sm:px-5">
-      <div class="flex justify-end">
-        <div class="w-full">
-          <slot name="header-actions" />
-        </div>
-      </div>
-      <input
-        ref="fileInputRef"
-        class="hidden"
-        type="file"
-        :accept="FILE_INPUT_ACCEPT"
-        multiple
-        @change="handleFileInput"
-      />
-    </div>
+    <input
+      ref="fileInputRef"
+      class="hidden"
+      type="file"
+      :accept="FILE_INPUT_ACCEPT"
+      multiple
+      @change="handleFileInput"
+    />
 
     <div
       class="flex-1 overflow-y-auto px-5 py-5"

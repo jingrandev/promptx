@@ -2509,7 +2509,7 @@ body {
   }
 
   :root[data-theme='promptx-wechat-light'] .workbench-activity-shell .workbench-panel-header,
-  :root[data-theme='promptx-wechat-light'] .workbench-input-shell > .theme-divider {
+  :root[data-theme='promptx-wechat-light'] .workbench-input-shell .workbench-panel-header {
     background: #f7f7f7;
     border-bottom-color: var(--theme-borderDefault);
   }
@@ -2609,7 +2609,7 @@ body {
     border-color: var(--theme-borderDefault);
   }
 
-  :root[data-theme='promptx-wechat-light'] .workbench-input-shell > .theme-divider {
+  :root[data-theme='promptx-wechat-light'] .workbench-input-shell .workbench-panel-header {
     border-color: var(--theme-borderDefault);
   }
 

@@ -4,6 +4,8 @@ import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, r
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import EditTaskDialog from '../components/EditTaskDialog.vue'
 import WorkbenchActivityPanel from '../components/WorkbenchActivityPanel.vue'
+import WorkbenchAgentSelector from '../components/WorkbenchAgentSelector.vue'
+import WorkbenchEditorActions from '../components/WorkbenchEditorActions.vue'
 import WorkbenchInputPanel from '../components/WorkbenchInputPanel.vue'
 import WorkbenchMobileDetailHeader from '../components/WorkbenchMobileDetailHeader.vue'
 import WorkbenchTaskListPanel from '../components/WorkbenchTaskListPanel.vue'
@@ -185,16 +187,9 @@ const activityPanelProps = computed(() => ({
   taskRunning: Boolean(currentRenderedTask.value?.running),
 }))
 const inputPanelProps = computed(() => ({
-  agentBindings: currentProjectAgentBindings.value,
-  canAddTodo: hasCurrentDraftContent.value,
   codexSessionId: currentProjectSessionId.value,
-  isCurrentTaskSending: isCurrentTaskSending.value,
-  selectedAgentEngine: currentSelectedAgentEngine.value,
   sendBehavior: sendBehavior.value,
-  sendState: currentTaskSendState.value,
   loading: loadingTask.value,
-  todoCount: currentTodoItems.value.length,
-  uploading: uploading.value,
 }))
 const mobileDetailHeaderProps = computed(() => ({
   currentTaskAutoTitle: draft.value.autoTitle || currentTaskAutoTitle.value,
@@ -805,16 +800,12 @@ const activityPanelListeners = {
 }
 
 const inputPanelListeners = {
-  'add-todo': handleAddTodo,
   'clear-request': openClearDialog,
-  'copy-request': copyCodexPrompt,
   'file-feedback': (message) => flashToast({ message, type: 'warning' }),
   'import-pdf-files': handleImportPdfFiles,
   'import-text-files': handleImportTextFiles,
-  'manage-todo': openTodoDialog,
   'send-request': sendToCodex,
   'upload-files': handleUpload,
-  'update:selectedAgentEngine': handleCurrentAgentEngineChange,
 }
 
 const mobileDetailHeaderListeners = {
@@ -914,12 +905,39 @@ const mobileDetailHeaderListeners = {
         </div>
 
         <div class="min-h-0 min-w-0 overflow-hidden">
-          <WorkbenchInputPanel
-            ref="editorRef"
-            v-model="draft.blocks"
-            v-bind="inputPanelProps"
-            v-on="inputPanelListeners"
-          />
+          <div class="workbench-input-shell panel flex h-full min-h-0 flex-col overflow-hidden">
+            <div class="workbench-panel-header theme-divider theme-muted-panel shrink-0 border-b p-3">
+              <div class="flex flex-col gap-2">
+                <WorkbenchEditorActions
+                  :can-add-todo="hasCurrentDraftContent"
+                  :is-current-task-sending="isCurrentTaskSending"
+                  :send-state="currentTaskSendState"
+                  :todo-count="currentTodoItems.length"
+                  :uploading="uploading"
+                  @add-todo="handleAddTodo"
+                  @open-file-picker="editorRef?.openFilePicker?.()"
+                  @clear-request="openClearDialog"
+                  @copy-request="copyCodexPrompt"
+                  @manage-todo="openTodoDialog"
+                  @send-request="sendToCodex"
+                />
+                <WorkbenchAgentSelector
+                  :agent-bindings="currentProjectAgentBindings"
+                  :selected-agent-engine="currentSelectedAgentEngine"
+                  align="end"
+                  @update:selected-agent-engine="handleCurrentAgentEngineChange"
+                />
+              </div>
+            </div>
+            <div class="min-h-0 flex-1 overflow-hidden">
+              <WorkbenchInputPanel
+                ref="editorRef"
+                v-model="draft.blocks"
+                v-bind="inputPanelProps"
+                v-on="inputPanelListeners"
+              />
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -970,12 +988,38 @@ const mobileDetailHeaderListeners = {
           </div>
 
           <div v-show="mobileDetailTab === 'input'" class="h-full min-h-0">
-            <WorkbenchInputPanel
-              ref="editorRef"
-              v-model="draft.blocks"
-              v-bind="inputPanelProps"
-              v-on="inputPanelListeners"
-            />
+            <div class="workbench-input-shell panel flex h-full min-h-0 flex-col overflow-hidden">
+              <div class="workbench-panel-header theme-divider theme-muted-panel shrink-0 border-b px-3 py-3">
+                <div class="flex flex-col gap-2">
+                  <WorkbenchEditorActions
+                    :can-add-todo="hasCurrentDraftContent"
+                    :is-current-task-sending="isCurrentTaskSending"
+                    :send-state="currentTaskSendState"
+                    :todo-count="currentTodoItems.length"
+                    :uploading="uploading"
+                    @add-todo="handleAddTodo"
+                    @open-file-picker="editorRef?.openFilePicker?.()"
+                    @clear-request="openClearDialog"
+                    @copy-request="copyCodexPrompt"
+                    @manage-todo="openTodoDialog"
+                    @send-request="sendToCodex"
+                  />
+                  <WorkbenchAgentSelector
+                    :agent-bindings="currentProjectAgentBindings"
+                    :selected-agent-engine="currentSelectedAgentEngine"
+                    @update:selected-agent-engine="handleCurrentAgentEngineChange"
+                  />
+                </div>
+              </div>
+              <div class="min-h-0 flex-1 overflow-hidden">
+                <WorkbenchInputPanel
+                  ref="editorRef"
+                  v-model="draft.blocks"
+                  v-bind="inputPanelProps"
+                  v-on="inputPanelListeners"
+                />
+              </div>
+            </div>
           </div>
         </div>
       </div>
