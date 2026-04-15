@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import TiptapBlockEditor from './TiptapBlockEditor.vue'
 import WorkbenchEditorActions from './WorkbenchEditorActions.vue'
 import { useI18n } from '../composables/useI18n.js'
@@ -67,6 +67,9 @@ const emit = defineEmits([
 
 const blockEditorRef = ref(null)
 const { t } = useI18n()
+const displayedAgentBindings = ref([])
+const displayedSelectedAgentEngine = ref('')
+let agentSelectorSyncTimer = null
 
 const blocks = computed({
   get: () => props.modelValue,
@@ -109,6 +112,53 @@ function isEditing() {
   return blockEditorRef.value?.isEditing?.() || false
 }
 
+function clearAgentSelectorSyncTimer() {
+  if (agentSelectorSyncTimer) {
+    clearTimeout(agentSelectorSyncTimer)
+    agentSelectorSyncTimer = null
+  }
+}
+
+function syncDisplayedAgentSelector(options = {}) {
+  const { force = false } = options
+  if (!force && isComposing()) {
+    clearAgentSelectorSyncTimer()
+    agentSelectorSyncTimer = setTimeout(() => {
+      syncDisplayedAgentSelector()
+    }, 120)
+    return
+  }
+
+  clearAgentSelectorSyncTimer()
+  displayedAgentBindings.value = Array.isArray(props.agentBindings) ? props.agentBindings : []
+  displayedSelectedAgentEngine.value = String(props.selectedAgentEngine || '').trim()
+}
+
+function handleSelectedAgentEngineUpdate(value) {
+  displayedSelectedAgentEngine.value = String(value || '').trim()
+  emit('update:selectedAgentEngine', value)
+}
+
+watch(
+  () => props.agentBindings,
+  () => {
+    syncDisplayedAgentSelector()
+  },
+  { deep: true, immediate: true }
+)
+
+watch(
+  () => props.selectedAgentEngine,
+  () => {
+    syncDisplayedAgentSelector()
+  },
+  { immediate: true }
+)
+
+onBeforeUnmount(() => {
+  clearAgentSelectorSyncTimer()
+})
+
 defineExpose({
   focusEditor,
   flushPendingInput,
@@ -146,9 +196,9 @@ defineExpose({
     <template #header-actions>
       <WorkbenchEditorActions
         :can-add-todo="canAddTodo"
-        :agent-bindings="agentBindings"
+        :agent-bindings="displayedAgentBindings"
         :is-current-task-sending="isCurrentTaskSending"
-        :selected-agent-engine="selectedAgentEngine"
+        :selected-agent-engine="displayedSelectedAgentEngine"
         :send-state="sendState"
         :todo-count="todoCount"
         :uploading="uploading"
@@ -158,7 +208,7 @@ defineExpose({
         @copy-request="emit('copy-request')"
         @manage-todo="emit('manage-todo')"
         @send-request="emit('send-request')"
-        @update:selected-agent-engine="emit('update:selectedAgentEngine', $event)"
+        @update:selected-agent-engine="handleSelectedAgentEngineUpdate"
       />
     </template>
   </TiptapBlockEditor>
