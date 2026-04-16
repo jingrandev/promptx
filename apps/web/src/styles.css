@@ -2457,6 +2457,65 @@ body {
     background: var(--theme-primaryHover);
   }
 
+  :root[data-theme='promptx-wechat-light'] .tool-button-danger {
+    border-color: var(--theme-danger);
+    background: var(--theme-danger);
+    color: var(--theme-textInverse);
+    box-shadow: none;
+  }
+
+  :root[data-theme='promptx-wechat-light'] .tool-button-danger:hover {
+    background: color-mix(in srgb, black 8%, var(--theme-danger));
+  }
+
+  :root[data-theme='promptx-wechat-light'] .tool-button-danger-subtle {
+    border-color: color-mix(in srgb, var(--theme-danger) 36%, var(--theme-buttonBorder));
+    background: var(--theme-dangerSoft);
+    color: var(--theme-dangerText);
+    box-shadow: none;
+  }
+
+  :root[data-theme='promptx-wechat-light'] .tool-button-danger-subtle:hover {
+    background: color-mix(in srgb, var(--theme-dangerSoft) 82%, var(--theme-danger) 18%);
+    color: var(--theme-dangerText);
+  }
+
+  :root[data-theme='promptx-wechat-light'] .tool-button-warning-subtle {
+    border-color: color-mix(in srgb, var(--theme-warning) 36%, var(--theme-buttonBorder));
+    background: var(--theme-warningSoft);
+    color: var(--theme-warningText);
+    box-shadow: none;
+  }
+
+  :root[data-theme='promptx-wechat-light'] .tool-button-warning-subtle:hover {
+    background: color-mix(in srgb, var(--theme-warningSoft) 82%, var(--theme-warning) 18%);
+    color: var(--theme-warningText);
+  }
+
+  :root[data-theme='promptx-wechat-light'] .tool-button-success-subtle {
+    border-color: color-mix(in srgb, var(--theme-success) 36%, var(--theme-buttonBorder));
+    background: var(--theme-successSoft);
+    color: var(--theme-successText);
+    box-shadow: none;
+  }
+
+  :root[data-theme='promptx-wechat-light'] .tool-button-success-subtle:hover {
+    background: color-mix(in srgb, var(--theme-successSoft) 82%, var(--theme-success) 18%);
+    color: var(--theme-successText);
+  }
+
+  :root[data-theme='promptx-wechat-light'] .tool-button-info-subtle {
+    border-color: color-mix(in srgb, var(--theme-info) 36%, var(--theme-buttonBorder));
+    background: var(--theme-infoSoft);
+    color: var(--theme-infoText);
+    box-shadow: none;
+  }
+
+  :root[data-theme='promptx-wechat-light'] .tool-button-info-subtle:hover {
+    background: color-mix(in srgb, var(--theme-infoSoft) 82%, var(--theme-info) 18%);
+    color: var(--theme-infoText);
+  }
+
   :root[data-theme='promptx-wechat-light'] .workbench-panel-header,
   :root[data-theme='promptx-wechat-light'] .settings-dialog-header,
   :root[data-theme='promptx-wechat-light'] .settings-dialog-nav {

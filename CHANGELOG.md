@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.2
+
+- 修复 `WeChat` 主题下删除任务等危险确认弹窗的按钮文字不可见问题：补齐 `tool-button-danger` 与各类 `subtle` 按钮在微信主题中的语义色覆盖，避免通用按钮样式把危险操作刷成白底白字。
+
 ## 0.2.1
 
 - 新增工作台 `shell` 命令模式：在右侧编辑区输入 `!pwd`、`!git status`、`!pnpm test` 这类纯文本命令时，PromptX 会直接按当前选中的 `Codex / Claude Code / OpenCode` 语义发起本地命令执行，并把结果继续收拢回原有的 `PromptX → Agent / Agent` 对话流，不额外引入一套独立的 Shell 卡片心智。
