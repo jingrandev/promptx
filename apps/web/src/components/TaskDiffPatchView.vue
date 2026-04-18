@@ -408,7 +408,7 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <div v-if="selectedFile.message" class="theme-secondary-text flex-1 overflow-y-auto px-4 py-4 text-[12px]">
+    <div v-if="selectedFile.message && !selectedPatchLines.length" class="theme-secondary-text flex-1 overflow-y-auto px-4 py-4 text-[12px]">
       <div class="theme-empty-state px-4 py-4">
         {{ selectedFile.message }}
       </div>
@@ -422,6 +422,12 @@ onBeforeUnmount(() => {
       @mouseup="handleViewportMouseUp"
     >
       <div class="task-diff-view min-w-max px-4 py-4 font-mono">
+        <div
+          v-if="selectedFile.message"
+          class="theme-inline-panel theme-secondary-text mb-3 rounded-sm border border-dashed px-3 py-2 text-[12px]"
+        >
+          {{ selectedFile.message }}
+        </div>
         <div
           v-for="line in renderedPatchLines"
           :key="line.id"

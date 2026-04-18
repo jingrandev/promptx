@@ -247,6 +247,7 @@ export function getTaskGitDiff(taskSlug, options = {}) {
   const filePath = String(options.filePath || '').trim()
   const includeFiles = options.includeFiles !== false
   const includeStats = options.includeStats !== false
+  const timeoutMs = Math.max(0, Number(options.timeoutMs) || 0)
 
   if (scope === 'run') {
     params.set('scope', 'run')
@@ -267,6 +268,9 @@ export function getTaskGitDiff(taskSlug, options = {}) {
   }
   if (!includeStats) {
     params.set('includeStats', 'false')
+  }
+  if (timeoutMs > 0) {
+    params.set('timeoutMs', String(timeoutMs))
   }
 
   const query = params.toString()

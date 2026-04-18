@@ -9,6 +9,11 @@ import { getTaskBySlug } from './repository.js'
 
 const MAX_SNAPSHOT_TEXT_BYTES = 220_000
 const MAX_PATCH_TEXT_BYTES = 260_000
+const MAX_INLINE_PATCH_SOURCE_BYTES = Math.max(48_000, Number(process.env.PROMPTX_GIT_DIFF_MAX_INLINE_FILE_BYTES) || 140_000)
+const MAX_PATCH_LINE_COUNT = Math.max(400, Number(process.env.PROMPTX_GIT_DIFF_MAX_PATCH_LINES) || 2200)
+const MAX_PATCH_PREVIEW_LINES = Math.max(80, Number(process.env.PROMPTX_GIT_DIFF_MAX_PATCH_PREVIEW_LINES) || 220)
+const MAX_PATCH_PREVIEW_HUNKS = Math.max(1, Number(process.env.PROMPTX_GIT_DIFF_MAX_PATCH_PREVIEW_HUNKS) || 5)
+const PATCH_COMMAND_TIMEOUT_MS = Math.max(1_000, Number(process.env.PROMPTX_GIT_DIFF_PATCH_COMMAND_TIMEOUT_MS) || 8000)
 const DIFF_REVIEW_CACHE_TTL_MS = 4000
 const DIFF_REVIEW_CACHE_MAX_ENTRIES = 80
 const FILE_DIFF_CACHE_TTL_MS = 8000
@@ -66,6 +71,9 @@ function runGit(repoRoot = '', args = [], options = {}) {
     status: typeof result.status === 'number' ? result.status : 1,
     stdout: String(result.stdout || ''),
     stderr: String(result.stderr || ''),
+    signal: String(result.signal || ''),
+    errorCode: String(result.error?.code || ''),
+    timedOut: String(result.error?.code || '') === 'ETIMEDOUT',
   }
 }
 
@@ -81,6 +89,9 @@ function runGitBuffer(repoRoot = '', args = [], options = {}) {
     status: typeof result.status === 'number' ? result.status : 1,
     stdout: Buffer.isBuffer(result.stdout) ? result.stdout : Buffer.from(result.stdout || ''),
     stderr: Buffer.isBuffer(result.stderr) ? result.stderr : Buffer.from(result.stderr || ''),
+    signal: String(result.signal || ''),
+    errorCode: String(result.error?.code || ''),
+    timedOut: String(result.error?.code || '') === 'ETIMEDOUT',
   }
 }
 
@@ -90,6 +101,80 @@ function splitNullText(value = '') {
 
 function createHash(value) {
   return crypto.createHash('sha1').update(value).digest('hex')
+}
+
+function countTextLines(value = '') {
+  const text = String(value || '')
+  if (!text) {
+    return 0
+  }
+
+  let lines = 1
+  for (let index = 0; index < text.length; index += 1) {
+    if (text.charCodeAt(index) === 10) {
+      lines += 1
+    }
+  }
+  return lines
+}
+
+function buildPatchPreviewSummary(patch = '') {
+  const text = String(patch || '').trim()
+  if (!text) {
+    return ''
+  }
+
+  const lines = text.split('\n')
+  if (lines.length <= MAX_PATCH_PREVIEW_LINES) {
+    return text
+  }
+
+  const previewLines = []
+  let index = 0
+  let hunkCount = 0
+
+  while (index < lines.length && !lines[index].startsWith('@@ ')) {
+    if (previewLines.length >= MAX_PATCH_PREVIEW_LINES) {
+      break
+    }
+    previewLines.push(lines[index])
+    index += 1
+  }
+
+  while (index < lines.length && previewLines.length < MAX_PATCH_PREVIEW_LINES) {
+    const line = lines[index]
+    if (line.startsWith('@@ ')) {
+      if (hunkCount >= MAX_PATCH_PREVIEW_HUNKS) {
+        break
+      }
+      hunkCount += 1
+    }
+
+    previewLines.push(line)
+    index += 1
+  }
+
+  while (previewLines.length && !previewLines[previewLines.length - 1].startsWith('@@ ') && previewLines.length > MAX_PATCH_PREVIEW_LINES - 12) {
+    previewLines.pop()
+  }
+
+  const omittedLineCount = Math.max(0, lines.length - previewLines.length)
+  previewLines.push(`... 已截断，剩余 ${omittedLineCount} 行未展示 ...`)
+  return previewLines.join('\n').trim()
+}
+
+function createLongPatchPreviewPayload(stats = {}, patch = '', includeStats = true) {
+  const previewPatch = buildPatchPreviewSummary(patch)
+  return {
+    binary: false,
+    tooLarge: true,
+    patch: previewPatch,
+    patchLoaded: true,
+    additions: includeStats ? stats.additions : null,
+    deletions: includeStats ? stats.deletions : null,
+    statsLoaded: includeStats,
+    message: previewPatch ? 'diff 内容较长，当前仅展示摘要预览。' : 'diff 内容较长，暂不在页面内完整展示。',
+  }
 }
 
 function getCachedValue(cache, key, ttlMs, metricKey = '', options = {}) {
@@ -857,7 +942,21 @@ function buildSubmoduleDiffPayload(repoRoot = '', filePath = '', options = {}) {
   }
   diffArgs.push('--', normalizedPath)
 
-  const result = runGit(repoRoot, diffArgs)
+  const result = runGit(repoRoot, diffArgs, {
+    timeout: includePatch ? PATCH_COMMAND_TIMEOUT_MS : undefined,
+  })
+  if (result.timedOut) {
+    return {
+      binary: false,
+      tooLarge: true,
+      patch: '',
+      patchLoaded: true,
+      additions: null,
+      deletions: null,
+      statsLoaded: false,
+      message: '该文件 diff 计算超时，暂不在线展示详细内容。',
+    }
+  }
   const patch = String(result.stdout || '').trim()
   const stats = includeStats ? parsePatchStats(patch) : { additions: null, deletions: null }
 
@@ -875,16 +974,11 @@ function buildSubmoduleDiffPayload(repoRoot = '', filePath = '', options = {}) {
   }
 
   if (patch.length > MAX_PATCH_TEXT_BYTES) {
-    return {
-      binary: false,
-      tooLarge: true,
-      patch: '',
-      patchLoaded: true,
-      additions: stats.additions,
-      deletions: stats.deletions,
-      statsLoaded: includeStats,
-      message: 'diff 内容较长，暂不在页面内完整展示。',
-    }
+    return createLongPatchPreviewPayload(stats, patch, includeStats)
+  }
+
+  if (countTextLines(patch) > MAX_PATCH_LINE_COUNT) {
+    return createLongPatchPreviewPayload(stats, patch, includeStats)
   }
 
   return {
@@ -1042,6 +1136,32 @@ function buildDiffPayloadForFile(filePath = '', previousState = null, nextState 
     return payload
   }
 
+  if (includePatch && Math.max(
+    Math.max(0, Number(previousState?.size) || 0),
+    Math.max(0, Number(nextState?.size) || 0)
+  ) > MAX_INLINE_PATCH_SOURCE_BYTES) {
+    const payload = {
+      binary: false,
+      tooLarge: true,
+      patch: '',
+      patchLoaded: true,
+      additions: null,
+      deletions: null,
+      statsLoaded: false,
+      message: '文件内容较大，暂不展示具体 diff。',
+    }
+    setCachedValue(fileDiffCache, cacheKey, payload, FILE_DIFF_CACHE_MAX_ENTRIES, {
+      channel: 'file',
+      cacheName: 'file-diff',
+      debugMeta: {
+        path: String(filePath || '').trim(),
+        includePatch,
+        includeStats,
+      },
+    })
+    return payload
+  }
+
   if (!includeStats) {
     const payload = {
       binary: false,
@@ -1084,16 +1204,15 @@ function buildDiffPayloadForFile(filePath = '', previousState = null, nextState 
       fs.writeFileSync(nextPath, nextState.text || '', 'utf8')
     }
 
-    const statsResult = runGit(tempDir, [
-      'diff',
-      '--no-index',
-      '--numstat',
-      previousState?.exists ? previousPath : nullPath,
-      nextState?.exists ? nextPath : nullPath,
-    ])
-    const numstat = parseNumstat(statsResult.stdout)
-
     if (!includePatch) {
+      const statsResult = runGit(tempDir, [
+        'diff',
+        '--no-index',
+        '--numstat',
+        previousState?.exists ? previousPath : nullPath,
+        nextState?.exists ? nextPath : nullPath,
+      ])
+      const numstat = parseNumstat(statsResult.stdout)
       const payload = {
         binary: false,
         tooLarge: false,
@@ -1123,7 +1242,31 @@ function buildDiffPayloadForFile(filePath = '', previousState = null, nextState 
       '--unified=3',
       previousState?.exists ? previousPath : nullPath,
       nextState?.exists ? nextPath : nullPath,
-    ])
+    ], {
+      timeout: PATCH_COMMAND_TIMEOUT_MS,
+    })
+    if (result.timedOut) {
+      const payload = {
+        binary: false,
+        tooLarge: true,
+        patch: '',
+        patchLoaded: true,
+        additions: null,
+        deletions: null,
+        statsLoaded: false,
+        message: '该文件 diff 计算超时，暂不在线展示详细内容。',
+      }
+      setCachedValue(fileDiffCache, cacheKey, payload, FILE_DIFF_CACHE_MAX_ENTRIES, {
+        channel: 'file',
+        cacheName: 'file-diff',
+        debugMeta: {
+          path: String(filePath || '').trim(),
+          includePatch,
+          includeStats,
+        },
+      })
+      return payload
+    }
 
     let patch = String(result.stdout || '').trim()
     if (patch) {
@@ -1158,16 +1301,21 @@ function buildDiffPayloadForFile(filePath = '', previousState = null, nextState 
     }
 
     if (patch.length > MAX_PATCH_TEXT_BYTES) {
-      const payload = {
-        binary: false,
-        tooLarge: true,
-        patch: '',
-        patchLoaded: true,
-        additions: stats.additions,
-        deletions: stats.deletions,
-        statsLoaded: true,
-        message: 'diff 内容较长，暂不在页面内完整展示。',
-      }
+      const payload = createLongPatchPreviewPayload(stats, patch, true)
+      setCachedValue(fileDiffCache, cacheKey, payload, FILE_DIFF_CACHE_MAX_ENTRIES, {
+        channel: 'file',
+        cacheName: 'file-diff',
+        debugMeta: {
+          path: String(filePath || '').trim(),
+          includePatch,
+          includeStats,
+        },
+      })
+      return payload
+    }
+
+    if (countTextLines(patch) > MAX_PATCH_LINE_COUNT) {
+      const payload = createLongPatchPreviewPayload(stats, patch, true)
       setCachedValue(fileDiffCache, cacheKey, payload, FILE_DIFF_CACHE_MAX_ENTRIES, {
         channel: 'file',
         cacheName: 'file-diff',
@@ -1340,6 +1488,21 @@ function createUnsupportedResult(reason = '', repoRoot = '', branch = '') {
   }
 }
 
+function createLightweightDiffFileEntry(filePath = '', status = 'M') {
+  return {
+    path: String(filePath || '').trim(),
+    status: normalizeDiffStatus(status),
+    additions: null,
+    deletions: null,
+    statsLoaded: false,
+    binary: false,
+    tooLarge: false,
+    patch: '',
+    patchLoaded: false,
+    message: '',
+  }
+}
+
 export function getWorkspaceGitDiffReviewByCwd(cwd = '', options = {}) {
   const repoRoot = resolveGitRepoRoot(cwd)
   if (!repoRoot) {
@@ -1350,8 +1513,8 @@ export function getWorkspaceGitDiffReviewByCwd(cwd = '', options = {}) {
   const workspaceStatusSignature = resolveWorkspaceStatusSignature(repoRoot)
   const currentHeadOid = resolveGitHeadOid(repoRoot)
   const targetFilePath = String(options.filePath || '').trim()
-  const includeFiles = targetFilePath || options.includeFiles !== false
-  const includeStats = targetFilePath || options.includeStats !== false
+  const includeFiles = Boolean(targetFilePath) || options.includeFiles !== false
+  const includeStats = Boolean(targetFilePath) || options.includeStats !== false
   const cacheKey = JSON.stringify([
     'workspace',
     repoRoot,
@@ -1379,6 +1542,44 @@ export function getWorkspaceGitDiffReviewByCwd(cwd = '', options = {}) {
   }
 
   const { headOid, entries: workingTreeEntries } = listGitChangeEntries(repoRoot)
+  if (!targetFilePath && !includeStats) {
+    const files = includeFiles
+      ? sortDiffFiles(
+        [...workingTreeEntries.values()].map((entry) => createLightweightDiffFileEntry(entry.path, entry.status))
+      )
+      : []
+
+    const payload = {
+      supported: true,
+      scope: 'workspace',
+      runId: '',
+      repoRoot,
+      branch,
+      baseline: null,
+      warnings: [],
+      baselineCreatedAt: '',
+      summary: {
+        fileCount: workingTreeEntries.size,
+        additions: null,
+        deletions: null,
+        statsComplete: false,
+      },
+      files,
+    }
+    setCachedValue(diffReviewCache, cacheKey, payload, DIFF_REVIEW_CACHE_MAX_ENTRIES, {
+      channel: 'review',
+      cacheName: 'diff-review',
+      debugMeta: {
+        scope: 'workspace',
+        repo: path.basename(repoRoot),
+        fileCount: workingTreeEntries.size,
+        includeFiles,
+        includeStats,
+      },
+    })
+    return payload
+  }
+
   const baselineStateForPath = createBaselineStateResolver(repoRoot, {
     headOid,
     entries: new Map(),
@@ -1516,12 +1717,14 @@ export function getTaskGitDiffReview(taskSlug = '', options = {}) {
       : 'workspace'
   const runId = String(options.runId || '').trim()
   const targetFilePath = String(options.filePath || '').trim()
-  const includeFiles = targetFilePath || options.includeFiles !== false
-  const includeStats = targetFilePath || options.includeStats !== false
+  const includeFiles = Boolean(targetFilePath) || options.includeFiles !== false
+  const includeStats = Boolean(targetFilePath) || options.includeStats !== false
 
   if (scope === 'workspace') {
     return getWorkspaceGitDiffReviewByCwd(resolveTaskRepoRoot(normalizedTaskSlug), {
       filePath: targetFilePath,
+      includeFiles,
+      includeStats,
     })
   }
 

@@ -413,6 +413,7 @@ function registerTaskRoutes(app, options = {}) {
         filePath: request.query?.filePath,
         includeFiles: String(request.query?.includeFiles || '').trim() !== 'false',
         includeStats: String(request.query?.includeStats || '').trim() !== 'false',
+        timeoutMs: request.query?.timeoutMs,
       })
     } catch (error) {
       if (error?.statusCode) {
