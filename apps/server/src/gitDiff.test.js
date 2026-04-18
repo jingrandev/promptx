@@ -69,6 +69,7 @@ test('git diff review returns task and run scoped file changes for git workspace
     captureRunGitFinalSnapshot('run-1', repoDir)
 
     const workspaceDiff = getTaskGitDiffReview('task-1', { scope: 'workspace' })
+    const workspaceDiffFast = getTaskGitDiffReview('task-1', { scope: 'workspace', includeStats: false })
     const workspaceDiffByCwd = getWorkspaceGitDiffReviewByCwd(repoDir)
     const workspaceStatusSummary = getWorkspaceGitDiffStatusSummaryByCwd(repoDir)
     const taskDiffFast = getTaskGitDiffReview('task-1', { scope: 'task', includeStats: false })
@@ -86,6 +87,16 @@ test('git diff review returns task and run scoped file changes for git workspace
     assert.equal(workspaceDiff.branch, branchName)
     assert.deepEqual(workspaceDiff.summary, { fileCount: 2, additions: 2, deletions: 1, statsComplete: true })
     assert.deepEqual(workspaceDiff.files.map((file) => `${file.status}:${file.path}`), ['A:new-file.txt', 'M:tracked.txt'])
+    assert.equal(workspaceDiffFast.supported, true)
+    assert.deepEqual(workspaceDiffFast.summary, {
+      fileCount: 2,
+      additions: null,
+      deletions: null,
+      statsComplete: false,
+    })
+    assert.deepEqual(workspaceDiffFast.files.map((file) => `${file.status}:${file.path}`), ['A:new-file.txt', 'M:tracked.txt'])
+    assert.equal(workspaceDiffFast.files.find((file) => file.path === 'tracked.txt')?.statsLoaded, false)
+    assert.equal(workspaceDiffFast.files.find((file) => file.path === 'tracked.txt')?.patchLoaded, false)
     assert.deepEqual(workspaceDiffByCwd.summary, workspaceDiff.summary)
     assert.deepEqual(workspaceDiffByCwd.files.map((file) => `${file.status}:${file.path}`), workspaceDiff.files.map((file) => `${file.status}:${file.path}`))
     assert.equal(workspaceStatusSummary.supported, true)
@@ -119,6 +130,8 @@ test('git diff review returns task and run scoped file changes for git workspace
       deletions: 1,
       statsComplete: true,
     })
+    assert.equal(taskTrackedDetail.summary?.statsComplete, true)
+    assert.equal(typeof taskTrackedDetail.summary?.statsComplete, 'boolean')
     assert.deepEqual(taskTrackedDetail.files.map((file) => file.path), ['tracked.txt'])
     assert.match(taskTrackedDetail.files.find((file) => file.path === 'tracked.txt')?.patch || '', /--- a\/tracked\.txt/)
     assert.match(taskTrackedDetail.files.find((file) => file.path === 'tracked.txt')?.patch || '', /\+\+\+ b\/tracked\.txt/)
@@ -186,6 +199,79 @@ test('git diff review returns task and run scoped file changes for git workspace
     } else {
       delete process.env.PROMPTX_DATA_DIR
     }
+  }
+})
+
+test('single file diff falls back to message when patch exceeds inline line budget', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'promptx-git-diff-large-patch-'))
+  const repoDir = path.join(tempDir, 'repo')
+  fs.mkdirSync(repoDir, { recursive: true })
+
+  git(repoDir, ['init'])
+  git(repoDir, ['config', 'user.email', 'promptx@example.com'])
+  git(repoDir, ['config', 'user.name', 'PromptX'])
+
+  const originalContent = Array.from({ length: 520 }, (_, index) => `base-${index}`).join('\n') + '\n'
+  const nextContent = Array.from({ length: 520 }, (_, index) => `next-${index}`).join('\n') + '\n'
+  fs.writeFileSync(path.join(repoDir, 'huge-lines.txt'), originalContent)
+  git(repoDir, ['add', 'huge-lines.txt'])
+  git(repoDir, ['commit', '-m', 'init'])
+
+  const originalCwd = process.cwd()
+  const originalDataDir = process.env.PROMPTX_DATA_DIR
+  const originalMaxPatchLines = process.env.PROMPTX_GIT_DIFF_MAX_PATCH_LINES
+  const dataDir = path.join(tempDir, 'data')
+  fs.mkdirSync(dataDir, { recursive: true })
+  process.chdir(tempDir)
+  process.env.PROMPTX_DATA_DIR = dataDir
+  process.env.PROMPTX_GIT_DIFF_MAX_PATCH_LINES = '400'
+
+  try {
+    const { run } = await import('./db.js')
+    const {
+      captureTaskGitBaseline,
+      getTaskGitDiffReview,
+    } = await import(`./gitDiff.js?test=${Date.now()}`)
+
+    const now = new Date().toISOString()
+    run(
+      `INSERT INTO tasks (slug, edit_token, title, auto_title, last_prompt_preview, codex_session_id, visibility, expires_at, created_at, updated_at)
+       VALUES (?, ?, '', '', '', ?, 'private', NULL, ?, ?)`,
+      ['task-large-lines', 'token-large-lines', 'session-large-lines', now, now]
+    )
+    run(
+      `INSERT INTO codex_sessions (id, title, cwd, codex_thread_id, created_at, updated_at)
+       VALUES (?, ?, ?, '', ?, ?)`,
+      ['session-large-lines', 'Repo Session', repoDir, now, now]
+    )
+
+    captureTaskGitBaseline('task-large-lines', repoDir)
+    fs.writeFileSync(path.join(repoDir, 'huge-lines.txt'), nextContent)
+
+    const detail = getTaskGitDiffReview('task-large-lines', {
+      scope: 'workspace',
+      filePath: 'huge-lines.txt',
+    })
+    const file = detail.files.find((item) => item.path === 'huge-lines.txt')
+
+    assert.equal(file?.patchLoaded, true)
+    assert.equal(file?.tooLarge, true)
+    assert.match(file?.patch || '', /diff --git a\/huge-lines\.txt b\/huge-lines\.txt/)
+    assert.match(file?.patch || '', /\.\.\. 已截断，剩余 \d+ 行未展示 \.\.\./)
+    assert.equal(file?.message, 'diff 内容较长，当前仅展示摘要预览。')
+  } finally {
+    process.chdir(originalCwd)
+    if (typeof originalDataDir === 'undefined') {
+      delete process.env.PROMPTX_DATA_DIR
+    } else {
+      process.env.PROMPTX_DATA_DIR = originalDataDir
+    }
+    if (typeof originalMaxPatchLines === 'undefined') {
+      delete process.env.PROMPTX_GIT_DIFF_MAX_PATCH_LINES
+    } else {
+      process.env.PROMPTX_GIT_DIFF_MAX_PATCH_LINES = originalMaxPatchLines
+    }
+    fs.rmSync(tempDir, { recursive: true, force: true })
   }
 })
 

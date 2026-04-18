@@ -166,6 +166,7 @@ function localizeLegacyDiffMessage(message = '') {
     ['二进制文件暂不支持在线 diff 预览。', 'diffReview.binaryPreviewUnavailable'],
     ['文件内容较大，暂不展示具体 diff。', 'diffReview.fileTooLarge'],
     ['diff 内容较长，暂不在页面内完整展示。', 'diffReview.diffTooLong'],
+    ['diff 内容较长，当前仅展示摘要预览。', 'diffReview.diffPreviewOnly'],
     ['当前工作目录不是 Git 仓库，暂不支持代码变更审查。', 'diffReview.notGitRepo'],
     ['任务不存在。', 'diffReview.taskNotFound'],
     ['请选择一轮执行后再查看本轮代码变更。', 'diffReview.runRequired'],
@@ -180,6 +181,10 @@ function localizeLegacyDiffMessage(message = '') {
   const key = directMap.get(text)
   if (key) {
     return translate(key)
+  }
+
+  if (/^git diff 计算超时（>\d+ms）[。.]?$/.test(text) || text === '该文件 diff 计算超时，暂不在线展示详细内容。') {
+    return translate('diffReview.fileDiffTimedOut')
   }
 
   return text
@@ -203,6 +208,38 @@ function normalizeDiffPayload(payload = null) {
       }))
       : [],
   }
+}
+
+export function buildPatchPrefetchTargets(files = [], selectedFilePath = '', limit = 0) {
+  const maxItems = Math.max(0, Number(limit) || 0)
+  if (!maxItems) {
+    return []
+  }
+
+  const normalizedSelectedFilePath = String(selectedFilePath || '').trim()
+  const nextFiles = Array.isArray(files) ? files : []
+  const targets = []
+  const seen = new Set()
+
+  if (normalizedSelectedFilePath) {
+    const selectedFile = nextFiles.find((file) => String(file?.path || '').trim() === normalizedSelectedFilePath)
+    if (selectedFile) {
+      targets.push(normalizedSelectedFilePath)
+      seen.add(normalizedSelectedFilePath)
+    }
+  }
+
+  nextFiles.forEach((file) => {
+    const filePath = String(file?.path || '').trim()
+    if (!filePath || seen.has(filePath) || targets.length >= maxItems) {
+      return
+    }
+
+    targets.push(filePath)
+    seen.add(filePath)
+  })
+
+  return targets
 }
 
 export function useTaskDiffReviewData(props) {
@@ -232,6 +269,9 @@ export function useTaskDiffReviewData(props) {
   const diffListCache = new Map()
   const diffStatsCache = new Map()
   const filePatchCache = new Map()
+  const inFlightPatchRequests = new Map()
+  const FILE_PATCH_TIMEOUT_MS = 12_000
+  const PATCH_PREFETCH_COUNT = 3
 
   const terminalRuns = computed(() => runs.value.filter((run) => run.completed))
   const statusCounts = computed(() => {
@@ -279,6 +319,11 @@ export function useTaskDiffReviewData(props) {
       .map((line, index) => ({ ...line, index }))
       .filter((line) => line.kind === 'hunk')
   )
+  const patchPrefetchTargets = computed(() => buildPatchPrefetchTargets(
+    filteredFiles.value,
+    selectedFilePath.value,
+    PATCH_PREFETCH_COUNT
+  ))
 
   const showSummarySkeleton = computed(() => statsLoading.value && !diffPayload.value?.summary?.statsComplete)
   const baselineMetaText = computed(() => {
@@ -465,6 +510,143 @@ export function useTaskDiffReviewData(props) {
     clearCacheEntriesByPrefix(filePatchCache, prefix)
   }
 
+  function getCurrentDiffContext() {
+    const scope = diffScope.value === 'run' ? 'run' : diffScope.value === 'task' ? 'task' : 'workspace'
+    const runId = scope === 'run' ? selectedRunId.value : ''
+    const signature = buildLoadSignature(props.taskSlug, scope, runId)
+    return {
+      scope,
+      runId,
+      signature,
+    }
+  }
+
+  function getFileEntryByPath(filePath = '') {
+    const normalizedFilePath = String(filePath || '').trim()
+    if (!normalizedFilePath) {
+      return null
+    }
+
+    return (diffPayload.value?.files || []).find((file) => file.path === normalizedFilePath) || null
+  }
+
+  function canRequestFilePatch(file = null) {
+    return Boolean(file)
+      && !file.patchLoaded
+      && !file.binary
+      && !file.tooLarge
+      && !file.message
+  }
+
+  function applyDetailedFileToPayload(signature = '', filePath = '', detailedFile = null, normalizedPayload = null) {
+    const latestSignature = buildLoadSignature(props.taskSlug, diffScope.value, diffScope.value === 'run' ? selectedRunId.value : '')
+    if (signature !== latestSignature || !detailedFile || !diffPayload.value?.files) {
+      return false
+    }
+
+    diffPayload.value = {
+      ...diffPayload.value,
+      baseline: normalizedPayload?.baseline || diffPayload.value.baseline || null,
+      warnings: normalizedPayload?.warnings || diffPayload.value.warnings || [],
+      files: diffPayload.value.files.map((file) => (file.path === filePath ? detailedFile : file)),
+    }
+    return true
+  }
+
+  async function requestFilePatch(filePath = '', context = {}) {
+    const normalizedFilePath = String(filePath || '').trim()
+    const signature = String(context.signature || '').trim()
+    if (!normalizedFilePath || !signature) {
+      return null
+    }
+
+    const patchCacheKey = buildPatchCacheKey(signature, normalizedFilePath)
+    const cachedFile = getCachedValue(filePatchCache, patchCacheKey)
+    if (cachedFile) {
+      return {
+        detailedFile: cachedFile,
+        normalizedPayload: null,
+      }
+    }
+
+    const existingRequest = inFlightPatchRequests.get(patchCacheKey)
+    if (existingRequest) {
+      return existingRequest
+    }
+
+    const nextRequest = (async () => {
+      try {
+        const payload = await getTaskGitDiff(props.taskSlug, {
+          scope: context.scope,
+          runId: context.runId,
+          filePath: normalizedFilePath,
+          timeoutMs: FILE_PATCH_TIMEOUT_MS,
+        })
+        const normalizedPayload = normalizeDiffPayload(payload)
+        const detailedFile = (normalizedPayload.files || []).find((file) => file.path === normalizedFilePath)
+        if (!detailedFile) {
+          throw new Error(translate('diffReview.noFileDiffContent'))
+        }
+
+        setCachedValue(filePatchCache, patchCacheKey, detailedFile, 120)
+        return {
+          detailedFile,
+          normalizedPayload,
+        }
+      } catch (error) {
+        return {
+          error,
+        }
+      } finally {
+        inFlightPatchRequests.delete(patchCacheKey)
+      }
+    })()
+
+    inFlightPatchRequests.set(patchCacheKey, nextRequest)
+    return nextRequest
+  }
+
+  async function prefetchVisibleFilePatches() {
+    if (!props.taskSlug || !props.active || !diffPayload.value?.supported) {
+      return
+    }
+
+    const context = getCurrentDiffContext()
+    for (const filePath of patchPrefetchTargets.value) {
+      const currentFile = getFileEntryByPath(filePath)
+      if (!canRequestFilePatch(currentFile)) {
+        continue
+      }
+
+      const latestSignature = buildLoadSignature(props.taskSlug, diffScope.value, diffScope.value === 'run' ? selectedRunId.value : '')
+      if (context.signature !== latestSignature) {
+        return
+      }
+
+      const result = await requestFilePatch(filePath, context)
+      if (!result) {
+        continue
+      }
+
+      if (result.error) {
+        const message = localizeLegacyDiffMessage(result.error?.message || '')
+          || translate('diffReview.fileDiffTimedOut')
+        const failedFile = {
+          ...currentFile,
+          patch: '',
+          patchLoaded: true,
+          tooLarge: true,
+          message,
+        }
+        setCachedValue(filePatchCache, buildPatchCacheKey(context.signature, filePath), failedFile, 120)
+        applyDetailedFileToPayload(context.signature, filePath, failedFile, null)
+        continue
+      }
+
+      applyDetailedFileToPayload(context.signature, filePath, result.detailedFile, result.normalizedPayload)
+    }
+  }
+
   async function loadRuns() {
     if (!props.taskSlug) {
       runs.value = []
@@ -538,6 +720,7 @@ export function useTaskDiffReviewData(props) {
 
         syncSelectedFile()
         loadSelectedFilePatch().catch(() => {})
+        prefetchVisibleFilePatches().catch(() => {})
         if (!cachedStatsPayload) {
           loadDiffStats().catch(() => {})
         }
@@ -561,6 +744,7 @@ export function useTaskDiffReviewData(props) {
       lastStatsLoadedSignature = ''
       syncSelectedFile()
       loadSelectedFilePatch().catch(() => {})
+      prefetchVisibleFilePatches().catch(() => {})
       loadDiffStats().catch(() => {})
     } catch (err) {
       if (currentRequestId !== loadRequestId) {
@@ -641,26 +825,20 @@ export function useTaskDiffReviewData(props) {
 
   async function loadSelectedFilePatch() {
     const filePath = String(selectedFilePath.value || '').trim()
-    if (!props.taskSlug || !props.active || !filePath || patchLoading.value) {
+    if (!props.taskSlug || !props.active || !filePath) {
       return
     }
 
-    const scope = diffScope.value === 'run' ? 'run' : diffScope.value === 'task' ? 'task' : 'workspace'
-    const runId = scope === 'run' ? selectedRunId.value : ''
-    const signature = buildLoadSignature(props.taskSlug, scope, runId)
-
-    const currentFile = (diffPayload.value?.files || []).find((file) => file.path === filePath)
-    if (!currentFile || currentFile.patchLoaded || currentFile.binary || currentFile.tooLarge || currentFile.message) {
+    const context = getCurrentDiffContext()
+    const currentFile = getFileEntryByPath(filePath)
+    if (!canRequestFilePatch(currentFile)) {
       return
     }
 
-    const patchCacheKey = buildPatchCacheKey(signature, filePath)
+    const patchCacheKey = buildPatchCacheKey(context.signature, filePath)
     const cachedFile = getCachedValue(filePatchCache, patchCacheKey)
     if (cachedFile && diffPayload.value?.files) {
-      diffPayload.value = {
-        ...diffPayload.value,
-        files: diffPayload.value.files.map((file) => (file.path === filePath ? cachedFile : file)),
-      }
+      applyDetailedFileToPayload(context.signature, filePath, cachedFile, null)
       return
     }
 
@@ -668,35 +846,37 @@ export function useTaskDiffReviewData(props) {
     patchLoading.value = true
 
     try {
-      const payload = await getTaskGitDiff(props.taskSlug, {
-        scope,
-        runId,
-        filePath,
-      })
+      const result = await requestFilePatch(filePath, context)
       if (currentPatchRequestId !== patchRequestId) {
         return
       }
 
+      if (!result) {
+        return
+      }
+
       const latestSignature = buildLoadSignature(props.taskSlug, diffScope.value, diffScope.value === 'run' ? selectedRunId.value : '')
-      if (signature !== latestSignature) {
+      if (context.signature !== latestSignature) {
         return
       }
 
-      const normalizedPayload = normalizeDiffPayload(payload)
-      const detailedFile = (normalizedPayload.files || []).find((file) => file.path === filePath)
-      if (!detailedFile || !diffPayload.value?.files) {
+      if (result.error) {
+        const message = localizeLegacyDiffMessage(result.error?.message || '')
+          || translate('diffReview.fileDiffTimedOut')
+        const failedFile = {
+          ...currentFile,
+          patch: '',
+          patchLoaded: true,
+          tooLarge: true,
+          message,
+        }
+
+        setCachedValue(filePatchCache, patchCacheKey, failedFile, 120)
+        applyDetailedFileToPayload(context.signature, filePath, failedFile, null)
         return
       }
 
-      setCachedValue(filePatchCache, patchCacheKey, detailedFile, 120)
-      diffPayload.value = {
-        ...diffPayload.value,
-        baseline: normalizedPayload.baseline || diffPayload.value.baseline || null,
-        warnings: normalizedPayload.warnings || diffPayload.value.warnings || [],
-        files: diffPayload.value.files.map((file) => (file.path === filePath ? detailedFile : file)),
-      }
-    } catch (err) {
-      error.value = err.message
+      applyDetailedFileToPayload(context.signature, filePath, result.detailedFile, result.normalizedPayload)
     } finally {
       if (currentPatchRequestId === patchRequestId) {
         patchLoading.value = false
@@ -784,6 +964,17 @@ export function useTaskDiffReviewData(props) {
       loadSelectedFilePatch().catch(() => {})
     },
     { immediate: true }
+  )
+
+  watch(
+    () => [props.active, diffPayload.value?.supported, patchPrefetchTargets.value.join('\n')],
+    ([active, supported]) => {
+      if (!active || !supported) {
+        return
+      }
+
+      prefetchVisibleFilePatches().catch(() => {})
+    }
   )
 
   watch(

@@ -37,6 +37,7 @@ test('git diff subprocess client returns the same task diff payload', async () =
     } = await import(`./gitDiff.js?test=${Date.now()}`)
     const {
       __getGitDiffWorkerPidForTest,
+      __getGitDiffWorkerPidsForTest,
       getGitDiffWorkerDiagnostics,
       getTaskGitDiffReviewInSubprocess,
       stopGitDiffWorker,
@@ -95,6 +96,32 @@ test('git diff subprocess client returns the same task diff payload', async () =
     assert.equal(diagnostics.metrics.completedRequests >= 2, true)
     assert.equal(diagnostics.metrics.lastRequest?.status, 'completed')
     assert.equal(diagnostics.metrics.lastRequest?.scope, 'task')
+
+    const concurrentResults = await Promise.all([
+      getTaskGitDiffReviewInSubprocess('task-client', { scope: 'task' }),
+      getTaskGitDiffReviewInSubprocess('task-client', { scope: 'task', includeFiles: false, includeStats: true }),
+    ])
+    const workerPids = __getGitDiffWorkerPidsForTest()
+
+    assert.equal(concurrentResults.length, 2)
+    assert.equal(workerPids.length >= 2, true)
+
+    for (let index = 0; index < 80; index += 1) {
+      fs.writeFileSync(path.join(repoDir, `stress-${index}.txt`), `stress-${index}\n`)
+    }
+
+    const [timeoutResult, successResult] = await Promise.allSettled([
+      getTaskGitDiffReviewInSubprocess('task-client', { scope: 'task', timeoutMs: 1 }),
+      getTaskGitDiffReviewInSubprocess('task-client', { scope: 'task' }),
+    ])
+    const timeoutDiagnostics = getGitDiffWorkerDiagnostics()
+
+    assert.equal(timeoutResult.status, 'rejected')
+    assert.equal(timeoutResult.reason?.code, 'GIT_DIFF_TIMEOUT')
+    assert.equal(successResult.status, 'fulfilled')
+    assert.equal(successResult.value?.summary?.fileCount >= 80, true)
+    assert.equal(timeoutDiagnostics.metrics.timeoutRequests >= 1, true)
+    assert.equal(timeoutDiagnostics.metrics.completedRequests >= 1, true)
 
     stopGitDiffWorker()
   } finally {
